@@ -58,6 +58,11 @@ def main() -> int:
     assert public_emails == {"sebastiano.romi@gmail.com"}
     assert "affiliation:" not in (ROOT / "CITATION.cff").read_text(encoding="utf-8")
 
+    build_workflow = (ROOT / ".github/workflows/build-desktop.yml").read_text(encoding="utf-8")
+    assert build_workflow.count('--add-data "google_health_viewer/locales') == 3
+    frozen_smoke = (ROOT / "google_health_viewer/app.py").read_text(encoding="utf-8")
+    assert "Frozen build is missing the bundled translation catalogues." in frozen_smoke
+
     required_files = (
         ".github/workflows/ci.yml",
         ".github/workflows/automatic-release.yml",
