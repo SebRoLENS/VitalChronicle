@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pyqtgraph as pg
 from PySide6.QtCore import QDate, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QIntValidator, QTextCursor
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIntValidator, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -66,7 +66,14 @@ from .branding import (
 from .constants import DATA_TYPE_BY_KEY, DATA_TYPES, SCOPE_GROUPS
 from .dashboard import OverviewPage
 from .external_links import open_external_url
-from .i18n import _
+from .i18n import (
+    SYSTEM_LANGUAGE,
+    _,
+    current_language,
+    language_name,
+    startup_language,
+    supported_languages,
+)
 from .local_ai import (
     HARDWARE_PROFILE_LABELS,
     MODEL_DESCRIPTIONS,
@@ -239,9 +246,36 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self.tabs, 1)
         self.setCentralWidget(root)
 
+        settings_menu = self.menuBar().addMenu(_("Settings"))
+        language_menu = settings_menu.addMenu(_("Language"))
+        self._language_action_group = QActionGroup(self)
+        self._language_action_group.setExclusive(True)
+        saved_language = str(
+            self.settings.value("interface/language", SYSTEM_LANGUAGE)
+        ).lower()
+        if saved_language != SYSTEM_LANGUAGE and saved_language not in supported_languages():
+            saved_language = SYSTEM_LANGUAGE
+        system_label = _(
+            "System default ({language})",
+            language=language_name(startup_language(SYSTEM_LANGUAGE)),
+        )
+        for label, code in (
+            (system_label, SYSTEM_LANGUAGE),
+            *((language_name(code), code) for code in supported_languages()),
+        ):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(code == saved_language)
+            action.triggered.connect(
+                lambda _checked=False, selected=code: self._select_interface_language(selected)
+            )
+            self._language_action_group.addAction(action)
+            language_menu.addAction(action)
+        settings_menu.addSeparator()
+
         privacy = QAction(_("Delete local data and access…"), self)
         privacy.triggered.connect(self.clear_local_data)
-        self.menuBar().addMenu("Privacy").addAction(privacy)
+        settings_menu.addAction(privacy)
 
         help_menu = self.menuBar().addMenu(_("Help"))
         manual_action = QAction(_("User manual"), self)
@@ -260,6 +294,20 @@ class MainWindow(QMainWindow):
         help_menu.addSeparator()
         help_menu.addAction(coffee_action)
         help_menu.addAction(about_action)
+
+    def _select_interface_language(self, preference: str) -> None:
+        self.settings.setValue("interface/language", preference)
+        selected = startup_language(preference)
+        if selected == current_language():
+            return
+        QMessageBox.information(
+            self,
+            _("Restart required"),
+            _(
+                "Language preference saved. Restart VitalChronicle to use {language}.",
+                language=language_name(selected),
+            ),
+        )
 
     def open_url(self, url: str) -> None:
         if open_external_url(url):
