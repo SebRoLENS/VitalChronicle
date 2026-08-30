@@ -22,8 +22,7 @@ concurrency:
 
 jobs:
   prepare-release:
-    # Temporarily paused while the unpublished v1.0.0 tag is rebuilt.
-    if: ${{ false }}
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.prepare.outputs.version }}
