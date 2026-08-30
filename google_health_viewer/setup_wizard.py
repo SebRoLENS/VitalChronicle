@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from .branding import APP_NAME
 from .constants import OAUTH_REDIRECT_URI, SCOPE_GROUPS
 from .external_links import open_external_url
+from .i18n import _
 from .oauth import CredentialStore, OAuthError
 
 CLOUD_CLIENTS_URL = "https://console.cloud.google.com/auth/clients"
@@ -34,15 +35,15 @@ HEALTH_SETUP_URL = "https://developers.google.com/health/setup"
 class _IntroPage(QWizardPage):
     def __init__(self) -> None:
         super().__init__()
-        self.setTitle("Configura l'accesso personale")
+        self.setTitle(_("Set up personal access"))
         label = QLabel(
-            "Google richiede che ogni applicazione che legge dati sanitari abbia credenziali "
-            "OAuth personali. Questa procedura guidata apre le pagine necessarie e controlla "
-            "la configurazione. Le credenziali e i dati resteranno sul tuo computer."
+            _("Google requires every application that reads health data to use personal OAuth "
+              "credentials. This wizard opens the required pages and checks the configuration. "
+              "Your credentials and data remain on your computer.")
         )
         label.setWordWrap(True)
         note = QLabel(
-            "La configurazione richiede in genere 3–5 minuti e va eseguita una sola volta."
+            _("Setup normally takes 3–5 minutes and only needs to be completed once.")
         )
         note.setWordWrap(True)
         layout = QVBoxLayout(self)
@@ -56,20 +57,20 @@ class _CredentialsPage(QWizardPage):
     def __init__(self, store: CredentialStore) -> None:
         super().__init__()
         self.store = store
-        self.setTitle("Crea e importa le credenziali OAuth")
+        self.setTitle(_("Create and import OAuth credentials"))
         instructions = QLabel(
-            "1. Apri Google Cloud e crea o seleziona un progetto.\n"
-            "2. Abilita Google Health API.\n"
-            "3. Crea un client OAuth di tipo “Applicazione web”.\n"
-            f"4. Inserisci esattamente {OAUTH_REDIRECT_URI} tra gli URI di reindirizzamento.\n"
-            "5. Scarica il file JSON e selezionalo qui sotto."
+            _("1. Open Google Cloud and create or select a project.\n"
+              "2. Enable the Google Health API.\n"
+              "3. Create a Web application OAuth client.\n"
+              "4. Add exactly {redirect_uri} to the authorised redirect URIs.\n"
+              "5. Download the JSON file and select it below.", redirect_uri=OAUTH_REDIRECT_URI)
         )
         instructions.setWordWrap(True)
-        open_setup = QPushButton("Apri la configurazione ufficiale")
+        open_setup = QPushButton(_("Open the official setup guide"))
         open_setup.clicked.connect(lambda: open_external_url(HEALTH_SETUP_URL))
-        open_clients = QPushButton("Apri i client OAuth")
+        open_clients = QPushButton(_("Open OAuth clients"))
         open_clients.clicked.connect(lambda: open_external_url(CLOUD_CLIENTS_URL))
-        copy_redirect = QPushButton("Copia URI locale")
+        copy_redirect = QPushButton(_("Copy local URI"))
         copy_redirect.clicked.connect(
             lambda: QGuiApplication.clipboard().setText(OAUTH_REDIRECT_URI)
         )
@@ -79,7 +80,7 @@ class _CredentialsPage(QWizardPage):
         buttons.addWidget(copy_redirect)
         self.path = QLineEdit()
         self.path.setReadOnly(True)
-        choose = QPushButton("Seleziona JSON…")
+        choose = QPushButton(_("Select JSON…"))
         choose.clicked.connect(self._choose)
         file_row = QHBoxLayout()
         file_row.addWidget(self.path, 1)
@@ -92,8 +93,8 @@ class _CredentialsPage(QWizardPage):
         layout.addStretch()
 
     def _choose(self) -> None:
-        filename, _ = QFileDialog.getOpenFileName(
-            self, "Seleziona le credenziali OAuth", "", "File JSON (*.json)"
+        filename, _selected_filter = QFileDialog.getOpenFileName(
+            self, _("Select OAuth credentials"), "", _("JSON files (*.json)")
         )
         if filename:
             self.path.setText(filename)
@@ -108,7 +109,7 @@ class _CredentialsPage(QWizardPage):
         try:
             self.store.import_client_file(Path(self.path.text()))
         except OAuthError as exc:
-            QMessageBox.warning(self, "Credenziali non valide", str(exc))
+            QMessageBox.warning(self, _("Invalid credentials"), str(exc))
             return False
         return True
 
@@ -116,23 +117,23 @@ class _CredentialsPage(QWizardPage):
 class _CloudAccessPage(QWizardPage):
     def __init__(self) -> None:
         super().__init__()
-        self.setTitle("Autorizza il tuo account nel progetto")
+        self.setTitle(_("Authorise your account in the project"))
         text = QLabel(
-            "Nel pannello OAuth di Google Cloud:\n\n"
-            "• Audience: per l'uso personale puoi lasciare lo stato “Testing” e aggiungere "
-            "il tuo indirizzo Google tra i Test users. La modalità Testing non è obbligatoria, "
-            "ma passare in produzione può richiedere la verifica dell'app.\n"
-            "• Data Access: aggiungi gli scope Google Health che userai. Puoi copiare "
-            "l'elenco completo con il pulsante qui sotto.\n\n"
-            "In modalità Testing Google fa scadere il refresh token dopo 7 giorni; il "
-            "programma ti chiederà semplicemente di accedere di nuovo."
+            _("In the Google Cloud OAuth panel:\n\n"
+              "• Audience: for personal use you can leave the app in Testing and add your "
+              "Google address under Test users. Testing is not mandatory, but moving to "
+              "Production may require app verification.\n"
+              "• Data Access: add the Google Health scopes you will use. You can copy the "
+              "complete list with the button below.\n\n"
+              "In Testing, Google expires refresh tokens after seven days; VitalChronicle "
+              "will simply ask you to sign in again.")
         )
         text.setWordWrap(True)
-        audience = QPushButton("Apri Audience / Test users")
+        audience = QPushButton(_("Open Audience / Test users"))
         audience.clicked.connect(lambda: open_external_url(CLOUD_AUDIENCE_URL))
-        scopes = QPushButton("Apri Data Access")
+        scopes = QPushButton(_("Open Data Access"))
         scopes.clicked.connect(lambda: open_external_url(CLOUD_DATA_ACCESS_URL))
-        copy_scopes = QPushButton("Copia tutti gli scope di lettura")
+        copy_scopes = QPushButton(_("Copy all read-only scopes"))
         copy_scopes.clicked.connect(
             lambda: QGuiApplication.clipboard().setText("\n".join(SCOPE_GROUPS.values()))
         )
@@ -140,7 +141,7 @@ class _CloudAccessPage(QWizardPage):
         buttons.addWidget(audience)
         buttons.addWidget(scopes)
         buttons.addWidget(copy_scopes)
-        self.confirm = QCheckBox("Ho aggiunto il mio account e gli scope nel progetto")
+        self.confirm = QCheckBox(_("I added my account and the scopes to the project"))
         self.confirm.toggled.connect(self.completeChanged)
         layout = QVBoxLayout(self)
         layout.addWidget(text)
@@ -156,10 +157,10 @@ class _CloudAccessPage(QWizardPage):
 class _ScopesPage(QWizardPage):
     def __init__(self) -> None:
         super().__init__()
-        self.setTitle("Scegli i dati da autorizzare")
+        self.setTitle(_("Choose the data to authorise"))
         text = QLabel(
-            "Per vedere tutto, lascia selezionate tutte le categorie. Google mostrerà "
-            "comunque un riepilogo e potrai negare singoli permessi."
+            _("Leave every category selected to view all available data. Google will still "
+              "show a summary and let you deny individual permissions.")
         )
         text.setWordWrap(True)
         self.checks: list[tuple[QCheckBox, str]] = []
@@ -186,7 +187,7 @@ class SetupWizard(QWizard):
 
     def __init__(self, store: CredentialStore, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle(f"Configurazione {APP_NAME}")
+        self.setWindowTitle(_("{app_name} setup", app_name=APP_NAME))
         self.setMinimumSize(760, 500)
         self.setWizardStyle(QWizard.ModernStyle)
         self.addPage(_IntroPage())

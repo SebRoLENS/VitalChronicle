@@ -20,6 +20,7 @@ from platformdirs import user_config_dir
 from .branding import APP_NAME
 from .constants import OAUTH_REDIRECT_URI
 from .external_links import open_external_url
+from .i18n import _
 
 SERVICE_NAME = "GoogleHealthViewer"
 TOKEN_USER = "google-health-oauth"
@@ -45,15 +46,15 @@ class CredentialStore:
         try:
             content = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise OAuthError("Il file selezionato non è un JSON di credenziali valido.") from exc
+            raise OAuthError(_("The selected file is not valid credential JSON.")) from exc
         client = content.get("web") or content.get("installed")
         if not client or not client.get("client_id") or not client.get("client_secret"):
-            raise OAuthError("Il file non contiene un client OAuth 2.0 valido.")
+            raise OAuthError(_("The file does not contain a valid OAuth 2.0 client."))
         redirects = client.get("redirect_uris") or []
         if OAUTH_REDIRECT_URI not in redirects:
             raise OAuthError(
-                "Nelle credenziali manca l'URI di reindirizzamento "
-                f"{OAUTH_REDIRECT_URI}. Aggiungilo nel client OAuth e scarica di nuovo il JSON."
+                _("The credentials are missing redirect URI {redirect_uri}. Add it to the "
+                  "OAuth client and download the JSON again.", redirect_uri=OAUTH_REDIRECT_URI)
             )
         return content
 
@@ -114,12 +115,12 @@ class _CallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         type(self).callback_path = self.path
         body = (
-            "<!doctype html><html lang='it'><meta charset='utf-8'>"
+            "<!doctype html><html lang='en'><meta charset='utf-8'>"
             f"<title>{APP_NAME}</title>"
             "<style>body{font-family:system-ui;margin:4rem;max-width:42rem}"
             "h1{color:#1769aa}</style>"
-            "<h1>Autenticazione completata</h1>"
-            f"<p>Puoi chiudere questa scheda e tornare a {APP_NAME}.</p>"
+            f"<h1>{_('Authentication completed')}</h1>"
+            f"<p>{_('You can close this tab and return to {app_name}.', app_name=APP_NAME)}</p>"
             "</html>"
         ).encode()
         self.send_response(200)
@@ -154,7 +155,7 @@ def authenticate(
         server = HTTPServer(("localhost", 8765), _CallbackHandler)
     except OSError as exc:
         raise OAuthError(
-            "La porta locale 8765 è occupata. Chiudi l'altro programma che la usa e riprova."
+            _("Local port 8765 is in use. Close the other program using it and try again.")
         ) from exc
     server.timeout = timeout_seconds
     if on_authorization_url:
@@ -162,26 +163,26 @@ def authenticate(
     if not open_external_url(authorization_url):
         server.server_close()
         raise OAuthError(
-            "Non riesco ad aprire il browser. Apri manualmente l'indirizzo mostrato dal programma."
+            _("The browser could not be opened. Open the address shown by the application manually.")
         )
     server.handle_request()
     server.server_close()
     path = _CallbackHandler.callback_path
     if not path:
-        raise OAuthError("Autenticazione scaduta o annullata.")
+        raise OAuthError(_("Authentication expired or was cancelled."))
     parsed = urlsplit(path)
     params = parse_qs(parsed.query)
     if params.get("state", [None])[0] != state:
-        raise OAuthError("Risposta OAuth non valida: parametro di sicurezza state errato.")
+        raise OAuthError(_("Invalid OAuth response: incorrect state security parameter."))
     if "error" in params:
-        raise OAuthError(f"Accesso non autorizzato: {params['error'][0]}")
+        raise OAuthError(_("Access not authorised: {error}", error=params["error"][0]))
     response_url = OAUTH_REDIRECT_URI.rstrip("/") + path
     previous = os.environ.get("OAUTHLIB_INSECURE_TRANSPORT")
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
     try:
         flow.fetch_token(authorization_response=response_url)
     except Exception as exc:  # OAuth library exposes several unrelated exception types.
-        raise OAuthError(f"Google non ha accettato l'autenticazione: {exc}") from exc
+        raise OAuthError(_("Google did not accept authentication: {error}", error=exc)) from exc
     finally:
         if previous is None:
             os.environ.pop("OAUTHLIB_INSECURE_TRANSPORT", None)

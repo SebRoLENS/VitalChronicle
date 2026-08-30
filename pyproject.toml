@@ -44,7 +44,7 @@ where = ["."]
 include = ["google_health_viewer*"]
 
 [tool.setuptools.package-data]
-google_health_viewer = ["assets/*.svg"]
+google_health_viewer = ["assets/*.svg", "locales/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

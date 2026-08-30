@@ -25,6 +25,20 @@ measurements and professional care.
 VitalChronicle is and will remain free and open source. Voluntary support through
 [Buy Me a Coffee](https://buymeacoffee.com/sebromi) helps maintain the project.
 
+## Interface language
+
+VitalChronicle selects the operating-system language at startup. English and Italian are included;
+when the detected language is not supported, the interface and local-AI answers use English.
+Advanced users and screenshot automation can override detection before starting the application:
+
+```bash
+VITALCHRONICLE_LANGUAGE=it vitalchronicle
+```
+
+Additional languages are maintained by the community on
+[Weblate](https://hosted.weblate.org/projects/vitalchronicle/) and are included in releases after
+automatic catalogue validation.
+
 # 1. What VitalChronicle does
 
 VitalChronicle can:

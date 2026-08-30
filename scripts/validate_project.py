@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SUPPORT_URL = "https://buymeacoffee.com/sebromi"
+TRANSLATION_URL = "https://hosted.weblate.org/projects/vitalchronicle/"
 
 
 def declared_version() -> str:
@@ -36,6 +37,7 @@ def main() -> int:
     assert readme.count(SUPPORT_URL) >= 3
     assert "VitalChronicle is and will remain" in readme
     assert "http://localhost:8765/" in readme
+    assert readme.count(TRANSLATION_URL) >= 3
 
     public_identity_files = (
         "pyproject.toml",
@@ -60,11 +62,14 @@ def main() -> int:
         ".github/workflows/ci.yml",
         ".github/workflows/automatic-release.yml",
         ".github/workflows/build-desktop.yml",
+        ".github/workflows/translations.yml",
         "docs/screenshots/overview.png",
         "docs/screenshots/data-explorer.png",
         "docs/screenshots/local-ai.png",
         "docs/screenshots/ai-settings.png",
         "packaging/linux/vitalchronicle.desktop",
+        "google_health_viewer/locales/en.json",
+        "google_health_viewer/locales/it.json",
     )
     for relative in required_files:
         path = ROOT / relative

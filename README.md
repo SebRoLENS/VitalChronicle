@@ -12,6 +12,7 @@
   <a href="https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest"><img src="https://img.shields.io/badge/Windows-x86__64-0078D4?logo=windows" alt="Windows x86-64"></a>
   <a href="https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest"><img src="https://img.shields.io/badge/macOS-Intel%20%7C%20Apple%20Silicon-000000?logo=apple" alt="macOS Intel and Apple Silicon"></a>
   <a href="https://github.com/SebRoLENS/google-health-dashboard-ai/actions/workflows/ci.yml"><img src="https://github.com/SebRoLENS/google-health-dashboard-ai/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://hosted.weblate.org/projects/vitalchronicle/"><img src="https://hosted.weblate.org/widget/vitalchronicle/svg-badge.svg" alt="Translation status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
   <a href="https://buymeacoffee.com/sebromi"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-support%20development-FFDD00?logo=buymeacoffee&logoColor=black" alt="Buy me a coffee"></a>
 </p>
@@ -24,6 +25,10 @@ model. Health records stay on the computer unless the user explicitly exports th
 > **VitalChronicle is and will remain free and open-source software.** If it is useful
 > to you, a voluntary [contribution through Buy Me a Coffee](https://buymeacoffee.com/sebromi)
 > helps keep development active and the downloadable packages available.
+
+Another valuable way to support this open-source project is to
+**[help translate VitalChronicle on Weblate](https://hosted.weblate.org/projects/vitalchronicle/)**.
+No programming experience is required.
 
 VitalChronicle is an independent project. It is not affiliated with, endorsed by, or
 supported by Google. It is an exploratory wellness-data tool, not a medical device and
@@ -98,6 +103,8 @@ value remains editable and is limited only by the physical context reported by O
 - local Qwen analysis through Ollama, with NVIDIA 16 GB and CPU-only 32 GB profiles;
 - model-update notifications and model-context-aware token recommendations;
 - no cloud AI service and no transmission of health data to the developer.
+- automatic system-language detection, with English fallback and community catalogues managed
+  through Weblate.
 
 ## Quick start
 
@@ -192,7 +199,12 @@ VitalChronicle is developed as free, open-source software and will remain so. No
 is placed behind a donation. If the project saves you time, you can
 **[support its continued development on Buy Me a Coffee](https://buymeacoffee.com/sebromi)**.
 
-The same link is available inside the application toolbar and **Aiuto** menu.
+An equally useful non-financial contribution is to
+**[translate the application on Weblate](https://hosted.weblate.org/projects/vitalchronicle/)**.
+Translations committed by Weblate are validated by GitHub Actions and included automatically in
+subsequent application releases.
+
+The same link is available inside the application toolbar and **Help** menu.
 
 ## Author and contact
 

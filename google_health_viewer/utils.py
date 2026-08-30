@@ -7,6 +7,8 @@ from collections.abc import Iterator
 from datetime import date, datetime, time
 from typing import Any
 
+from .i18n import _
+
 _NUMBER = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
 
 
@@ -124,7 +126,7 @@ def summarize(payload: dict[str, Any], max_fields: int = 4) -> str:
             pieces.append(f"{key.rsplit('.', 1)[-1]}: {value}")
         if len(pieces) >= max_fields:
             break
-    return " · ".join(pieces) or "Record disponibile"
+    return " · ".join(pieces) or _("Record available")
 
 
 def parse_timestamp(value: str | None) -> float | None:

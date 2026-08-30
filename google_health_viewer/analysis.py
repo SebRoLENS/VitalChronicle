@@ -9,6 +9,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from .constants import DATA_TYPE_BY_KEY, DATA_TYPES
+from .i18n import _
 from .utils import coerce_number, flatten_dict, parse_timestamp
 
 
@@ -37,22 +38,22 @@ class SeriesSummary:
 
 
 TYPE_VISUALS: dict[str, tuple[str, str, str, str]] = {
-    "steps": ("bar", "sum", "#34A853", "passi"),
-    "floors": ("bar", "sum", "#0F9D58", "piani"),
+    "steps": ("bar", "sum", "#34A853", _("steps")),
+    "floors": ("bar", "sum", "#0F9D58", _("floors")),
     "distance": ("bar", "sum", "#00A0B0", "m"),
     "active-minutes": ("bar", "sum", "#F9AB00", "min"),
     "active-zone-minutes": ("bar", "sum", "#FF8F00", "min"),
     "active-energy-burned": ("bar", "sum", "#F57C00", "kcal"),
     "total-calories": ("bar", "sum", "#EF6C00", "kcal"),
-    "swim-lengths-data": ("bar", "sum", "#039BE5", "vasche"),
+    "swim-lengths-data": ("bar", "sum", "#039BE5", _("lengths")),
     "heart-rate": ("scatter", "none", "#EA4335", "bpm"),
     "daily-resting-heart-rate": ("line", "none", "#D93025", "bpm"),
     "heart-rate-variability": ("scatter", "none", "#7E57C2", "ms"),
     "daily-heart-rate-variability": ("line", "none", "#673AB7", "ms"),
     "oxygen-saturation": ("scatter", "none", "#4285F4", "%"),
     "daily-oxygen-saturation": ("line", "none", "#1A73E8", "%"),
-    "daily-respiratory-rate": ("line", "none", "#00ACC1", "atti/min"),
-    "respiratory-rate-sleep-summary": ("line", "none", "#0097A7", "atti/min"),
+    "daily-respiratory-rate": ("line", "none", "#00ACC1", _("breaths/min")),
+    "respiratory-rate-sleep-summary": ("line", "none", "#0097A7", _("breaths/min")),
     "core-body-temperature": ("line", "none", "#E91E63", "°C"),
     "daily-sleep-temperature-derivations": ("line", "none", "#C2185B", "°C"),
     "blood-glucose": ("scatter", "none", "#8D6E63", "mg/dL"),
@@ -164,27 +165,27 @@ _IGNORED_NUMERIC_FIELDS = {
 
 def friendly_metric_name(metric: str) -> str:
     virtual_labels = {
-        "__duration_hours__": "Durata giornaliera",
-        "__heart_rate_samples__": "Frequenza cardiaca",
-        "__zone_time__": "Tempo per zona",
-        "__zone_calories__": "Calorie per zona",
-        "__heart_rate_zones__": "Soglie delle zone",
-        "__activity_minutes__": "Minuti per intensità",
-        "__swim_lengths__": "Vasche completate",
+        "__duration_hours__": _("Daily duration"),
+        "__heart_rate_samples__": _("Heart rate"),
+        "__zone_time__": _("Time by zone"),
+        "__zone_calories__": _("Calories by zone"),
+        "__heart_rate_zones__": _("Zone thresholds"),
+        "__activity_minutes__": _("Minutes by intensity"),
+        "__swim_lengths__": _("Completed lengths"),
     }
     if metric in virtual_labels:
         return virtual_labels[metric]
     leaf = metric.rsplit(".", 1)[-1].replace("_", " ").replace("-", " ")
     leaf = _CAMEL_BOUNDARY.sub(" ", leaf)
     replacements = {
-        "beats per minute": "Frequenza cardiaca",
-        "count": "Conteggio",
-        "minutes asleep": "Tempo di sonno",
-        "average heart rate variability milliseconds": "HRV media",
-        "root mean square of successive differences milliseconds": "HRV (RMSSD)",
-        "standard deviation milliseconds": "HRV (SDNN)",
-        "percentage": "Percentuale",
-        "temperature delta": "Variazione temperatura",
+        "beats per minute": _("Heart rate"),
+        "count": _("Count"),
+        "minutes asleep": _("Sleep time"),
+        "average heart rate variability milliseconds": _("Average HRV"),
+        "root mean square of successive differences milliseconds": _("HRV (RMSSD)"),
+        "standard deviation milliseconds": _("HRV (SDNN)"),
+        "percentage": _("Percentage"),
+        "temperature delta": _("Temperature variation"),
         "vo2 max": "VO₂ max",
     }
     normalized = leaf.strip().lower()
@@ -519,7 +520,7 @@ def visual_profile(data_type: str, metric: str) -> VisualProfile:
         unit = "bpm"
         chart = "line"
     elif metric == "__swim_lengths__":
-        unit = "vasche"
+        unit = _("lengths")
         chart = "bar"
         aggregation = "sum"
     elif "beatsperminute" in lowered:
@@ -528,10 +529,14 @@ def visual_profile(data_type: str, metric: str) -> VisualProfile:
         unit = "ms"
     elif "percentage" in lowered or "percent" in lowered:
         unit = "%"
-    elif "minute" in lowered and "millisecond" not in lowered:
+    elif (
+        "minute" in lowered
+        and "millisecond" not in lowered
+        and data_type not in {"daily-respiratory-rate", "respiratory-rate-sleep-summary"}
+    ):
         unit = "min"
     elif "count" in lowered and data_type == "steps":
-        unit = "passi"
+        unit = _("steps")
     if "millimeter" in lowered and data_type in {"distance", "altitude", "height"}:
         scale = 0.001
         unit = "m"
@@ -548,23 +553,23 @@ def visual_profile(data_type: str, metric: str) -> VisualProfile:
         unit = "mL"
 
     descriptions = {
-        "bar": "Totale giornaliero",
-        "scatter": "Misure puntuali e andamento locale",
-        "line": "Andamento nel tempo e intervallo personale",
+        "bar": _("Daily total"),
+        "scatter": _("Individual measurements and local trend"),
+        "line": _("Trend over time and personal range"),
     }
     subtitle = descriptions[chart]
     if data_type == "exercise":
-        subtitle = "Durata totale degli allenamenti per giorno"
+        subtitle = _("Total workout duration per day")
     elif data_type == "sedentary-period":
-        subtitle = "Tempo sedentario totale per giorno"
+        subtitle = _("Total sedentary time per day")
     elif metric == "__zone_time__":
-        subtitle = "Minuti giornalieri suddivisi per zona cardiaca"
+        subtitle = _("Daily minutes by heart-rate zone")
     elif metric == "__zone_calories__":
-        subtitle = "Calorie giornaliere suddivise per zona cardiaca"
+        subtitle = _("Daily calories by heart-rate zone")
     elif metric == "__heart_rate_zones__":
-        subtitle = "Soglie personali delle zone cardiache nel tempo"
+        subtitle = _("Personal heart-rate zone thresholds over time")
     elif metric == "__activity_minutes__":
-        subtitle = "Minuti giornalieri suddivisi per intensità"
+        subtitle = _("Daily minutes by intensity")
     return VisualProfile(chart, aggregation, color, unit, subtitle, scale)
 
 
@@ -867,7 +872,7 @@ def smooth_heart_rate_points(
     short oscillations. Sparse measurements remain visible as individual points.
     """
     if bin_seconds <= 0 or window_seconds <= 0:
-        raise ValueError("Gli intervalli di smoothing devono essere positivi")
+        raise ValueError(_("Smoothing intervals must be positive"))
 
     buckets: dict[int, list[float]] = defaultdict(list)
     for timestamp, value in points:
@@ -974,10 +979,10 @@ def _partial_day_context(
         **same_clock,
         "same_time_percent": same_time_percent,
         "interpretation": (
-            "Confrontare il valore odierno solo con same_time_mean; il totale di oggi "
-            "è ancora parziale. Non proiettarlo linearmente a fine giornata."
+            "Compare today's value only with same_time_mean; today's total is still partial. "
+            "Do not project it linearly to the end of the day."
             if has_today
-            else "L'assenza di un valore odierno non equivale a zero: la giornata è in corso."
+            else "A missing value for today does not mean zero: the day is still in progress."
         ),
     }
 
@@ -1276,7 +1281,7 @@ def build_daily_progress_snapshot(
                     comparison = daily_progress(heart_points, "mean", heart_day)
                     heart_item = {
                         "data_type": "daily-resting-heart-rate",
-                        "label": "Frequenza cardiaca",
+                        "label": _("Heart rate"),
                         "metric": "Media giornaliera",
                         "unit": heart_profile.unit,
                         "completion": False,
@@ -1387,7 +1392,7 @@ def build_health_snapshot(
                     "structured_details": structured_details
                     or {
                         "records_present": len(records),
-                        "note": "Categoria presente senza campi numerici compatti.",
+                        "note": _("Category present without compact numeric fields."),
                     },
                 }
             )
@@ -1480,9 +1485,9 @@ def build_health_snapshot(
             "current_day_is_incomplete": includes_today,
             "elapsed_day_percent": round(elapsed_seconds / 86400.0 * 100.0, 1),
             "interpretation_rule": (
-                "I totali odierni sono parziali: usare il confronto alla stessa ora quando "
-                "disponibile; non confrontarli con intere giornate e non estrapolarli in modo "
-                "lineare. Un dato odierno assente non significa zero."
+                "Today's totals are partial: use the same-time comparison when available; "
+                "do not compare them with complete days or extrapolate them linearly. "
+                "A missing value for today does not mean zero."
             ),
         },
         "metrics": metrics,
@@ -1494,8 +1499,8 @@ def build_health_snapshot(
             "truncated_data_types": truncated_data_types,
             "records_considered": records_considered,
             "interpretation_rule": (
-                "Esaminare tutte le metriche, additional_fields e structured_details "
-                "disponibili; non limitarsi ai dati mostrati nella Panoramica."
+                "Examine all available metrics, additional_fields, and structured_details; "
+                "do not limit the analysis to data shown in the Overview."
             ),
         },
     }

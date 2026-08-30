@@ -21,8 +21,13 @@ pytest -q
 python scripts/validate_project.py
 ```
 
-Keep user-facing application text in Italian for the current development series. Project
-documentation is English-first until the planned application translation is complete.
+English is the source and fallback language. Wrap every new user-facing string in
+`google_health_viewer.i18n._()`, then run `python scripts/update_translations.py`.
+
+Translate through Weblate whenever possible. Weblate commits catalogue changes back to GitHub;
+placeholder and catalogue checks run automatically before translations are packaged. The
+interface currently ships complete English and Italian catalogues. Documentation remains
+English-first while community translations grow.
 
 ## Pull requests
 

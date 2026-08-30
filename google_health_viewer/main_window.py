@@ -66,6 +66,7 @@ from .branding import (
 from .constants import DATA_TYPE_BY_KEY, DATA_TYPES, SCOPE_GROUPS
 from .dashboard import OverviewPage
 from .external_links import open_external_url
+from .i18n import _
 from .local_ai import (
     HARDWARE_PROFILE_LABELS,
     MODEL_DESCRIPTIONS,
@@ -90,10 +91,10 @@ from .workers import (
 
 DOCS_URL = "https://developers.google.com/health"
 RESOURCE_LABELS = {
-    "identity": "Identità Google Health",
-    "profile": "Profilo",
-    "settings": "Impostazioni e unità",
-    "paired-devices": "Dispositivi associati",
+    "identity": _("Google Health identity"),
+    "profile": _("Profile"),
+    "settings": _("Settings and units"),
+    "paired-devices": _("Paired devices"),
 }
 
 
@@ -151,7 +152,7 @@ class MainWindow(QMainWindow):
         self.refresh_overview()
         self._update_connection_status()
         if screenshot_mode:
-            self.status_label.setText("● Modalità dimostrativa · dati sintetici locali")
+            self.status_label.setText(_("● Demo mode · local synthetic data"))
             self.status_label.setStyleSheet(
                 "color: #188038; font-weight: 700; padding-left: 14px;"
             )
@@ -165,22 +166,22 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(250, self.show_setup_wizard)
 
     def _build_ui(self) -> None:
-        toolbar = QToolBar("Azioni principali")
+        toolbar = QToolBar(_("Main actions"))
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
-        setup_action = QAction("Configurazione Google", self)
+        setup_action = QAction(_("Google setup"), self)
         setup_action.triggered.connect(self.show_setup_wizard)
-        self.auth_action = QAction("Accedi con Google", self)
+        self.auth_action = QAction(_("Sign in with Google"), self)
         self.auth_action.triggered.connect(self.authenticate_existing)
-        self.sync_action = QAction("Scarica / aggiorna", self)
+        self.sync_action = QAction(_("Download / update"), self)
         self.sync_action.triggered.connect(lambda _checked=False: self.start_sync())
-        export_action = QAction("Esporta archivio", self)
+        export_action = QAction(_("Export archive"), self)
         export_action.triggered.connect(self.export_archive)
-        docs_action = QAction("Documentazione API", self)
+        docs_action = QAction(_("API documentation"), self)
         docs_action.triggered.connect(lambda: self.open_url(DOCS_URL))
         issue_toolbar_action = QAction("Report an issue", self)
         issue_toolbar_action.triggered.connect(lambda: self.open_url(ISSUES_URL))
-        support_action = QAction("☕ Sostieni lo sviluppo", self)
+        support_action = QAction(_("☕ Support development"), self)
         support_action.triggered.connect(lambda: self.open_url(SUPPORT_URL))
         toolbar.addAction(setup_action)
         toolbar.addAction(self.auth_action)
@@ -201,26 +202,26 @@ class MainWindow(QMainWindow):
         header.addWidget(app_title)
         self.status_label = QLabel()
         header.addWidget(self.status_label, 1)
-        header.addWidget(QLabel("Periodo"))
+        header.addWidget(QLabel(_("Period")))
         self.range_combo = QComboBox()
         for label, key in (
-            ("Oggi", "today"),
-            ("Ultimi 7 giorni", "seven_days"),
-            ("Ultimo mese", "month"),
-            ("Ultimo anno", "year"),
-            ("Tutto", "all"),
-            ("Personalizzato", "custom"),
+            (_("Today"), "today"),
+            (_("Last 7 days"), "seven_days"),
+            (_("Last month"), "month"),
+            (_("Last year"), "year"),
+            (_("All"), "all"),
+            (_("Custom"), "custom"),
         ):
             self.range_combo.addItem(label, key)
         self.range_combo.setCurrentIndex(self.range_combo.findData("month"))
         header.addWidget(self.range_combo)
-        header.addWidget(QLabel("Dal"))
+        header.addWidget(QLabel(_("From")))
         self.start_date = QDateEdit()
         self.start_date.setCalendarPopup(True)
         self.start_date.setDate(QDate.currentDate().addMonths(-1))
         self.start_date.dateChanged.connect(self._date_range_changed)
         header.addWidget(self.start_date)
-        header.addWidget(QLabel("al"))
+        header.addWidget(QLabel(_("to")))
         self.end_date = QDateEdit()
         self.end_date.setCalendarPopup(True)
         self.end_date.setDate(QDate.currentDate())
@@ -231,27 +232,27 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self.overview = OverviewPage()
-        self.tabs.addTab(self.overview, "Panoramica")
-        self.tabs.addTab(self._build_explorer_page(), "Esplora dati")
-        self.tabs.addTab(self._build_ai_page(), "Analisi AI locale")
-        self.tabs.addTab(self._build_ai_settings_page(), "Impostazioni AI")
+        self.tabs.addTab(self.overview, _("Overview"))
+        self.tabs.addTab(self._build_explorer_page(), _("Explore data"))
+        self.tabs.addTab(self._build_ai_page(), _("Local AI analysis"))
+        self.tabs.addTab(self._build_ai_settings_page(), _("AI settings"))
         root_layout.addWidget(self.tabs, 1)
         self.setCentralWidget(root)
 
-        privacy = QAction("Elimina dati locali e accesso…", self)
+        privacy = QAction(_("Delete local data and access…"), self)
         privacy.triggered.connect(self.clear_local_data)
         self.menuBar().addMenu("Privacy").addAction(privacy)
 
-        help_menu = self.menuBar().addMenu("Aiuto")
-        manual_action = QAction("Manuale utente", self)
+        help_menu = self.menuBar().addMenu(_("Help"))
+        manual_action = QAction(_("User manual"), self)
         manual_action.triggered.connect(lambda: self.open_url(MANUAL_URL))
         repository_action = QAction("Repository GitHub", self)
         repository_action.triggered.connect(lambda: self.open_url(REPOSITORY_URL))
-        issue_action = QAction("Segnala un problema", self)
+        issue_action = QAction(_("Report an issue"), self)
         issue_action.triggered.connect(lambda: self.open_url(ISSUES_URL))
         coffee_action = QAction("☕ Buy me a coffee", self)
         coffee_action.triggered.connect(lambda: self.open_url(SUPPORT_URL))
-        about_action = QAction(f"Informazioni su {APP_NAME}", self)
+        about_action = QAction(_("About {app_name}", app_name=APP_NAME), self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(manual_action)
         help_menu.addAction(repository_action)
@@ -265,27 +266,27 @@ class MainWindow(QMainWindow):
             return
         QMessageBox.warning(
             self,
-            "Impossibile aprire il browser",
-            "VitalChronicle non è riuscito ad avviare il browser predefinito.\n\n"
-            f"Apri manualmente questo indirizzo:\n{url}",
+            _("Could not open the browser"),
+            _("VitalChronicle could not start the default browser.\n\n"
+              "Open this address manually:\n{url}", url=url),
         )
 
     def show_about(self) -> None:
         box = QMessageBox(self)
-        box.setWindowTitle(f"Informazioni su {APP_NAME}")
+        box.setWindowTitle(_("About {app_name}", app_name=APP_NAME))
         box.setIconPixmap(self.windowIcon().pixmap(72, 72))
         box.setTextFormat(Qt.RichText)
         box.setTextInteractionFlags(Qt.TextBrowserInteraction)
         box.setText(
             f"<h2>{APP_NAME}</h2>"
             f"<p>{APP_TAGLINE}</p>"
-            "<p>Dashboard locale e privata per visualizzare i dati Google Health "
-            "e analizzarli con modelli Ollama eseguiti sul computer.</p>"
-            "<p><b>Software libero e open source.</b> Un contributo volontario aiuta "
-            "a mantenerne attivo lo sviluppo.</p>"
-            f"<p><a href='{SUPPORT_URL}'>Buy me a coffee</a> · "
+            + _("<p>A private local dashboard for viewing Google Health data and analysing "
+              "it with Ollama models running on your computer.</p>"
+              "<p><b>Free and open-source software.</b> A voluntary contribution helps "
+              "keep development active.</p>")
+            + f"<p><a href='{SUPPORT_URL}'>Buy me a coffee</a> · "
             f"<a href='{REPOSITORY_URL}'>GitHub</a></p>"
-            "<p>Autore: Sebastiano Romi · sebastiano.romi@gmail.com</p>"
+            + _("<p>Author: Sebastiano Romi · sebastiano.romi@gmail.com</p>")
         )
         box.exec()
 
@@ -298,14 +299,14 @@ class MainWindow(QMainWindow):
         navigation = QWidget()
         navigation_layout = QVBoxLayout(navigation)
         navigation_layout.setContentsMargins(0, 0, 0, 0)
-        self.show_empty_check = QCheckBox("Mostra anche categorie senza dati")
+        self.show_empty_check = QCheckBox(_("Show categories without data"))
         self.show_empty_check.setChecked(
             str(self.settings.value("view/show_empty", "false")).lower() == "true"
         )
         self.show_empty_check.toggled.connect(self._show_empty_changed)
         navigation_layout.addWidget(self.show_empty_check)
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Tipo di dato", "Record"])
+        self.tree.setHeaderLabels([_("Data type"), _("Records")])
         self.tree.setAlternatingRowColors(True)
         self.tree.setMinimumWidth(290)
         self.tree.itemSelectionChanged.connect(self._tree_selection_changed)
@@ -316,7 +317,7 @@ class MainWindow(QMainWindow):
         centre_layout = QVBoxLayout(centre)
         centre_layout.setContentsMargins(14, 0, 14, 0)
         chart_header = QHBoxLayout()
-        self.chart_title = QLabel("Seleziona un tipo di dato")
+        self.chart_title = QLabel(_("Select a data type"))
         self.chart_title.setObjectName("pageTitle")
         chart_header.addWidget(self.chart_title, 1)
         self.metric_combo = QComboBox()
@@ -324,24 +325,24 @@ class MainWindow(QMainWindow):
         self.metric_combo.currentIndexChanged.connect(self.update_plot)
         chart_header.addWidget(self.metric_combo)
         self.scale_combo = QComboBox()
-        self.scale_combo.addItems(["Scala Y leggibile", "Tutti i valori Y"])
+        self.scale_combo.addItems([_("Readable Y scale"), _("All Y values")])
         self.scale_combo.setToolTip(
-            "La scala leggibile usa i valori visibili ed evita che pochi estremi "
-            "schiaccino il grafico. La rotella modifica soltanto l'asse temporale."
+            _("The readable scale uses visible values so a few extremes do not compress the "
+              "chart. The mouse wheel changes only the time axis.")
         )
         self.scale_combo.currentIndexChanged.connect(self._scale_mode_changed)
         chart_header.addWidget(self.scale_combo)
-        self.export_csv_button = QPushButton("Esporta CSV")
+        self.export_csv_button = QPushButton(_("Export CSV"))
         self.export_csv_button.clicked.connect(self.export_current_csv)
         chart_header.addWidget(self.export_csv_button)
         centre_layout.addLayout(chart_header)
-        self.chart_subtitle = QLabel("I grafici si adattano automaticamente alla metrica.")
+        self.chart_subtitle = QLabel(_("Charts adapt automatically to each metric."))
         self.chart_subtitle.setObjectName("pageSubtitle")
         centre_layout.addWidget(self.chart_subtitle)
 
         stats = QHBoxLayout()
         self.stat_values: list[QLabel] = []
-        for title in ("Ultimo valore", "Media", "Intervallo", "Trend"):
+        for title in (_("Latest value"), _("Average"), _("Range"), _("Trend")):
             card = QFrame()
             card.setObjectName("statCard")
             card_layout = QVBoxLayout(card)
@@ -363,7 +364,7 @@ class MainWindow(QMainWindow):
         self.plot = pg.PlotWidget(axisItems={"bottom": DateAxis(orientation="bottom")})
         self.plot.setBackground("#FFFFFF")
         self.plot.showGrid(x=True, y=True, alpha=0.12)
-        self.plot.setLabel("bottom", "Data e ora")
+        self.plot.setLabel("bottom", _("Date and time"))
         self.plot.getAxis("left").setTextPen("#5F6368")
         self.plot.getAxis("bottom").setTextPen("#5F6368")
         self.plot.getAxis("left").setPen("#DADCE0")
@@ -378,7 +379,7 @@ class MainWindow(QMainWindow):
         self.limit_label.setStyleSheet("color: #9A6700")
         centre_layout.addWidget(self.limit_label)
         self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Data/ora", "Fonte", "Riepilogo"])
+        self.table.setHorizontalHeaderLabels([_("Date/time"), _("Source"), _("Summary")])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -389,7 +390,7 @@ class MainWindow(QMainWindow):
 
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
-        self.details.setPlaceholderText("Seleziona un record per vedere tutti i campi originali.")
+        self.details.setPlaceholderText(_("Select a record to view all original fields."))
         self.details.setMinimumWidth(310)
         splitter.addWidget(self.details)
         splitter.setSizes([290, 820, 330])
@@ -400,12 +401,12 @@ class MainWindow(QMainWindow):
         page = QWidget()
         root = QVBoxLayout(page)
         root.setContentsMargins(24, 22, 24, 22)
-        title = QLabel("Analisi privata sul tuo computer")
+        title = QLabel(_("Private analysis on your computer"))
         title.setObjectName("pageTitle")
         subtitle = QLabel(
-            "La statistica costruisce la tua baseline personale; Qwen trasforma i "
-            "risultati in una spiegazione leggibile. Sono disponibili profili per NVIDIA "
-            "con 16 GB di RAM e per computer con 32 GB di RAM senza scheda video."
+            _("Statistics build your personal baseline; Qwen turns the results into a readable "
+              "explanation. Profiles are available for NVIDIA systems with 16 GB RAM and "
+              "CPU-only computers with 32 GB RAM.")
         )
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
@@ -417,10 +418,10 @@ class MainWindow(QMainWindow):
         config.setObjectName("aiCard")
         config_layout = QGridLayout(config)
         config_layout.setContentsMargins(16, 14, 16, 14)
-        self.ai_status_label = QLabel("○ Verifica di Ollama…")
+        self.ai_status_label = QLabel(_("○ Checking Ollama…"))
         self.ai_status_label.setStyleSheet("font-weight: 700; color: #5F6368")
         config_layout.addWidget(self.ai_status_label, 0, 0, 1, 3)
-        config_layout.addWidget(QLabel("Profilo hardware"), 1, 0)
+        config_layout.addWidget(QLabel(_("Hardware profile")), 1, 0)
         self.ai_profile_combo = QComboBox()
         for profile, label in HARDWARE_PROFILE_LABELS.items():
             self.ai_profile_combo.addItem(label, profile)
@@ -430,7 +431,7 @@ class MainWindow(QMainWindow):
         profile_index = self.ai_profile_combo.findData(saved_profile)
         self.ai_profile_combo.setCurrentIndex(max(0, profile_index))
         config_layout.addWidget(self.ai_profile_combo, 1, 1, 1, 2)
-        config_layout.addWidget(QLabel("Modello locale"), 2, 0)
+        config_layout.addWidget(QLabel(_("Local model")), 2, 0)
         self.ai_model_combo = QComboBox()
         self.ai_model_combo.setEditable(True)
         self.ai_model_combo.addItems(MODEL_OPTIONS)
@@ -440,7 +441,7 @@ class MainWindow(QMainWindow):
         self.ai_model_combo.setCurrentText(saved_model)
         self.ai_model_combo.currentTextChanged.connect(self._ai_model_changed)
         config_layout.addWidget(self.ai_model_combo, 2, 1)
-        check = QPushButton("Verifica")
+        check = QPushButton(_("Check"))
         check.clicked.connect(self.check_ai_status)
         config_layout.addWidget(check, 2, 2)
         self.ai_model_hint = QLabel()
@@ -449,18 +450,18 @@ class MainWindow(QMainWindow):
         config_layout.addWidget(self.ai_model_hint, 3, 1, 1, 2)
         self._update_ai_model_hint(saved_model)
         self.ai_profile_combo.currentIndexChanged.connect(self._ai_profile_changed)
-        setup = QPushButton("Guida installazione locale")
+        setup = QPushButton(_("Local installation guide"))
         setup.clicked.connect(self.show_ai_setup)
         config_layout.addWidget(setup, 4, 0)
-        self.pull_button = QPushButton("Scarica modello")
+        self.pull_button = QPushButton(_("Download model"))
         self.pull_button.clicked.connect(self.pull_ai_model)
         config_layout.addWidget(self.pull_button, 4, 1)
         self.ai_progress = QProgressBar()
         self.ai_progress.setRange(0, 1)
         self.ai_progress.setValue(0)
-        self.ai_progress.setFormat("In attesa")
+        self.ai_progress.setFormat(_("Waiting"))
         config_layout.addWidget(self.ai_progress, 4, 2)
-        self.model_update_button = QPushButton("Aggiorna modello")
+        self.model_update_button = QPushButton(_("Update model"))
         self.model_update_button.clicked.connect(self._apply_model_update)
         self.model_update_button.setVisible(False)
         config_layout.addWidget(self.model_update_button, 5, 1, 1, 2)
@@ -468,7 +469,7 @@ class MainWindow(QMainWindow):
         root.addWidget(config)
 
         interval_row = QHBoxLayout()
-        question_label = QLabel("Periodo usato per le domande")
+        question_label = QLabel(_("Period used for questions"))
         question_label.setStyleSheet("font-weight: 700;")
         interval_row.addWidget(question_label)
         self.ai_range_combo = QComboBox()
@@ -490,16 +491,16 @@ class MainWindow(QMainWindow):
         self.ai_question = QPlainTextEdit()
         self.ai_question.setMaximumHeight(72)
         self.ai_question.setPlaceholderText(
-            "Esempio: il sonno sembra associato alla mia HRV e alla frequenza a riposo?"
+            _("Example: does my sleep appear associated with HRV and resting heart rate?")
         )
         root.addWidget(self.ai_question)
         actions = QHBoxLayout()
-        self.auto_ai_button = QPushButton("Analizza tutta la cronologia")
+        self.auto_ai_button = QPushButton(_("Analyse complete history"))
         self.auto_ai_button.setObjectName("primaryButton")
         self.auto_ai_button.clicked.connect(
             lambda: self.start_ai_analysis("", use_all_data=True)
         )
-        self.ask_ai_button = QPushButton("Rispondi alla domanda")
+        self.ask_ai_button = QPushButton(_("Answer the question"))
         self.ask_ai_button.setObjectName("primaryButton")
         self.ask_ai_button.clicked.connect(
             lambda: self.start_ai_analysis(self.ai_question.toPlainText())
@@ -514,7 +515,7 @@ class MainWindow(QMainWindow):
         answer_layout = QVBoxLayout(answer_card)
         answer_layout.setContentsMargins(14, 10, 14, 10)
         answer_header = QHBoxLayout()
-        self.ai_result_title = QLabel("Analisi locale")
+        self.ai_result_title = QLabel(_("Local analysis"))
         self.ai_result_title.setStyleSheet("font-weight: 700;")
         self.ai_live_badge = QLabel("LIVE")
         self.ai_live_badge.setObjectName("thinkingLive")
@@ -526,14 +527,14 @@ class MainWindow(QMainWindow):
         self.ai_output = QTextBrowser()
         self.ai_output.setOpenExternalLinks(True)
         self.ai_output.setPlaceholderText(
-            "Il ragionamento apparirà qui durante l’elaborazione e sarà poi sostituito "
-            "dalla risposta finale. Nessun dato viene inviato a un’AI online."
+            _("Thinking appears here during processing and is then replaced by the final "
+              "answer. No data is sent to an online AI service.")
         )
         answer_layout.addWidget(self.ai_output, 1)
         root.addWidget(answer_card, 1)
         disclaimer = QLabel(
-            "Strumento esplorativo: correlazioni e anomalie non equivalgono a cause o diagnosi. "
-            "Per decisioni sanitarie usa misure validate e il parere di un professionista."
+            _("Exploratory tool: correlations and anomalies do not establish causes or diagnoses. "
+              "Use validated measurements and professional advice for health decisions.")
         )
         disclaimer.setObjectName("disclaimer")
         disclaimer.setWordWrap(True)
@@ -544,11 +545,11 @@ class MainWindow(QMainWindow):
         page = QWidget()
         root = QVBoxLayout(page)
         root.setContentsMargins(24, 22, 24, 22)
-        title = QLabel("Impostazioni AI")
+        title = QLabel(_("AI settings"))
         title.setObjectName("pageTitle")
         subtitle = QLabel(
-            "Inserisci la RAM del computer: il consiglio considera il modello selezionato "
-            "e il suo limite fisico di contesto dichiarato da Ollama."
+            _("Enter the computer's RAM. The recommendation considers the selected model and "
+              "its physical context limit reported by Ollama.")
         )
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
@@ -560,20 +561,20 @@ class MainWindow(QMainWindow):
         card.setObjectName("aiCard")
         layout = QGridLayout(card)
         layout.setContentsMargins(18, 16, 18, 16)
-        layout.addWidget(QLabel("RAM installata"), 0, 0)
+        layout.addWidget(QLabel(_("Installed RAM")), 0, 0)
         self.ai_ram_edit = QLineEdit()
         self.ai_ram_edit.setValidator(QIntValidator(1, 2_147_483_647, self))
         default_ram = 32 if self.ai_profile_combo.currentData() == "cpu32" else 16
         self.ai_ram_edit.setText(
             str(self.settings.value("ai/ram_gb", default_ram, type=int))
         )
-        self.ai_ram_edit.setPlaceholderText("Esempio: 16")
-        self.ai_ram_edit.setToolTip("RAM totale installata, espressa in GB.")
+        self.ai_ram_edit.setPlaceholderText(_("Example: 16"))
+        self.ai_ram_edit.setToolTip(_("Total installed RAM in GB."))
         self.ai_ram_edit.editingFinished.connect(self._save_ai_token_settings)
         layout.addWidget(self.ai_ram_edit, 0, 1)
         layout.addWidget(QLabel("GB"), 0, 2)
 
-        layout.addWidget(QLabel("Token massimi"), 1, 0)
+        layout.addWidget(QLabel(_("Maximum tokens")), 1, 0)
         self.ai_token_edit = QLineEdit()
         self._model_token_limit: int | None = None
         self.ai_token_edit.setValidator(QIntValidator(1, 2_147_483_647, self))
@@ -581,18 +582,18 @@ class MainWindow(QMainWindow):
             str(self.settings.value("ai/max_generation_tokens", 3200, type=int))
         )
         self.ai_token_edit.setToolTip(
-            "Thinking e risposta condividono questo limite. Puoi modificare il consiglio."
+            _("Thinking and the answer share this limit. You can edit the recommendation.")
         )
         self.ai_token_edit.editingFinished.connect(self._save_ai_token_settings)
         layout.addWidget(self.ai_token_edit, 1, 1, 1, 2)
 
-        recommend = QPushButton("Consiglia in base alla RAM")
+        recommend = QPushButton(_("Recommend from RAM"))
         recommend.setObjectName("primaryButton")
         recommend.clicked.connect(self._recommend_ai_tokens)
         layout.addWidget(recommend, 2, 0, 1, 3)
         self.ai_token_recommendation = QLabel(
-            "Il valore resta liberamente modificabile. Dopo il calcolo, l’unico massimo "
-            "applicato sarà il contesto fisico dichiarato dal modello."
+            _("The value remains editable. After calculation, the only maximum applied is the "
+              "physical context reported by the model.")
         )
         self.ai_token_recommendation.setObjectName("pageSubtitle")
         self.ai_token_recommendation.setWordWrap(True)
@@ -648,8 +649,8 @@ class MainWindow(QMainWindow):
         start = self.start_date.date().toString("dd/MM/yyyy")
         end = self.end_date.date().toString("dd/MM/yyyy")
         self.ai_interval_label.setText(
-            f"Le domande useranno: {label} · {start}–{end}. "
-            "“Analizza tutta la cronologia” ignora questo filtro temporale."
+            _("Questions use: {period} · {start}–{end}. Analyse complete history ignores this "
+              "time filter.", period=label, start=start, end=end)
         )
 
     def _sync_ai_range_combo(self) -> None:
@@ -690,7 +691,9 @@ class MainWindow(QMainWindow):
                 hardware_profile=str(self.ai_profile_combo.currentData()),
             ).token_recommendation(ram_gb)
         except (ValueError, LocalAIError) as exc:
-            self.ai_token_recommendation.setText(f"Impossibile calcolare il consiglio: {exc}")
+            self.ai_token_recommendation.setText(
+                _("Could not calculate a recommendation: {error}", error=exc)
+            )
             return
 
         self._model_token_limit = recommendation.model_context_limit
@@ -702,22 +705,22 @@ class MainWindow(QMainWindow):
         self.ai_token_edit.setText(str(recommendation.recommended_tokens))
         self._save_ai_token_settings()
         size_text = (
-            f" · modello {recommendation.model_size_gb:.1f} GB"
+            _(" · model {size:.1f} GB", size=recommendation.model_size_gb)
             if recommendation.model_size_gb is not None
             else ""
         )
         limit_text = (
-            f" · limite fisico {recommendation.model_context_limit:,} token".replace(
+            _(" · physical limit {limit:,} tokens", limit=recommendation.model_context_limit).replace(
                 ",", "."
             )
             if recommendation.model_context_limit is not None
-            else " · limite fisico non dichiarato dal modello"
+            else _(" · physical limit not reported by the model")
         )
         self.ai_token_recommendation.setText(
-            f"Consiglio: {recommendation.recommended_tokens:,} token".replace(",", ".")
+            _("Recommendation: {tokens:,} tokens", tokens=recommendation.recommended_tokens)
             + size_text
             + limit_text
-            + ". Puoi sovrascriverlo; input, thinking e risposta condividono il contesto."
+            + _(". You can override it; input, thinking, and the answer share the context.")
         )
 
     def _selected_ai_tokens(self) -> int:
@@ -755,7 +758,7 @@ class MainWindow(QMainWindow):
     def _update_connection_status(self) -> None:
         connected = self.credentials is not None
         self.status_label.setText(
-            "● Account Google configurato" if connected else "○ Account Google non collegato"
+            _("● Google account configured") if connected else _("○ Google account not connected")
         )
         self.status_label.setStyleSheet(
             "color: #188038; font-weight: 700; padding-left: 14px;"
@@ -763,7 +766,7 @@ class MainWindow(QMainWindow):
             else "color: #5F6368; padding-left: 14px;"
         )
         self.sync_action.setEnabled(connected)
-        self.auth_action.setText("Riautentica" if connected else "Accedi con Google")
+        self.auth_action.setText(_("Sign in again") if connected else _("Sign in with Google"))
 
     def show_setup_wizard(self) -> None:
         wizard = SetupWizard(self.credential_store, self)
@@ -781,13 +784,13 @@ class MainWindow(QMainWindow):
         if self.auth_thread and self.auth_thread.isRunning():
             return
         self.auth_action.setEnabled(False)
-        self.status_label.setText("Apertura del browser per l'accesso…")
+        self.status_label.setText(_("Opening the browser for sign-in…"))
         self.auth_thread = AuthThread(self.credential_store, scopes)
         self.auth_thread.succeeded.connect(self._auth_succeeded)
         self.auth_thread.failed.connect(self._auth_failed)
         self.auth_thread.url_ready.connect(
             lambda url: self.statusBar().showMessage(
-                f"Se il browser non si apre, copia questo URL: {url}", 300000
+                _("If the browser does not open, copy this URL: {url}", url=url), 300000
             )
         )
         self.auth_thread.start()
@@ -796,20 +799,20 @@ class MainWindow(QMainWindow):
         self.credentials = credentials
         self.auth_action.setEnabled(True)
         self._update_connection_status()
-        self.statusBar().showMessage("Autenticazione completata.", 8000)
+        self.statusBar().showMessage(_("Authentication completed."), 8000)
         QTimer.singleShot(300, self._start_automatic_sync)
         if not secure:
             QMessageBox.information(
                 self,
-                "Archivio credenziali",
-                "Il portachiavi di sistema non era disponibile. Il token è stato salvato "
-                "in un file locale accessibile soltanto al tuo utente.",
+                _("Credential storage"),
+                _("The system keyring was unavailable. The token was saved in a local file "
+                  "that only your user can access."),
             )
 
     def _auth_failed(self, message: str) -> None:
         self.auth_action.setEnabled(True)
         self._update_connection_status()
-        QMessageBox.critical(self, "Autenticazione non riuscita", message)
+        QMessageBox.critical(self, _("Authentication failed"), message)
 
     @staticmethod
     def _qdate_to_date(value: QDate) -> date:
@@ -834,20 +837,20 @@ class MainWindow(QMainWindow):
         if start > end:
             if not automatic:
                 QMessageBox.warning(
-                    self, "Intervallo non valido", "La data iniziale supera quella finale."
+                    self, _("Invalid date range"), _("The start date is after the end date.")
                 )
             return
         self.sync_action.setEnabled(False)
         self.sync_warnings = []
         if automatic:
             self.progress_dialog = None
-            self.statusBar().showMessage("Aggiornamento automatico incrementale…")
+            self.statusBar().showMessage(_("Incremental automatic update…"))
         else:
             sync_steps = sum(spec.auto_sync for spec in DATA_TYPES) + 1
             self.progress_dialog = QProgressDialog(
-                "Preparazione…", "Annulla", 0, sync_steps, self
+                _("Preparing…"), _("Cancel"), 0, sync_steps, self
             )
-            self.progress_dialog.setWindowTitle("Download Google Health")
+            self.progress_dialog.setWindowTitle(_("Google Health download"))
             self.progress_dialog.setMinimumDuration(0)
             self.progress_dialog.setAutoClose(False)
         self.sync_thread = SyncThread(
@@ -875,14 +878,14 @@ class MainWindow(QMainWindow):
         if self.progress_dialog:
             self.progress_dialog.setMaximum(maximum)
             self.progress_dialog.setValue(value)
-            self.progress_dialog.setLabelText(f"Download: {label}")
+            self.progress_dialog.setLabelText(_("Download: {label}", label=label))
         else:
-            self.statusBar().showMessage(f"Aggiornamento automatico: {label}")
+            self.statusBar().showMessage(_("Automatic update: {label}", label=label))
 
     def _sync_warning(self, label: str, message: str) -> None:
         self.sync_warnings.append((label, message))
         self.statusBar().showMessage(
-            f"{label} ignorato: il download continua con le altre categorie.", 12000
+            _("{label} skipped: the download continues with other categories.", label=label), 12000
         )
 
     def _sync_completed(self, success: int, errors: int, automatic: bool = False) -> None:
@@ -894,21 +897,21 @@ class MainWindow(QMainWindow):
         self.refresh_overview()
         if self.current_type:
             self._reload_current_type()
-        prefix = "Aggiornamento automatico completato" if automatic else "Aggiornamento completato"
-        message = f"{prefix}: {success} categorie elaborate"
+        prefix = _("Automatic update completed") if automatic else _("Update completed")
+        message = _("{prefix}: {count} categories processed", prefix=prefix, count=success)
         if errors:
-            message += f", {errors} ignorate con avviso"
+            message += _(", {count} skipped with warnings", count=errors)
         self.statusBar().showMessage(message, 15000)
         if self.sync_warnings and not automatic:
             details = "\n".join(
                 f"• {label}: {warning}" for label, warning in self.sync_warnings[:8]
             )
             if len(self.sync_warnings) > 8:
-                details += f"\n• …e altre {len(self.sync_warnings) - 8} categorie"
+                details += _("\n• …and {count} more categories", count=len(self.sync_warnings) - 8)
             QMessageBox.warning(
                 self,
-                "Aggiornamento completato con avvisi",
-                "Le categorie seguenti non hanno bloccato il download:\n\n" + details,
+                _("Update completed with warnings"),
+                _("The following categories did not stop the download:\n\n") + details,
             )
 
     def _sync_failed(self, message: str, automatic: bool = False) -> None:
@@ -920,9 +923,11 @@ class MainWindow(QMainWindow):
             self.credentials = None
             self._update_connection_status()
         if automatic:
-            self.statusBar().showMessage(f"Aggiornamento automatico non riuscito: {message}", 15000)
+            self.statusBar().showMessage(
+                _("Automatic update failed: {message}", message=message), 15000
+            )
         else:
-            QMessageBox.critical(self, "Download non riuscito", message)
+            QMessageBox.critical(self, _("Download failed"), message)
 
     def refresh_tree(self) -> None:
         selected = self.current_type
@@ -958,7 +963,7 @@ class MainWindow(QMainWindow):
             parent.addChild(item)
             if spec.key == selected:
                 selected_item = item
-        system_parent = QTreeWidgetItem(["Account e dispositivi", ""])
+        system_parent = QTreeWidgetItem([_("Account and devices"), ""])
         system_parent.setFlags(system_parent.flags() & ~Qt.ItemIsSelectable)
         self.tree.addTopLevelItem(system_parent)
         for key, label in RESOURCE_LABELS.items():
@@ -992,7 +997,7 @@ class MainWindow(QMainWindow):
 
     def load_data_type(self, key: str) -> None:
         self.current_type = key
-        self.export_csv_button.setText("Esporta CSV")
+        self.export_csv_button.setText(_("Export CSV"))
         start, end = self._date_bounds()
         self.current_records = self.store.list_records(
             key, start, end, limit=20000, newest=True
@@ -1009,8 +1014,8 @@ class MainWindow(QMainWindow):
                     item.setData(Qt.UserRole, row)
                 self.table.setItem(row, column, item)
         self.limit_label.setText(
-            "Sono mostrati al massimo 5.000 record in tabella e 20.000 nel grafico; "
-            "l'esportazione include tutti i dati."
+            _("At most 5,000 records are shown in the table and 20,000 in the chart; "
+              "the export includes all data.")
             if len(self.current_records) >= 5000
             else ""
         )
@@ -1024,15 +1029,15 @@ class MainWindow(QMainWindow):
         self.metric_combo.clear()
         self.plot.clear()
         self.chart_title.setText(RESOURCE_LABELS.get(key, key))
-        self.chart_subtitle.setText("Informazione di account conservata localmente.")
+        self.chart_subtitle.setText(_("Account information stored locally."))
         self.table.setRowCount(1 if payload else 0)
         self.limit_label.clear()
-        self.export_csv_button.setText("Esporta JSON")
+        self.export_csv_button.setText(_("Export JSON"))
         self._clear_stats()
         if not payload:
             self.details.setPlainText(
-                "Questa informazione non è ancora disponibile. Esegui il download oppure "
-                "controlla il relativo permesso OAuth."
+                _("This information is not available yet. Run a download or check the related "
+                  "OAuth permission.")
             )
             return
         self.current_records = [
@@ -1196,17 +1201,17 @@ class MainWindow(QMainWindow):
                 for boundary in (minimum, maximum)
             ]
             self.chart_subtitle.setText(
-                f"{profile.subtitle} · ogni area colorata mostra minimo e massimo · "
-                "trascina per scorrere"
+                _("{subtitle} · each coloured area shows minimum and maximum · drag to pan",
+                  subtitle=profile.subtitle)
             )
-            self.stat_values[0].setText(f"{len(thresholds[-1][1])} zone")
-            self.stat_values[1].setText("Soglie individuali")
+            self.stat_values[0].setText(_("{count} zones", count=len(thresholds[-1][1])))
+            self.stat_values[1].setText(_("Individual thresholds"))
             self.stat_values[2].setText(f"{min(boundaries):.0f}–{max(boundaries):.0f} bpm")
-            self.stat_values[3].setText(f"{len(thresholds)} giorni")
+            self.stat_values[3].setText(_("{count} days", count=len(thresholds)))
         else:
             self.chart_subtitle.setText(
-                f"{profile.subtitle} · {summary.count} valori · trascina per scorrere · "
-                "rotella per lo zoom temporale"
+                _("{subtitle} · {count} values · drag to pan · wheel to zoom time",
+                  subtitle=profile.subtitle, count=summary.count)
             )
             self._update_stats(summary, profile.unit)
 
@@ -1238,11 +1243,11 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _category_style(category: str) -> tuple[str, str]:
         styles = {
-            "LIGHT": ("Leggera", "#64B5F6"),
-            "MODERATE": ("Moderata", "#66BB6A"),
-            "VIGOROUS": ("Intensa", "#FFB74D"),
-            "PEAK": ("Picco", "#EF5350"),
-            "FAT_BURN": ("Brucia grassi", "#FBC02D"),
+            "LIGHT": (_("Light"), "#64B5F6"),
+            "MODERATE": (_("Moderate"), "#66BB6A"),
+            "VIGOROUS": (_("Vigorous"), "#FFB74D"),
+            "PEAK": (_("Peak"), "#EF5350"),
+            "FAT_BURN": (_("Fat burn"), "#FBC02D"),
             "CARDIO": ("Cardio", "#FB8C00"),
         }
         return styles.get(category, (category.replace("_", " ").title(), "#90A4AE"))
@@ -1317,12 +1322,12 @@ class MainWindow(QMainWindow):
         self, stages: list[tuple[float, dict[str, float]]], width: float
     ) -> None:
         palette = {
-            "DEEP": ("Profondo", "#3F51B5"),
+            "DEEP": (_("Deep"), "#3F51B5"),
             "REM": ("REM", "#AB47BC"),
-            "LIGHT": ("Leggero", "#7986CB"),
-            "ASLEEP": ("Addormentato", "#5C6BC0"),
-            "AWAKE": ("Sveglio", "#FFB74D"),
-            "RESTLESS": ("Irrequieto", "#FFCA28"),
+            "LIGHT": (_("Light"), "#7986CB"),
+            "ASLEEP": (_("Asleep"), "#5C6BC0"),
+            "AWAKE": (_("Awake"), "#FFB74D"),
+            "RESTLESS": (_("Restless"), "#FFCA28"),
         }
         if self.plot.plotItem.legend is None:
             self.plot.addLegend(offset=(10, 10))
@@ -1360,7 +1365,7 @@ class MainWindow(QMainWindow):
             arrow = "↑" if summary.trend_percent > 0 else ("↓" if summary.trend_percent < 0 else "→")
             trend = f"{arrow} {abs(summary.trend_percent):.1f}%"
         if summary.anomaly_count:
-            trend += f" · {summary.anomaly_count} anomalie"
+            trend += _(" · {count} anomalies", count=summary.anomaly_count)
         self.stat_values[3].setText(trend)
 
     def _clear_stats(self) -> None:
@@ -1402,21 +1407,21 @@ class MainWindow(QMainWindow):
             if isinstance(validator, QIntValidator):
                 validator.setTop(2_147_483_647)
             self.ai_token_recommendation.setText(
-                "Modello cambiato: ricalcola il consiglio in base alla RAM."
+                _("Model changed: recalculate the recommendation from RAM.")
             )
 
     def _update_ai_model_hint(self, model: str) -> None:
         self.ai_model_hint.setText(
             MODEL_DESCRIPTIONS.get(
                 model.strip(),
-                "Modello personalizzato: verifica che il nome sia disponibile in Ollama.",
+                _("Custom model: check that the name is available in Ollama."),
             )
         )
 
     def check_ai_status(self) -> None:
         if self.ai_status_thread and self.ai_status_thread.isRunning():
             return
-        self.ai_status_label.setText("○ Verifica del servizio locale…")
+        self.ai_status_label.setText(_("○ Checking the local service…"))
         self.ai_status_label.setStyleSheet("font-weight: 700; color: #5F6368")
         self.ai_status_thread = AIStatusThread(
             self.ai_model_combo.currentText(), str(self.ai_profile_combo.currentData())
@@ -1441,18 +1446,18 @@ class MainWindow(QMainWindow):
                 self.ai_status_label.setText(
                     ("● " if installed else "◐ ")
                     + status.message
-                    + "\nAggiornamento: "
+                    + _("\nUpdate: ")
                     + status.update_message
                 )
                 target = status.update_target or self.ai_model_combo.currentText()
                 action = (
-                    "Usa modello aggiornato"
+                    _("Use updated model")
                     if target in status.models
-                    else "Scarica aggiornamento"
+                    else _("Download update")
                 )
                 self.model_update_button.setText(f"{action} · {target}")
         else:
-            self.ai_status_label.setText("○ Ollama non è attivo · apri la guida Fedora")
+            self.ai_status_label.setText(_("○ Ollama is not running · open the Fedora guide"))
             self.ai_status_label.setStyleSheet("font-weight: 700; color: #D93025")
             self.pull_button.setEnabled(False)
             self._pending_model_update = None
@@ -1474,7 +1479,7 @@ class MainWindow(QMainWindow):
         self.pull_button.setEnabled(False)
         self.model_update_button.setEnabled(False)
         self.ai_progress.setRange(0, 0)
-        self.ai_progress.setFormat("Avvio download…")
+        self.ai_progress.setFormat(_("Starting download…"))
         self.ai_pull_thread = AIPullThread(self.ai_model_combo.currentText())
         self.ai_pull_thread.progress.connect(self.ai_progress.setFormat)
         self.ai_pull_thread.completed.connect(self._ai_pull_completed)
@@ -1484,17 +1489,17 @@ class MainWindow(QMainWindow):
     def _ai_pull_completed(self) -> None:
         self.ai_progress.setRange(0, 1)
         self.ai_progress.setValue(1)
-        self.ai_progress.setFormat("Modello pronto")
+        self.ai_progress.setFormat(_("Model ready"))
         self.model_update_button.setEnabled(True)
         self.check_ai_status()
 
     def _ai_pull_failed(self, message: str) -> None:
         self.ai_progress.setRange(0, 1)
         self.ai_progress.setValue(0)
-        self.ai_progress.setFormat("Errore")
+        self.ai_progress.setFormat(_("Error"))
         self.pull_button.setEnabled(True)
         self.model_update_button.setEnabled(True)
-        QMessageBox.critical(self, "Download modello", message)
+        QMessageBox.critical(self, _("Model download"), message)
 
     def start_ai_analysis(self, question: str, *, use_all_data: bool = False) -> None:
         if self.ai_analysis_thread and self.ai_analysis_thread.isRunning():
@@ -1520,11 +1525,11 @@ class MainWindow(QMainWindow):
         if not snapshot.get("metrics"):
             QMessageBox.information(
                 self,
-                "Dati insufficienti",
+                _("Insufficient data"),
                 (
-                    "Scarica prima i dati Google Health."
+                    _("Download Google Health data first.")
                     if use_all_data
-                    else "Scarica i dati Google Health o amplia l’intervallo selezionato."
+                    else _("Download Google Health data or widen the selected period.")
                 ),
             )
             return
@@ -1532,8 +1537,8 @@ class MainWindow(QMainWindow):
         self.auto_ai_button.setEnabled(False)
         self._ai_answer_received = False
         self.ai_output.clear()
-        self.ai_output.setPlaceholderText("Il modello sta iniziando a ragionare…")
-        self.ai_result_title.setText("Ragionamento del modello")
+        self.ai_output.setPlaceholderText(_("The model is starting to think…"))
+        self.ai_result_title.setText(_("Model thinking"))
         self.ai_live_badge.setVisible(True)
         self.ai_analysis_thread = AIAnalysisThread(
             self.ai_model_combo.currentText(),
@@ -1563,27 +1568,27 @@ class MainWindow(QMainWindow):
         if not self._ai_answer_received:
             self._ai_answer_received = True
             self.ai_output.clear()
-            self.ai_result_title.setText("Risposta finale")
+            self.ai_result_title.setText(_("Final answer"))
             self.ai_live_badge.setVisible(False)
         self._append_stream_text(self.ai_output, text)
 
     def _ai_analysis_completed(self, answer: str) -> None:
         self.ask_ai_button.setEnabled(True)
         self.auto_ai_button.setEnabled(True)
-        self.ai_result_title.setText("Risposta finale")
+        self.ai_result_title.setText(_("Final answer"))
         self.ai_live_badge.setVisible(False)
         self.ai_output.setMarkdown(answer)
 
     def _ai_analysis_failed(self, message: str) -> None:
         self.ask_ai_button.setEnabled(True)
         self.auto_ai_button.setEnabled(True)
-        self.ai_result_title.setText("Errore nell’analisi")
+        self.ai_result_title.setText(_("Analysis error"))
         self.ai_live_badge.setVisible(False)
         self.ai_output.setPlainText(message)
         QMessageBox.warning(
             self,
-            "Analisi locale non disponibile",
-            f"{message}\n\nVerifica Ollama dalla scheda AI locale.",
+            _("Local analysis unavailable"),
+            _("{message}\n\nCheck Ollama from the Local AI tab.", message=message),
         )
 
     def export_current_csv(self) -> None:
@@ -1594,39 +1599,43 @@ class MainWindow(QMainWindow):
             payload = self.store.resources().get(key)
             if payload is None:
                 return
-            filename, _ = QFileDialog.getSaveFileName(
-                self, "Esporta JSON", f"google-health-{key}.json", "JSON (*.json)"
+            filename, _selected_filter = QFileDialog.getSaveFileName(
+                self, _("Export JSON"), f"google-health-{key}.json", _("JSON (*.json)")
             )
             if filename:
                 Path(filename).write_text(
                     json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
-                self.statusBar().showMessage(f"Risorsa salvata in {filename}", 12000)
+                self.statusBar().showMessage(_("Resource saved to {filename}", filename=filename), 12000)
             return
         default = f"google-health-{self.current_type}.csv"
-        filename, _ = QFileDialog.getSaveFileName(self, "Esporta CSV", default, "CSV (*.csv)")
+        filename, _selected_filter = QFileDialog.getSaveFileName(
+            self, _("Export CSV"), default, _("CSV (*.csv)")
+        )
         if not filename:
             return
         count = self.store.export_csv(self.current_type, Path(filename))
-        self.statusBar().showMessage(f"Esportati {count} record in {filename}", 12000)
+        self.statusBar().showMessage(
+            _("Exported {count} records to {filename}", count=count, filename=filename), 12000
+        )
 
     def export_archive(self) -> None:
         today = QDate.currentDate().toString("yyyy-MM-dd")
         default = f"google-health-export-{today}.zip"
-        filename, _ = QFileDialog.getSaveFileName(
-            self, "Esporta archivio completo", default, "Archivio ZIP (*.zip)"
+        filename, _selected_filter = QFileDialog.getSaveFileName(
+            self, _("Export complete archive"), default, _("ZIP archive (*.zip)")
         )
         if not filename:
             return
         self.store.export_archive(Path(filename))
-        self.statusBar().showMessage(f"Archivio completo salvato in {filename}", 12000)
+        self.statusBar().showMessage(_("Complete archive saved to {filename}", filename=filename), 12000)
 
     def clear_local_data(self) -> None:
         answer = QMessageBox.warning(
             self,
-            "Elimina dati locali",
-            "Saranno eliminati il database locale e il token di accesso. I dati presenti "
-            "nel tuo account Google Health non verranno modificati. Continuare?",
+            _("Delete local data"),
+            _("The local database and access token will be deleted. Data in your Google "
+              "Health account will not be changed. Continue?"),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )

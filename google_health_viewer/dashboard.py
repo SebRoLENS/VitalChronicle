@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from .analysis import format_value
+from .i18n import _
 
 
 def _format_metric_value(data_type: str, value: float | None, unit: str) -> str:
@@ -132,7 +133,7 @@ class MetricCard(QFrame):
         self.title.setObjectName("cardTitle")
         self.value = QLabel("—")
         self.value.setObjectName("cardValue")
-        self.trend = QLabel("Nessun dato nel periodo")
+        self.trend = QLabel(_("No data in this period"))
         self.trend.setObjectName("cardCaption")
         self.trend.setWordWrap(True)
         self.sparkline = SparklineWidget(color)
@@ -142,7 +143,7 @@ class MetricCard(QFrame):
         self.sparkline_caption.setWordWrap(True)
         self.sparkline_caption.setVisible(False)
         progress_header = QHBoxLayout()
-        self.baseline = QLabel("Media 7 gg · —")
+        self.baseline = QLabel(_("7-day average · —"))
         self.baseline.setObjectName("progressBaseline")
         self.ratio = QLabel("—")
         self.ratio.setObjectName("progressRatio")
@@ -172,12 +173,12 @@ class MetricCard(QFrame):
         data_type = metric.get("data_type", "")
         self.value.setText(_format_metric_value(data_type, summary["latest"], unit))
         trend = summary.get("trend_percent")
-        parts = [f"Media {_format_metric_value(data_type, summary['mean'], unit)}"]
+        parts = [_("Average {value}", value=_format_metric_value(data_type, summary['mean'], unit))]
         if trend is not None:
             arrow = "↑" if trend > 0 else ("↓" if trend < 0 else "→")
-            parts.append(f"{arrow} {abs(trend):.1f}% nel periodo")
+            parts.append(_("{arrow} {value:.1f}% over the period", arrow=arrow, value=abs(trend)))
         self.trend.setText(" · ".join(parts))
-        self.baseline.setText("Confronto giornaliero non disponibile")
+        self.baseline.setText(_("Daily comparison unavailable"))
         self.ratio.setText("—")
         self.progress.setVisible(False)
         self.sparkline.setVisible(False)
@@ -199,42 +200,46 @@ class MetricCard(QFrame):
 
         self.value.setText(formatted(current))
         if current is None:
-            self.trend.setText("Nessun dato per questo giorno")
+            self.trend.setText(_("No data for this day"))
         elif baseline is None:
-            self.trend.setText("Servono dati dei giorni precedenti")
+            self.trend.setText(_("Data from previous days is required"))
         elif percentage is None:
             difference = current - baseline
-            direction = "sopra" if difference > 0 else ("sotto" if difference < 0 else "in media")
-            if direction == "in media":
-                self.trend.setText("In linea con la media personale")
+            direction = _("above") if difference > 0 else (_("below") if difference < 0 else _("average"))
+            if difference == 0:
+                self.trend.setText(_("In line with your personal average"))
             else:
                 arrow = "↑" if difference > 0 else "↓"
                 self.trend.setText(
-                    f"{arrow} {formatted(abs(difference))} {direction} la media"
+                    _("{arrow} {value} {direction} average", arrow=arrow,
+                      value=formatted(abs(difference)), direction=direction)
                 )
         elif completion:
             if percentage >= 100:
-                self.trend.setText(f"Media personale superata del {percentage - 100:.0f}%")
+                self.trend.setText(_("Personal average exceeded by {value:.0f}%", value=percentage - 100))
             else:
                 remaining = max(0.0, baseline - current)
-                self.trend.setText(f"Mancano {formatted(remaining)} alla media")
+                self.trend.setText(_("{value} remaining to reach the average", value=formatted(remaining)))
         else:
             difference = current - baseline
-            direction = "sopra" if difference > 0 else ("sotto" if difference < 0 else "in media")
-            if direction == "in media":
-                self.trend.setText("In linea con la media personale")
+            direction = _("above") if difference > 0 else (_("below") if difference < 0 else _("average"))
+            if difference == 0:
+                self.trend.setText(_("In line with your personal average"))
             else:
                 arrow = "↑" if difference > 0 else "↓"
                 self.trend.setText(
-                    f"{arrow} {formatted(abs(difference))} {direction} la media"
+                    _("{arrow} {value} {direction} average", arrow=arrow,
+                      value=formatted(abs(difference)), direction=direction)
                 )
 
         if metric.get("data_type") == "weight" and value_date:
             measured = date.fromisoformat(value_date).strftime("%d/%m/%Y")
-            self.trend.setText(f"Ultima misurazione: {measured} · {self.trend.text()}")
+            self.trend.setText(_("Latest measurement: {date} · {trend}", date=measured,
+                                  trend=self.trend.text()))
         elif metric.get("latest_available") and value_date:
             measured = date.fromisoformat(value_date).strftime("%d/%m/%Y")
-            self.trend.setText(f"Ultimo dato: {measured} · {self.trend.text()}")
+            self.trend.setText(_("Latest value: {date} · {trend}", date=measured,
+                                  trend=self.trend.text()))
 
         is_heart_day = data_type == "daily-resting-heart-rate"
         if is_heart_day:
@@ -272,21 +277,22 @@ class MetricCard(QFrame):
                 maximum = format_value(metric.get("heart_day_max"), unit)
                 days = metric.get("heart_baseline_days", 0)
                 baseline_text = (
-                    f" · media {days} gg {format_value(mean, unit)}"
-                    f" · banda ±1σ ({format_value(std, unit)})"
+                    _(" · {days}-day average {mean} · ±1σ band ({std})", days=days,
+                      mean=format_value(mean, unit), std=format_value(std, unit))
                     if mean is not None and std is not None
                     else ""
                 )
                 smoothing = metric.get("heart_smoothing_minutes", 15)
                 caption = (
-                    f"Solo oggi · curva smussata {smoothing} min · "
-                    f"min–max reali {minimum}–{maximum}{baseline_text}"
+                    _("Today only · {minutes}-minute smoothed curve · actual min–max "
+                      "{minimum}–{maximum}{baseline}", minutes=smoothing, minimum=minimum,
+                      maximum=maximum, baseline=baseline_text)
                 )
             else:
                 self.sparkline.set_series(sparkline, mean, std)
                 caption = (
-                    f"Ultimi 7 giorni · media {format_value(mean, unit)} · "
-                    f"banda ±1σ ({format_value(std, unit)})"
+                    _("Last 7 days · average {mean} · ±1σ band ({std})",
+                      mean=format_value(mean, unit), std=format_value(std, unit))
                 )
             self.sparkline.setVisible(bool(sparkline))
             self.sparkline_caption.setText(caption)
@@ -296,11 +302,10 @@ class MetricCard(QFrame):
             self.sparkline.setVisible(False)
             self.sparkline_caption.setVisible(False)
 
-        days_label = "giorno" if days_used == 1 else "giorni"
         self.baseline.setText(
-            f"Media {days_used} {days_label} · {formatted(baseline)}"
+            _("{days}-day average · {value}", days=days_used, value=formatted(baseline))
             if days_used
-            else "Media 7 giorni · —"
+            else _("7-day average · —")
         )
         self.progress.setVisible(completion)
         if percentage is None:
@@ -309,7 +314,7 @@ class MetricCard(QFrame):
             ratio_style = "background: #F1F3F4; color: #5F6368;"
         elif not completion:
             if abs(delta or 0.0) < 0.05:
-                self.ratio.setText("≈ media")
+                self.ratio.setText(_("≈ average"))
             else:
                 arrow = "↑" if (delta or 0.0) > 0 else "↓"
                 self.ratio.setText(f"{arrow} {abs(delta or 0.0):.1f}%")
@@ -359,14 +364,14 @@ class OverviewPage(QWidget):
         hero_layout = QVBoxLayout(hero)
         hero_layout.setContentsMargins(22, 18, 22, 18)
         heading = QHBoxLayout()
-        title = QLabel("La tua salute, in sintesi")
+        title = QLabel(_("Your health at a glance"))
         title.setObjectName("pageTitle")
-        pill = QLabel("MEDIA MOBILE · 7 GIORNI")
+        pill = QLabel(_("MOVING AVERAGE · 7 DAYS"))
         pill.setObjectName("overviewPill")
         heading.addWidget(title, 1)
         heading.addWidget(pill)
         self.subtitle = QLabel(
-            "Il valore di oggi viene confrontato con i sette giorni precedenti."
+            _("Today's value is compared with the previous seven days.")
         )
         self.subtitle.setObjectName("pageSubtitle")
         self.subtitle.setWordWrap(True)
@@ -382,7 +387,7 @@ class OverviewPage(QWidget):
         self.grid.setVerticalSpacing(14)
         self.cards: dict[str, MetricCard] = {}
         for index, (key, color) in enumerate(CARD_COLORS.items()):
-            card = MetricCard("In attesa di dati", color)
+            card = MetricCard(_("Waiting for data"), color)
             self.cards[key] = card
             self.grid.addWidget(card, index // 3, index % 3)
         for column in range(3):
@@ -395,7 +400,7 @@ class OverviewPage(QWidget):
         root.addWidget(scroll, 1)
 
         note = QLabel(
-            "Le fasce personali e le anomalie sono calcoli statistici, non valutazioni mediche."
+            _("Personal ranges and anomalies are statistical calculations, not medical assessments.")
         )
         note.setObjectName("disclaimer")
         note.setAlignment(Qt.AlignCenter)
@@ -412,13 +417,13 @@ class OverviewPage(QWidget):
             reference_day = date.fromisoformat(reference_text)
             today = datetime.now().astimezone().date()
             prefix = (
-                "Oggi"
+                _("Today")
                 if reference_day == today
-                else reference_day.strftime("Il %d/%m/%Y")
+                else _("On {date}", date=reference_day.strftime("%d/%m/%Y"))
             )
             self.subtitle.setText(
-                f"{prefix} rispetto alla media mobile dei sette giorni precedenti. "
-                "Le percentuali degli indicatori fisiologici sono confronti neutri."
+                _("{prefix} compared with the moving average of the previous seven days. "
+                  "Percentages for physiological indicators are neutral comparisons.", prefix=prefix)
             )
         for key, card in self.cards.items():
             metric = by_type.get(key)
@@ -432,8 +437,8 @@ class OverviewPage(QWidget):
             else:
                 card.title.setText(_fallback_label(key))
                 card.value.setText("—")
-                card.trend.setText("Nessun dato nel periodo")
-                card.baseline.setText("Media 7 giorni · —")
+                card.trend.setText(_("No data in this period"))
+                card.baseline.setText(_("7-day average · —"))
                 card.ratio.setText("—")
                 card.progress.setValue(0)
                 card.progress.setVisible(False)
@@ -443,14 +448,14 @@ class OverviewPage(QWidget):
 
 def _fallback_label(key: str) -> str:
     labels = {
-        "steps": "Passi",
-        "daily-resting-heart-rate": "Frequenza a riposo",
-        "sleep": "Sonno",
-        "daily-heart-rate-variability": "HRV giornaliera",
-        "daily-oxygen-saturation": "Saturazione di ossigeno",
-        "daily-respiratory-rate": "Frequenza respiratoria",
-        "daily-sleep-temperature-derivations": "Temperatura nel sonno",
-        "weight": "Peso",
-        "active-zone-minutes": "Minuti in zona attiva",
+        "steps": _("Steps"),
+        "daily-resting-heart-rate": _("Resting heart rate"),
+        "sleep": _("Sleep"),
+        "daily-heart-rate-variability": _("Daily HRV"),
+        "daily-oxygen-saturation": _("Oxygen saturation"),
+        "daily-respiratory-rate": _("Respiratory rate"),
+        "daily-sleep-temperature-derivations": _("Sleep temperature"),
+        "weight": _("Weight"),
+        "active-zone-minutes": _("Active zone minutes"),
     }
     return labels.get(key, key)

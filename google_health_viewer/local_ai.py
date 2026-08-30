@@ -10,12 +10,14 @@ from urllib.parse import quote
 
 import requests
 
+from .i18n import _
+
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 OLLAMA_REGISTRY_URL = "https://registry.ollama.ai"
 DEFAULT_MODEL = "qwen3.5:9b"
 HARDWARE_PROFILE_LABELS = {
     "gpu16": "NVIDIA GPU · 16 GB RAM",
-    "cpu32": "Solo CPU · 32 GB RAM",
+    "cpu32": _("CPU only · 32 GB RAM"),
 }
 MODEL_OPTIONS = (
     "qwen3.5:9b",
@@ -27,13 +29,13 @@ MODEL_OPTIONS = (
     "qwen3:4b",
 )
 MODEL_DESCRIPTIONS = {
-    "qwen3.5:9b": "Attuale ed efficiente · circa 6,6 GB · consigliato per RTX 4060/16 GB",
-    "qwen3:14b": "Più grande · circa 9,3 GB · può usare insieme GPU e RAM",
-    "qwen3:30b-a3b": "Alta qualità MoE · circa 19 GB · consigliato per CPU/32 GB",
-    "qwen3.5:27b": "Dense 27B · circa 17 GB · accurato ma molto lento su CPU",
-    "qwen3.6:35b-a3b": "Massimo MoE · circa 23 GB · sperimentale su 32 GB",
-    "qwen3:8b": "Compatto · circa 5,2 GB · compatibilità",
-    "qwen3:4b": "Leggero · circa 2,5 GB · compatibilità",
+    "qwen3.5:9b": _("Current and efficient · about 6.6 GB · recommended for RTX 4060/16 GB"),
+    "qwen3:14b": _("Larger · about 9.3 GB · can use GPU and RAM together"),
+    "qwen3:30b-a3b": _("High-quality MoE · about 19 GB · recommended for CPU/32 GB"),
+    "qwen3.5:27b": _("Dense 27B · about 17 GB · accurate but very slow on CPU"),
+    "qwen3.6:35b-a3b": _("Maximum MoE · about 23 GB · experimental on 32 GB"),
+    "qwen3:8b": _("Compact · about 5.2 GB · compatibility"),
+    "qwen3:4b": _("Lightweight · about 2.5 GB · compatibility"),
 }
 
 
@@ -82,24 +84,22 @@ class TokenRecommendation:
     ram_gb: int
 
 
-SYSTEM_PROMPT = """Sei il modulo locale di analisi di VitalChronicle.
-Rispondi in italiano chiaro e conciso usando esclusivamente il riepilogo statistico fornito.
-Separa osservazioni, possibili associazioni e limiti. Non inventare valori mancanti.
-Le correlazioni non dimostrano causalità. Non formulare diagnosi, non modificare terapie e non
-presentare soglie generiche come verità individuali. Quando un cambiamento potrebbe essere
-clinicamente importante, suggerisci di discuterne con un professionista indicando quali dati
-mostrare. Ricorda che i dati dei wearable possono contenere errori.
-Rispetta sempre observation_context e temporal_context. I valori today_so_far appartengono a
-una giornata ancora incompleta: non definirli sopra o sotto la media confrontandoli con giornate
-intere. Se same_time_mean è disponibile, usa soltanto quel confronto e indica quanti giorni lo
-compongono; altrimenti dichiara che è troppo presto per giudicare. Non considerare un dato
-odierno assente come zero e non estrapolare linearmente un totale di metà giornata.
-Quando analysis_scope è all_local_history, esamina tutte le voci di metrics e data_coverage,
-inclusi additional_fields e structured_details. Non limitarti ai dati della Panoramica:
-tratta esplicitamente sonno e fasi del sonno, allenamenti, attività, parametri vitali,
-nutrizione/idratazione e dati cardiaci quando sono presenti. Se una categoria non è presente,
-non inventarla.
-"""
+SYSTEM_PROMPT = _("""You are VitalChronicle's local analysis module.
+Respond clearly and concisely in English, using only the supplied statistical summary.
+Separate observations, possible associations, and limitations. Never invent missing values.
+Correlations do not prove causation. Do not diagnose, change treatments, or present generic
+thresholds as individual truths. When a change might be clinically important, suggest discussing
+it with a professional and state which data to show. Wearable data may contain errors.
+Always respect observation_context and temporal_context. Values in today_so_far belong to an
+incomplete day: do not call them above or below average by comparing them with complete days.
+When same_time_mean is available, use only that comparison and state how many days it includes;
+otherwise say that it is too early to judge. Do not treat a missing value today as zero and do not
+linearly extrapolate a partial-day total.
+When analysis_scope is all_local_history, examine every entry in metrics and data_coverage,
+including additional_fields and structured_details. Do not limit the analysis to the Overview:
+explicitly cover sleep and sleep stages, workouts, activity, vital signs, nutrition/hydration,
+and cardiac data when present. Do not invent a category that is absent.
+""")
 
 
 class OllamaClient:
@@ -142,7 +142,7 @@ class OllamaClient:
     def token_recommendation(self, ram_gb: int) -> TokenRecommendation:
         """Estimate a useful generation budget and respect model-declared context."""
         if ram_gb <= 0:
-            raise LocalAIError("Inserisci una quantità di RAM positiva.")
+            raise LocalAIError(_("Enter a positive amount of RAM."))
         try:
             show_response = requests.post(
                 f"{self.base_url}/api/show",
@@ -178,9 +178,9 @@ class OllamaClient:
                 else None
             )
         except requests.RequestException as exc:
-            raise LocalAIError(f"Impossibile leggere i limiti del modello: {exc}") from exc
+            raise LocalAIError(_("Could not read model limits: {error}", error=exc)) from exc
         except (TypeError, ValueError) as exc:
-            raise LocalAIError("Ollama ha restituito metadati del modello non validi.") from exc
+            raise LocalAIError(_("Ollama returned invalid model metadata.")) from exc
 
         # Reserve memory for the OS and, on CPU, for the model weights. With the
         # GPU profile only a fraction is charged to system RAM because weights
@@ -218,17 +218,17 @@ class OllamaClient:
                 str(item.get("name")) for item in model_items if item.get("name")
             )
         except requests.RequestException as exc:
-            return OllamaStatus(False, (), f"Ollama non raggiungibile: {exc}")
+            return OllamaStatus(False, (), _("Ollama is unreachable: {error}", error=exc))
         except (TypeError, ValueError) as exc:
-            return OllamaStatus(False, (), f"Risposta Ollama non valida: {exc}")
+            return OllamaStatus(False, (), _("Invalid Ollama response: {error}", error=exc))
 
         installed_item = next(
             (item for item in model_items if str(item.get("name")) == self.model), None
         )
         message = (
-            f"Ollama pronto · {self.model}"
+            _("Ollama ready · {model}", model=self.model)
             if installed_item
-            else f"Ollama è attivo, ma il modello {self.model} non è ancora installato."
+            else _("Ollama is running, but model {model} is not installed yet.", model=self.model)
         )
         update_messages: list[str] = []
         update_target: str | None = None
@@ -240,14 +240,15 @@ class OllamaClient:
             except (requests.RequestException, TypeError, ValueError):
                 remote_digest = ""
             if local_digest and remote_digest and local_digest != remote_digest:
-                update_messages.append(f"nuovi pesi disponibili per {self.model}")
+                update_messages.append(_("new weights available for {model}", model=self.model))
                 update_target = self.model
 
         successor = newer_model_suggestion(self.model, self.hardware_profile)
         if successor:
-            qualifier = "già installata" if successor in models else "disponibile"
+            qualifier = _("already installed") if successor in models else _("available")
             update_messages.append(
-                f"generazione più recente adatta al profilo {qualifier}: {successor}"
+                _("newer generation suitable for this profile, {qualifier}: {model}",
+                  qualifier=qualifier, model=successor)
             )
             update_target = successor
 
@@ -273,7 +274,7 @@ class OllamaClient:
                     if not line:
                         continue
                     payload = json.loads(line)
-                    status = str(payload.get("status", "Download in corso"))
+                    status = str(payload.get("status", _("Downloading")))
                     total = payload.get("total")
                     completed = payload.get("completed")
                     if total and completed:
@@ -281,7 +282,7 @@ class OllamaClient:
                     if progress:
                         progress(status)
         except (requests.RequestException, ValueError) as exc:
-            raise LocalAIError(f"Download del modello non riuscito: {exc}") from exc
+            raise LocalAIError(_("Model download failed: {error}", error=exc)) from exc
 
     def _chat_stream(
         self,
@@ -316,7 +317,7 @@ class OllamaClient:
                 except (TypeError, ValueError):
                     error = None
                 detail = str(error or response.reason or f"HTTP {response.status_code}")
-                raise LocalAIError(f"Analisi locale non riuscita: {detail}")
+                raise LocalAIError(_("Local analysis failed: {detail}", detail=detail))
             response.raise_for_status()
             answer_parts: list[str] = []
             for line in response.iter_lines(decode_unicode=True):
@@ -325,7 +326,7 @@ class OllamaClient:
                 payload = json.loads(line)
                 if payload.get("error"):
                     raise LocalAIError(
-                        f"Analisi locale non riuscita: {payload['error']}"
+                        _("Local analysis failed: {detail}", detail=payload["error"])
                     )
                 message = payload.get("message") or {}
                 thinking = message.get("thinking")
@@ -348,11 +349,11 @@ class OllamaClient:
         model_context_limit: int | None = None,
     ) -> str:
         if not snapshot.get("metrics"):
-            raise LocalAIError("Non ci sono abbastanza dati locali nel periodo selezionato.")
+            raise LocalAIError(_("There is not enough local data in the selected period."))
         request_text = question.strip() or (
-            "Analizza tutti i dati disponibili: evidenzia tendenze, cambiamenti rispetto "
-            "alla baseline personale, anomalie statistiche e correlazioni che meritano "
-            "attenzione. Includi anche fasi del sonno, allenamenti e campi secondari."
+            _("Analyse all available data: highlight trends, changes from the personal baseline, "
+              "statistical anomalies, and correlations worth noting. Include sleep stages, "
+              "workouts, and secondary fields.")
         )
         context = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
         max_tokens = max(1, int(max_tokens))
@@ -366,8 +367,8 @@ class OllamaClient:
             {
                 "role": "user",
                 "content": (
-                    f"Riepilogo statistico locale:\n{context}\n\n"
-                    f"Richiesta dell'utente: {request_text}"
+                    _("Local statistical summary:\n{context}\n\nUser request: {request}",
+                      context=context, request=request_text)
                 ),
             },
         ]
@@ -383,15 +384,14 @@ class OllamaClient:
             if not answer:
                 if thinking_callback:
                     thinking_callback(
-                        "\n\nThinking completato. Preparo la risposta finale…\n"
+                        _("\n\nThinking complete. Preparing the final answer…\n")
                     )
                 fallback_messages = [
                     *messages,
                     {
                         "role": "user",
                         "content": (
-                            "Fornisci adesso la risposta finale in italiano, senza altro "
-                            "ragionamento interno."
+                            _("Now provide the final answer in English, without further internal reasoning.")
                         ),
                     },
                 ]
@@ -405,15 +405,15 @@ class OllamaClient:
                 )
             if not answer:
                 raise LocalAIError(
-                    "Ollama non ha prodotto una risposta finale neppure al secondo tentativo."
+                    _("Ollama did not produce a final answer after the second attempt.")
                 )
             return answer
         except LocalAIError:
             raise
         except requests.RequestException as exc:
-            raise LocalAIError(f"Analisi locale non riuscita: {exc}") from exc
+            raise LocalAIError(_("Local analysis failed: {error}", error=exc)) from exc
         except (TypeError, ValueError, KeyError) as exc:
-            raise LocalAIError(f"Risposta del modello locale non valida: {exc}") from exc
+            raise LocalAIError(_("Invalid local model response: {error}", error=exc)) from exc
 
     def analyze(
         self,

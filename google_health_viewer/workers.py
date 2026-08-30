@@ -7,6 +7,7 @@ from PySide6.QtCore import QThread, Signal
 
 from .api import ApiError, GoogleHealthClient
 from .constants import DATA_TYPES
+from .i18n import _
 from .local_ai import LocalAIError, OllamaClient
 from .oauth import CredentialStore, OAuthError, authenticate
 from .storage import HealthStore
@@ -74,7 +75,7 @@ class SyncThread(QThread):
         today = datetime.now().astimezone().date()
         try:
             if self.include_resources:
-                self.progress.emit(0, len(sync_types) + 1, "Profilo, impostazioni e dispositivi")
+                self.progress.emit(0, len(sync_types) + 1, _("Profile, settings, and devices"))
                 for key, payload in client.get_resources(self._is_cancelled).items():
                     self.store.save_resource(key, payload)
             for spec in DATA_TYPES:
@@ -82,7 +83,7 @@ class SyncThread(QThread):
                     self.store.set_sync_status(
                         spec.key,
                         "skipped",
-                        "Catalogo di riferimento non scaricato automaticamente.",
+                        _("Reference catalogue not downloaded automatically."),
                     )
             for index, spec in enumerate(sync_types, start=1):
                 if self._cancel:
@@ -139,12 +140,13 @@ class SyncThread(QThread):
                         self.store.set_app_marker(repair_key)
                     message = (
                         (
-                            f"{count} record ricevuti · recupero compatibilità completato"
+                            _("{count} records received · compatibility recovery completed", count=count)
                             if needs_filter_repair
-                            else f"{count} record ricevuti in {len(ranges)} intervalli mancanti"
+                            else _("{count} records received in {ranges} missing ranges",
+                                   count=count, ranges=len(ranges))
                         )
                         if ranges
-                        else "Già aggiornato: nessun intervallo storico mancante"
+                        else _("Already up to date: no historical ranges are missing")
                     )
                     self.store.set_sync_status(spec.key, "ok", message)
                     success += 1
@@ -157,7 +159,7 @@ class SyncThread(QThread):
                     self.warning.emit(spec.label, str(exc))
                     errors += 1
                 except Exception as exc:  # noqa: BLE001 - a category must not stop the rest.
-                    message = f"Errore inatteso: {exc}"
+                    message = _("Unexpected error: {error}", error=exc)
                     self.store.set_sync_status(spec.key, "error", message)
                     self.warning.emit(spec.label, message)
                     errors += 1

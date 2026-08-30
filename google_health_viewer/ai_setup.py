@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from .external_links import open_external_url
+from .i18n import _
 from .local_ai import DEFAULT_MODEL, recommended_model
 
 OLLAMA_LINUX_URL = "https://docs.ollama.com/linux"
@@ -22,30 +23,30 @@ class AISetupDialog(QDialog):
         self, model: str = DEFAULT_MODEL, profile: str = "gpu16", parent=None
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Configura l’AI locale")
+        self.setWindowTitle(_("Set up local AI"))
         self.setMinimumSize(680, 520)
         model = model.strip() or recommended_model(profile)
         cpu_only = profile == "cpu32"
 
         root = QVBoxLayout(self)
         title = QLabel(
-            "AI locale per 32 GB di RAM e solo CPU"
+            _("Local AI for 32 GB RAM and CPU only")
             if cpu_only
-            else "AI locale per 16 GB di RAM e NVIDIA RTX 4060"
+            else _("Local AI for 16 GB RAM and NVIDIA RTX 4060")
         )
         title.setObjectName("pageTitle")
         intro = QLabel(
             (
-                "Il profilo consigliato usa Qwen3 30B-A3B quantizzato (circa 19 GB): è un "
-                "modello MoE grande, ma attiva solo una parte dei parametri per ogni token. "
-                "Qwen3.5 27B privilegia la qualità dense; Qwen3.6 35B-A3B usa circa 23 GB e "
-                "può portare allo swap, quindi è indicato come opzione massima."
+                _("The recommended profile uses quantised Qwen3 30B-A3B (about 19 GB). It is "
+                  "a large MoE model, but activates only some parameters for each token. "
+                  "Qwen3.5 27B prioritises dense-model quality; Qwen3.6 35B-A3B uses about "
+                  "23 GB and may cause swapping, so it is shown as the maximum option.")
             )
             if cpu_only
             else (
-                "Il profilo consigliato usa Qwen3.5 9B quantizzato. Qwen3 14B è disponibile "
-                "per privilegiare la dimensione, ma sulla RTX 4060 può usare anche la RAM di "
-                "sistema. Ollama accelera automaticamente sulla GPU quando il driver funziona."
+                _("The recommended profile uses quantised Qwen3.5 9B. Qwen3 14B is available "
+                  "when model size is preferred, but may also use system RAM with an RTX 4060. "
+                  "Ollama automatically uses GPU acceleration when the driver is working.")
             )
         )
         intro.setWordWrap(True)
@@ -54,15 +55,15 @@ class AISetupDialog(QDialog):
 
         steps = QLabel(
             (
-                "1. Installa e avvia Ollama su Fedora.\n"
-                "2. Torna al programma e premi “Scarica modello”.\n"
-                "3. L'analisi userà la CPU: durante la generazione è normale un carico elevato."
+                _("1. Install and start Ollama on Fedora.\n"
+                  "2. Return to VitalChronicle and select Download model.\n"
+                  "3. Analysis will use the CPU; high load during generation is normal.")
             )
             if cpu_only
             else (
-                "1. Verifica che il driver NVIDIA funzioni.\n"
-                "2. Installa e avvia Ollama su Fedora.\n"
-                "3. Torna al programma e premi “Scarica modello”."
+                _("1. Check that the NVIDIA driver works.\n"
+                  "2. Install and start Ollama on Fedora.\n"
+                  "3. Return to VitalChronicle and select Download model.")
             )
         )
         steps.setWordWrap(True)
@@ -83,22 +84,22 @@ class AISetupDialog(QDialog):
         commands.setPlainText("\n".join(command_lines))
         root.addWidget(commands)
 
-        copy = QPushButton("Copia comandi")
+        copy = QPushButton(_("Copy commands"))
         copy.clicked.connect(lambda: QGuiApplication.clipboard().setText(commands.toPlainText()))
-        docs = QPushButton("Guida ufficiale Ollama per Linux")
+        docs = QPushButton(_("Official Ollama guide for Linux"))
         docs.clicked.connect(lambda: open_external_url(OLLAMA_LINUX_URL))
         root.addWidget(copy)
         root.addWidget(docs)
         if not cpu_only:
-            gpu = QPushButton("Compatibilità GPU NVIDIA")
+            gpu = QPushButton(_("NVIDIA GPU compatibility"))
             gpu.clicked.connect(lambda: open_external_url(OLLAMA_GPU_URL))
             root.addWidget(gpu)
         root.addStretch()
 
         warning = QLabel(
-            "L’AI spiega risultati statistici e non sostituisce un medico. Il programma non "
-            "invia i dati a servizi AI online. Il controllo aggiornamenti consulta soltanto i "
-            "metadati pubblici del modello selezionato."
+            _("AI explains statistical results and does not replace a doctor. VitalChronicle "
+              "does not send data to online AI services. Update checks only retrieve public "
+              "metadata for the selected model.")
         )
         warning.setObjectName("disclaimer")
         warning.setWordWrap(True)

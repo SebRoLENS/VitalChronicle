@@ -13,10 +13,10 @@ from google_health_viewer.local_ai import (
 
 def test_local_ai_profile_is_current_and_medically_guarded():
     assert DEFAULT_MODEL == "qwen3.5:9b"
-    assert "Non formulare diagnosi" in SYSTEM_PROMPT
-    assert "correlazioni" in SYSTEM_PROMPT.lower()
+    assert "Do not diagnose" in SYSTEM_PROMPT
+    assert "correlations" in SYSTEM_PROMPT.lower()
     assert "same_time_mean" in SYSTEM_PROMPT
-    assert "giornata ancora incompleta" in SYSTEM_PROMPT
+    assert "incomplete day" in SYSTEM_PROMPT
 
 
 def test_hardware_profiles_offer_larger_models():
@@ -95,7 +95,7 @@ def test_status_detects_new_weights_for_installed_model(monkeypatch):
     assert status.online
     assert status.update_available
     assert status.update_target == "qwen3.5:9b"
-    assert "nuovi pesi" in status.update_message
+    assert "new weights" in status.update_message
 
 
 def test_analysis_streams_thinking_and_final_answer(monkeypatch):
@@ -238,7 +238,7 @@ def test_analysis_retries_without_thinking_when_first_answer_is_empty(monkeypatc
     assert calls[1]["json"]["think"] is False
     assert calls[0]["json"]["options"]["num_predict"] == 4096
     assert calls[1]["json"]["options"]["num_predict"] == 4096
-    assert "Preparo la risposta finale" in "".join(thinking)
+    assert "Preparing the final answer" in "".join(thinking)
     assert answer_chunks == ["Ecco la risposta recuperata."]
 
 

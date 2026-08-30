@@ -2,6 +2,18 @@
 
 All notable changes to VitalChronicle are documented here.
 
+## 1.0.2 — 2026-08-30
+
+- translated the complete application source interface to English while retaining a
+  complete Italian catalogue;
+- added automatic system-language detection with English fallback and an optional
+  `VITALCHRONICLE_LANGUAGE` override;
+- made local-AI instructions and answers follow the selected interface language;
+- added Weblate-ready JSON catalogues, placeholder validation, packaging checks, and
+  automatic inclusion of community translations in releases;
+- regenerated all documentation screenshots from the English interface;
+- corrected respiratory-rate units when the source field contains `perMinute`.
+
 ## 1.0.1 — 2026-08-30
 
 - replaced Python's browser launcher with a frozen-app-safe, cross-platform external

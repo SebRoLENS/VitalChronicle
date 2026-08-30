@@ -11,6 +11,7 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 
 from .constants import API_BASE, DataTypeSpec
+from .i18n import _
 
 
 class ApiError(RuntimeError):
@@ -28,11 +29,11 @@ class GoogleHealthClient:
     def _ensure_token(self) -> None:
         if not self.credentials.valid or self.credentials.expired:
             if not self.credentials.refresh_token:
-                raise ApiError(401, "L'accesso Google è scaduto: autenticati nuovamente.")
+                raise ApiError(401, _("Google access has expired: sign in again."))
             try:
                 self.credentials.refresh(GoogleAuthRequest())
             except Exception as exc:
-                raise ApiError(401, f"Impossibile rinnovare l'accesso Google: {exc}") from exc
+                raise ApiError(401, _("Could not renew Google access: {error}", error=exc)) from exc
 
     def _request(
         self,
@@ -49,7 +50,7 @@ class GoogleHealthClient:
         url = f"{API_BASE}/{path.lstrip('/')}"
         for attempt in range(max_attempts):
             if cancel and cancel():
-                raise ApiError(499, "Operazione annullata.")
+                raise ApiError(499, _("Operation cancelled."))
             try:
                 response = self.session.request(
                     method,
@@ -64,7 +65,7 @@ class GoogleHealthClient:
                 )
             except requests.RequestException as exc:
                 if attempt == max_attempts - 1:
-                    raise ApiError(0, f"Errore di rete: {exc}") from exc
+                    raise ApiError(0, _("Network error: {error}", error=exc)) from exc
                 time.sleep(2**attempt)
                 continue
             if (
@@ -89,8 +90,8 @@ class GoogleHealthClient:
             try:
                 return response.json()
             except ValueError as exc:
-                raise ApiError(502, "La Google Health API ha restituito JSON non valido.") from exc
-        raise ApiError(0, "Richiesta non completata.")
+                raise ApiError(502, _("The Google Health API returned invalid JSON.")) from exc
+        raise ApiError(0, _("Request not completed."))
 
     @staticmethod
     def _date_filter(spec: DataTypeSpec, start: date, end: date) -> str | None:
@@ -121,7 +122,7 @@ class GoogleHealthClient:
         while True:
             pages += 1
             if pages > 1000:
-                raise ApiError(508, f"Troppe pagine ricevute per {spec.label}; download interrotto.")
+                raise ApiError(508, _("Too many pages received for {label}; download stopped.", label=spec.label))
             params: dict[str, Any] = {
                 "pageSize": 25 if spec.key in {"exercise", "sleep"} else 10000
             }
@@ -143,8 +144,8 @@ class GoogleHealthClient:
             if page_token in seen_tokens:
                 raise ApiError(
                     508,
-                    f"La Google Health API ha ripetuto una pagina per {spec.label}; "
-                    "categoria ignorata.",
+                    _("The Google Health API repeated a page for {label}; category skipped.",
+                      label=spec.label),
                 )
             seen_tokens.add(page_token)
 
@@ -193,7 +194,7 @@ class GoogleHealthClient:
                 if not page_token:
                     break
                 if page_token in seen_tokens:
-                    raise ApiError(508, f"Pagina roll-up ripetuta per {spec.label}.")
+                    raise ApiError(508, _("Repeated roll-up page for {label}.", label=spec.label))
                 seen_tokens.add(page_token)
             cursor = chunk_end
 
