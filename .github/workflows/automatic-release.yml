@@ -11,8 +11,6 @@ on:
       - 'pyproject.toml'
       - 'run.py'
       - '.release-trigger'
-      - '.github/workflows/automatic-release.yml'
-      - '.github/workflows/build-desktop.yml'
 
 permissions:
   contents: write
