@@ -102,7 +102,9 @@ value remains editable and is limited only by the physical context reported by O
 - seven-day personal baselines and transparent statistical bands;
 - local Qwen analysis through Ollama, with NVIDIA 16 GB and CPU-only 32 GB profiles;
 - model-update notifications and model-context-aware token recommendations;
-- no cloud AI service and no transmission of health data to the developer.
+- automatic in-app checks for new VitalChronicle releases, with a manual
+  **Help → Check for updates** command and a direct link to the download page;
+- no cloud AI service and no transmission of health data to the developer;
 - robust system-language detection, a persistent **Settings → Language** selector, English
   fallback, and community catalogues managed through Weblate.
 

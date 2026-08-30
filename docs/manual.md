@@ -39,6 +39,13 @@ and screenshot automation can temporarily override both automatic detection and 
 VITALCHRONICLE_LANGUAGE=it vitalchronicle
 ```
 
+VitalChronicle checks for a new public release shortly after startup without blocking the
+interface. The network check runs at most once per day; health data are never included in the
+request. To check immediately, choose **Help → Check for updates**. When a newer release is
+available, the dialog distinguishes maintenance, feature, and major updates and can open the
+official GitHub release page in the system browser. If postponed, the same release is not shown
+again for ten days.
+
 Additional languages are maintained by the community on
 [Weblate](https://hosted.weblate.org/projects/vitalchronicle/application/) and are included in releases after
 automatic catalogue validation.
