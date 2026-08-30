@@ -36,7 +36,7 @@ VITALCHRONICLE_LANGUAGE=it vitalchronicle
 ```
 
 Additional languages are maintained by the community on
-[Weblate](https://hosted.weblate.org/projects/vitalchronicle/) and are included in releases after
+[Weblate](https://hosted.weblate.org/projects/vitalchronicle/application/) and are included in releases after
 automatic catalogue validation.
 
 # 1. What VitalChronicle does
