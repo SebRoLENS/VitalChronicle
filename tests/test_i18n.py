@@ -13,6 +13,26 @@ def test_supported_locale_and_english_fallback(monkeypatch):
     assert i18n.system_language() == "en"
 
 
+def test_system_language_uses_fedora_environment_candidates(monkeypatch):
+    monkeypatch.delenv("VITALCHRONICLE_LANGUAGE", raising=False)
+    monkeypatch.setenv("LANGUAGE", "it_IT:en_US")
+    monkeypatch.setenv("LC_ALL", "C")
+    assert i18n.system_language() == "it"
+
+
+def test_manual_preference_and_system_fallback(monkeypatch):
+    monkeypatch.delenv("VITALCHRONICLE_LANGUAGE", raising=False)
+    monkeypatch.setattr(i18n, "_system_language_candidates", lambda: ("it", "en"))
+    assert i18n.startup_language("en") == "en"
+    assert i18n.startup_language("system") == "it"
+    assert i18n.startup_language("zz") == "it"
+
+
+def test_environment_override_wins_over_saved_preference(monkeypatch):
+    monkeypatch.setenv("VITALCHRONICLE_LANGUAGE", "it_IT.UTF-8")
+    assert i18n.startup_language("en") == "it"
+
+
 def test_empty_community_catalogue_is_not_advertised(monkeypatch, tmp_path):
     (tmp_path / "en.json").write_text('{"Hello": "Hello"}', encoding="utf-8")
     (tmp_path / "de.json").write_text("{}", encoding="utf-8")
