@@ -37,6 +37,25 @@ def main() -> int:
     assert "VitalChronicle is and will remain" in readme
     assert "http://localhost:8765/" in readme
 
+    public_identity_files = (
+        "pyproject.toml",
+        "CITATION.cff",
+        "README.md",
+        "docs/manual.md",
+        "SECURITY.md",
+        "google_health_viewer/main_window.py",
+    )
+    public_identity = "\n".join(
+        (ROOT / relative).read_text(encoding="utf-8")
+        for relative in public_identity_files
+    )
+    assert "sebastiano.romi@gmail.com" in public_identity
+    public_emails = set(
+        re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", public_identity)
+    )
+    assert public_emails == {"sebastiano.romi@gmail.com"}
+    assert "affiliation:" not in (ROOT / "CITATION.cff").read_text(encoding="utf-8")
+
     required_files = (
         ".github/workflows/ci.yml",
         ".github/workflows/automatic-release.yml",

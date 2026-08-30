@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import webbrowser
 from datetime import date, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
@@ -66,6 +65,7 @@ from .branding import (
 )
 from .constants import DATA_TYPE_BY_KEY, DATA_TYPES, SCOPE_GROUPS
 from .dashboard import OverviewPage
+from .external_links import open_external_url
 from .local_ai import (
     HARDWARE_PROFILE_LABELS,
     MODEL_DESCRIPTIONS,
@@ -177,15 +177,18 @@ class MainWindow(QMainWindow):
         export_action = QAction("Esporta archivio", self)
         export_action.triggered.connect(self.export_archive)
         docs_action = QAction("Documentazione API", self)
-        docs_action.triggered.connect(lambda: webbrowser.open(DOCS_URL))
+        docs_action.triggered.connect(lambda: self.open_url(DOCS_URL))
+        issue_toolbar_action = QAction("Report an issue", self)
+        issue_toolbar_action.triggered.connect(lambda: self.open_url(ISSUES_URL))
         support_action = QAction("☕ Sostieni lo sviluppo", self)
-        support_action.triggered.connect(lambda: webbrowser.open(SUPPORT_URL))
+        support_action.triggered.connect(lambda: self.open_url(SUPPORT_URL))
         toolbar.addAction(setup_action)
         toolbar.addAction(self.auth_action)
         toolbar.addAction(self.sync_action)
         toolbar.addSeparator()
         toolbar.addAction(export_action)
         toolbar.addAction(docs_action)
+        toolbar.addAction(issue_toolbar_action)
         toolbar.addSeparator()
         toolbar.addAction(support_action)
 
@@ -241,13 +244,13 @@ class MainWindow(QMainWindow):
 
         help_menu = self.menuBar().addMenu("Aiuto")
         manual_action = QAction("Manuale utente", self)
-        manual_action.triggered.connect(lambda: webbrowser.open(MANUAL_URL))
+        manual_action.triggered.connect(lambda: self.open_url(MANUAL_URL))
         repository_action = QAction("Repository GitHub", self)
-        repository_action.triggered.connect(lambda: webbrowser.open(REPOSITORY_URL))
+        repository_action.triggered.connect(lambda: self.open_url(REPOSITORY_URL))
         issue_action = QAction("Segnala un problema", self)
-        issue_action.triggered.connect(lambda: webbrowser.open(ISSUES_URL))
+        issue_action.triggered.connect(lambda: self.open_url(ISSUES_URL))
         coffee_action = QAction("☕ Buy me a coffee", self)
-        coffee_action.triggered.connect(lambda: webbrowser.open(SUPPORT_URL))
+        coffee_action.triggered.connect(lambda: self.open_url(SUPPORT_URL))
         about_action = QAction(f"Informazioni su {APP_NAME}", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(manual_action)
@@ -256,6 +259,16 @@ class MainWindow(QMainWindow):
         help_menu.addSeparator()
         help_menu.addAction(coffee_action)
         help_menu.addAction(about_action)
+
+    def open_url(self, url: str) -> None:
+        if open_external_url(url):
+            return
+        QMessageBox.warning(
+            self,
+            "Impossibile aprire il browser",
+            "VitalChronicle non è riuscito ad avviare il browser predefinito.\n\n"
+            f"Apri manualmente questo indirizzo:\n{url}",
+        )
 
     def show_about(self) -> None:
         box = QMessageBox(self)
@@ -272,7 +285,7 @@ class MainWindow(QMainWindow):
             "a mantenerne attivo lo sviluppo.</p>"
             f"<p><a href='{SUPPORT_URL}'>Buy me a coffee</a> · "
             f"<a href='{REPOSITORY_URL}'>GitHub</a></p>"
-            "<p>Autore: Sebastiano Romi · LENS, University of Florence</p>"
+            "<p>Autore: Sebastiano Romi · sebastiano.romi@gmail.com</p>"
         )
         box.exec()
 

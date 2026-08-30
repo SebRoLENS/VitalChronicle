@@ -5,7 +5,6 @@ import os
 import secrets
 import shutil
 import socket
-import webbrowser
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -20,6 +19,7 @@ from platformdirs import user_config_dir
 
 from .branding import APP_NAME
 from .constants import OAUTH_REDIRECT_URI
+from .external_links import open_external_url
 
 SERVICE_NAME = "GoogleHealthViewer"
 TOKEN_USER = "google-health-oauth"
@@ -159,7 +159,7 @@ def authenticate(
     server.timeout = timeout_seconds
     if on_authorization_url:
         on_authorization_url(authorization_url)
-    if not webbrowser.open(authorization_url, new=1, autoraise=True):
+    if not open_external_url(authorization_url):
         server.server_close()
         raise OAuthError(
             "Non riesco ad aprire il browser. Apri manualmente l'indirizzo mostrato dal programma."

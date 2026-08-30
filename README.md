@@ -197,9 +197,7 @@ The same link is available inside the application toolbar and **Aiuto** menu.
 ## Author and contact
 
 Sebastiano Romi<br>
-European Laboratory for Non-Linear Spectroscopy (LENS)<br>
-University of Florence (UNIFI)<br>
-[romi@lens.unifi.it](mailto:romi@lens.unifi.it)
+[sebastiano.romi@gmail.com](mailto:sebastiano.romi@gmail.com)
 
 Bug reports and feature requests belong in the
 [GitHub issue tracker](https://github.com/SebRoLENS/google-health-dashboard-ai/issues).

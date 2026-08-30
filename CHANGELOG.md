@@ -2,6 +2,15 @@
 
 All notable changes to VitalChronicle are documented here.
 
+## 1.0.1 — 2026-08-30
+
+- replaced Python's browser launcher with a frozen-app-safe, cross-platform external
+  link handler for Google OAuth, documentation, GitHub, Ollama, and support links;
+- added a visible **Report an issue** toolbar action linked to the GitHub issue form;
+- removed institutional affiliation and contact details from the application and all
+  public documentation, retaining only Sebastiano Romi and `sebastiano.romi@gmail.com`;
+- added regression tests for sanitized desktop-launch environments.
+
 ## 1.0.0 — 2026-08-30
 
 - public rebrand from Google Health Viewer to **VitalChronicle** while preserving the

@@ -7,8 +7,7 @@ date-released: 2026-08-30
 authors:
   - family-names: Romi
     given-names: Sebastiano
-    affiliation: "European Laboratory for Non-Linear Spectroscopy (LENS), University of Florence"
-    email: romi@lens.unifi.it
+    email: sebastiano.romi@gmail.com
 repository-code: "https://github.com/SebRoLENS/google-health-dashboard-ai"
 url: "https://github.com/SebRoLENS/google-health-dashboard-ai"
 license: MIT

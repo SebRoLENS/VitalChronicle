@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import webbrowser
 from pathlib import Path
 
 from PySide6.QtCore import Signal
@@ -23,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from .branding import APP_NAME
 from .constants import OAUTH_REDIRECT_URI, SCOPE_GROUPS
+from .external_links import open_external_url
 from .oauth import CredentialStore, OAuthError
 
 CLOUD_CLIENTS_URL = "https://console.cloud.google.com/auth/clients"
@@ -66,9 +66,9 @@ class _CredentialsPage(QWizardPage):
         )
         instructions.setWordWrap(True)
         open_setup = QPushButton("Apri la configurazione ufficiale")
-        open_setup.clicked.connect(lambda: webbrowser.open(HEALTH_SETUP_URL))
+        open_setup.clicked.connect(lambda: open_external_url(HEALTH_SETUP_URL))
         open_clients = QPushButton("Apri i client OAuth")
-        open_clients.clicked.connect(lambda: webbrowser.open(CLOUD_CLIENTS_URL))
+        open_clients.clicked.connect(lambda: open_external_url(CLOUD_CLIENTS_URL))
         copy_redirect = QPushButton("Copia URI locale")
         copy_redirect.clicked.connect(
             lambda: QGuiApplication.clipboard().setText(OAUTH_REDIRECT_URI)
@@ -129,9 +129,9 @@ class _CloudAccessPage(QWizardPage):
         )
         text.setWordWrap(True)
         audience = QPushButton("Apri Audience / Test users")
-        audience.clicked.connect(lambda: webbrowser.open(CLOUD_AUDIENCE_URL))
+        audience.clicked.connect(lambda: open_external_url(CLOUD_AUDIENCE_URL))
         scopes = QPushButton("Apri Data Access")
-        scopes.clicked.connect(lambda: webbrowser.open(CLOUD_DATA_ACCESS_URL))
+        scopes.clicked.connect(lambda: open_external_url(CLOUD_DATA_ACCESS_URL))
         copy_scopes = QPushButton("Copia tutti gli scope di lettura")
         copy_scopes.clicked.connect(
             lambda: QGuiApplication.clipboard().setText("\n".join(SCOPE_GROUPS.values()))

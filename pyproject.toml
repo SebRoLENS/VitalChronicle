@@ -9,7 +9,7 @@ description = "Private desktop dashboard and local AI analysis for Google Health
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Sebastiano Romi", email = "romi@lens.unifi.it" }]
+authors = [{ name = "Sebastiano Romi", email = "sebastiano.romi@gmail.com" }]
 dependencies = [
   "PySide6>=6.7,<7",
   "pyqtgraph>=0.13.7,<1",

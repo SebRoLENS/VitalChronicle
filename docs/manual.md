@@ -1,6 +1,6 @@
 ---
 title: "VitalChronicle User Manual"
-author: "Sebastiano Romi — LENS, University of Florence"
+author: "Sebastiano Romi"
 date: "Updated for VitalChronicle 1.0.0"
 lang: en-US
 geometry: margin=2.2cm
@@ -485,9 +485,7 @@ See [releasing.md](releasing.md) for maintainer details.
 # 15. Support and contact
 
 Author: **Sebastiano Romi**<br>
-European Laboratory for Non-Linear Spectroscopy (LENS)<br>
-University of Florence (UNIFI)<br>
-[romi@lens.unifi.it](mailto:romi@lens.unifi.it)
+[sebastiano.romi@gmail.com](mailto:sebastiano.romi@gmail.com)
 
 Use the [GitHub issue tracker](https://github.com/SebRoLENS/google-health-dashboard-ai/issues)
 for reproducible bug reports and feature requests. Remove personal health data, tokens, and

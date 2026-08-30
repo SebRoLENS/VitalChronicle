@@ -8,7 +8,7 @@ Security fixes are provided for the latest VitalChronicle release.
 
 Do not open a public issue containing OAuth credentials, access tokens, health records,
 database files, or other sensitive personal information. Send a minimal private report to
-`romi@lens.unifi.it` with the affected version, operating system, impact, and safe
+`sebastiano.romi@gmail.com` with the affected version, operating system, impact, and safe
 reproduction steps.
 
 For ordinary bugs that do not expose sensitive information, use the

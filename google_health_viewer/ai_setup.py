@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import webbrowser
-
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QDialog,
@@ -12,6 +10,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from .external_links import open_external_url
 from .local_ai import DEFAULT_MODEL, recommended_model
 
 OLLAMA_LINUX_URL = "https://docs.ollama.com/linux"
@@ -87,12 +86,12 @@ class AISetupDialog(QDialog):
         copy = QPushButton("Copia comandi")
         copy.clicked.connect(lambda: QGuiApplication.clipboard().setText(commands.toPlainText()))
         docs = QPushButton("Guida ufficiale Ollama per Linux")
-        docs.clicked.connect(lambda: webbrowser.open(OLLAMA_LINUX_URL))
+        docs.clicked.connect(lambda: open_external_url(OLLAMA_LINUX_URL))
         root.addWidget(copy)
         root.addWidget(docs)
         if not cpu_only:
             gpu = QPushButton("Compatibilità GPU NVIDIA")
-            gpu.clicked.connect(lambda: webbrowser.open(OLLAMA_GPU_URL))
+            gpu.clicked.connect(lambda: open_external_url(OLLAMA_GPU_URL))
             root.addWidget(gpu)
         root.addStretch()
 
