@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 import zipfile
 from collections.abc import Iterable
+from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -394,11 +395,15 @@ class HealthStore:
     def export_archive(self, destination: Path) -> None:
         with tempfile.TemporaryDirectory(prefix="google-health-export-") as tmp:
             tmp_path = Path(tmp)
+            # sqlite3.Connection's context manager commits or rolls back but does not
+            # close the handle. Explicit closing is required before TemporaryDirectory
+            # cleanup on Windows, where open database files cannot be removed.
             with (
-                self._connect() as source,
-                sqlite3.connect(tmp_path / "health_data.sqlite3") as target,
+                closing(self._connect()) as source,
+                closing(sqlite3.connect(tmp_path / "health_data.sqlite3")) as target,
             ):
                 source.backup(target)
+                target.commit()
             counts = self.counts()
             for data_type in counts:
                 records = self.list_records(data_type, limit=10_000_000)
