@@ -27,6 +27,7 @@ jobs:
       - name: Dispatch corrected native build
         env:
           GH_TOKEN: ${{ github.token }}
+          RETRY_REASON: "matched Intel OpenSSL runtime"
         run: |
           gh workflow run build-desktop.yml \
             --repo "$GITHUB_REPOSITORY" \

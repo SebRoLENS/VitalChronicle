@@ -235,6 +235,14 @@ jobs:
             --add-data "google_health_viewer/assets:google_health_viewer/assets" \
             --collect-all keyring \
             run.py
+      - name: Match the Intel OpenSSL runtime used by cryptography
+        if: matrix.arch == 'x86_64'
+        run: |
+          OPENSSL_PREFIX="$(brew --prefix openssl@3)"
+          cp -f "$OPENSSL_PREFIX/lib/libssl.3.dylib" \
+            dist/VitalChronicle.app/Contents/Frameworks/libssl.3.dylib
+          cp -f "$OPENSSL_PREFIX/lib/libcrypto.3.dylib" \
+            dist/VitalChronicle.app/Contents/Frameworks/libcrypto.3.dylib
       - name: Smoke-test and ad-hoc sign application
         env:
           QT_QPA_PLATFORM: offscreen
