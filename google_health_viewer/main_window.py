@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import date, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
@@ -36,6 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import __version__
 from .ai_setup import AISetupDialog
 from .analysis import (
     available_metrics,
@@ -87,6 +89,7 @@ from .local_ai import (
 from .oauth import CredentialStore
 from .setup_wizard import SetupWizard
 from .storage import HealthStore
+from .updates import ReleaseInfo, notification_due, semantic_version, update_kind
 from .utils import summarize
 from .workers import (
     AIAnalysisThread,
@@ -94,6 +97,7 @@ from .workers import (
     AIStatusThread,
     AuthThread,
     SyncThread,
+    UpdateCheckThread,
 )
 
 DOCS_URL = "https://developers.google.com/health"
@@ -135,6 +139,7 @@ class MainWindow(QMainWindow):
         self.ai_status_thread: AIStatusThread | None = None
         self.ai_pull_thread: AIPullThread | None = None
         self.ai_analysis_thread: AIAnalysisThread | None = None
+        self.update_check_thread: UpdateCheckThread | None = None
         self.progress_dialog: QProgressDialog | None = None
         self.sync_warnings: list[tuple[str, str]] = []
         self._plot_scale_points: list[tuple[float, float]] = []
@@ -151,6 +156,9 @@ class MainWindow(QMainWindow):
         self._model_update_timer = QTimer(self)
         self._model_update_timer.setInterval(6 * 60 * 60 * 1000)
         self._model_update_timer.timeout.connect(self.check_ai_status)
+        self._app_update_timer = QTimer(self)
+        self._app_update_timer.setInterval(60 * 60 * 1000)
+        self._app_update_timer.timeout.connect(self._automatic_update_check)
         self._pending_model_update: str | None = None
         self._known_ai_models: set[str] = set()
         self._applying_range_preset = False
@@ -166,7 +174,9 @@ class MainWindow(QMainWindow):
         else:
             self._auto_sync_timer.start()
             self._model_update_timer.start()
+            self._app_update_timer.start()
             QTimer.singleShot(600, self.check_ai_status)
+            QTimer.singleShot(2500, self._automatic_update_check)
             if self.credentials:
                 QTimer.singleShot(1200, self._start_automatic_sync)
             if not self.credential_store.has_client():
@@ -284,16 +294,141 @@ class MainWindow(QMainWindow):
         repository_action.triggered.connect(lambda: self.open_url(REPOSITORY_URL))
         issue_action = QAction(_("Report an issue"), self)
         issue_action.triggered.connect(lambda: self.open_url(ISSUES_URL))
+        update_action = QAction(_("Check for updates"), self)
+        update_action.triggered.connect(
+            lambda _checked=False: self.check_for_updates(force=True)
+        )
         coffee_action = QAction("☕ Buy me a coffee", self)
         coffee_action.triggered.connect(lambda: self.open_url(SUPPORT_URL))
         about_action = QAction(_("About {app_name}", app_name=APP_NAME), self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(manual_action)
         help_menu.addAction(repository_action)
+        help_menu.addAction(update_action)
         help_menu.addAction(issue_action)
         help_menu.addSeparator()
         help_menu.addAction(coffee_action)
         help_menu.addAction(about_action)
+
+    def _automatic_update_check(self) -> None:
+        self.check_for_updates(force=False)
+
+    def check_for_updates(self, *, force: bool = False) -> None:
+        if self.update_check_thread is not None:
+            if force:
+                self.statusBar().showMessage(_("An update check is already in progress."), 5000)
+            return
+        now = time.time()
+        try:
+            last_check = float(self.settings.value("updates/last_check", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            last_check = 0.0
+        if not force and now - last_check < 24 * 60 * 60:
+            return
+
+        self.settings.setValue("updates/last_check", now)
+        if force:
+            self.statusBar().showMessage(_("Checking for VitalChronicle updates…"))
+        thread = UpdateCheckThread(__version__)
+        thread.completed.connect(
+            lambda release, requested=force: self._update_check_completed(release, requested)
+        )
+        thread.failed.connect(
+            lambda message, requested=force: self._update_check_failed(message, requested)
+        )
+        thread.finished.connect(self._update_check_finished)
+        self.update_check_thread = thread
+        thread.start()
+
+    def _update_check_finished(self) -> None:
+        thread = self.update_check_thread
+        self.update_check_thread = None
+        if thread is not None:
+            thread.deleteLater()
+
+    def _update_check_failed(self, message: str, force: bool) -> None:
+        if not force:
+            return
+        self.statusBar().clearMessage()
+        QMessageBox.warning(
+            self,
+            _("Check for updates"),
+            _("Could not check for VitalChronicle updates: {message}", message=message),
+        )
+
+    def _update_check_completed(self, release: ReleaseInfo, force: bool) -> None:
+        self.statusBar().clearMessage()
+        current = semantic_version(__version__)
+        latest = semantic_version(release.version)
+        if current is None or latest is None:
+            self._update_check_failed(
+                _("GitHub returned an unrecognised release version."), force
+            )
+            return
+        if latest <= current:
+            self.settings.remove("updates/last_notified_version")
+            self.settings.remove("updates/last_notified_at")
+            if force:
+                QMessageBox.information(
+                    self,
+                    _("Check for updates"),
+                    _(
+                        "VitalChronicle is up to date. Installed version: {version}",
+                        version=__version__,
+                    ),
+                )
+            return
+
+        now = time.time()
+        previous_version = str(
+            self.settings.value("updates/last_notified_version", "") or ""
+        )
+        try:
+            previous_at = float(
+                self.settings.value("updates/last_notified_at", 0.0) or 0.0
+            )
+        except (TypeError, ValueError):
+            previous_at = 0.0
+        if not force and not notification_due(
+            release.version, previous_version, previous_at, now
+        ):
+            return
+
+        self._show_update_available(
+            release,
+            update_kind(current, latest),
+            reminder=not force and previous_version == release.version,
+        )
+        self.settings.setValue("updates/last_notified_version", release.version)
+        self.settings.setValue("updates/last_notified_at", now)
+
+    def _show_update_available(
+        self, release: ReleaseInfo, kind: str, *, reminder: bool
+    ) -> None:
+        descriptions = {
+            "patch": _("A maintenance update is available with bug fixes."),
+            "minor": _("A feature update is available with new functionality."),
+            "major": _("A new major version of VitalChronicle is available."),
+        }
+        prefix = _("Reminder: ") if reminder else ""
+        message = prefix + _(
+            "VitalChronicle {version} is available. {description}\n\n"
+            "Keeping the app up to date is recommended for the latest fixes, reliability "
+            "improvements, and compatibility updates.",
+            version=release.version,
+            description=descriptions[kind],
+        )
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle(_("VitalChronicle update available"))
+        box.setText(message)
+        open_button = box.addButton(
+            _("Open release page"), QMessageBox.ButtonRole.AcceptRole
+        )
+        box.addButton(_("Later"), QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_button:
+            self.open_url(release.url)
 
     def _select_interface_language(self, preference: str) -> None:
         self.settings.setValue("interface/language", preference)

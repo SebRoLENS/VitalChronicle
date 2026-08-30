@@ -11,6 +11,7 @@ from .i18n import _
 from .local_ai import LocalAIError, OllamaClient
 from .oauth import CredentialStore, OAuthError, authenticate
 from .storage import HealthStore
+from .updates import fetch_latest_release
 
 FILTER_REPAIR_VERSION = "snake-case-filters-v1"
 
@@ -184,6 +185,21 @@ class AIStatusThread(QThread):
         self.completed.emit(
             OllamaClient(model=self.model, hardware_profile=self.hardware_profile).status()
         )
+
+
+class UpdateCheckThread(QThread):
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, current_version: str) -> None:
+        super().__init__()
+        self.current_version = current_version
+
+    def run(self) -> None:
+        try:
+            self.completed.emit(fetch_latest_release(self.current_version))
+        except Exception as exc:  # noqa: BLE001 - thread boundary reports network failures.
+            self.failed.emit(str(exc))
 
 
 class AIPullThread(QThread):
