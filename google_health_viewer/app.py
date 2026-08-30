@@ -9,7 +9,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from .branding import APP_NAME
-from .main_window import MainWindow
+from .i18n import set_language, startup_language
 from .theme import APP_STYLESHEET
 
 
@@ -21,6 +21,16 @@ def main() -> int:
     QCoreApplication.setApplicationName("GoogleHealthViewer")
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
     app = QApplication(sys.argv)
+    # Resolve the persisted language before importing the UI modules: several
+    # translated labels are intentionally created at module import time.
+    from PySide6.QtCore import QSettings
+
+    settings = QSettings()
+    preference = str(settings.value("interface/language", "system"))
+    set_language(startup_language(preference))
+
+    from .main_window import MainWindow
+
     app.setApplicationDisplayName(APP_NAME)
     app.setStyle("Fusion")
     app.setStyleSheet(APP_STYLESHEET)

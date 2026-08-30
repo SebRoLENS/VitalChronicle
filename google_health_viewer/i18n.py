@@ -17,12 +17,56 @@ from typing import Any
 
 CATALOGUE_DIR = Path(__file__).with_name("locales")
 DEFAULT_LANGUAGE = "en"
+SYSTEM_LANGUAGE = "system"
 
 
 def _normalise_language(value: str | None) -> str:
     if not value:
         return ""
-    return value.split(".", 1)[0].replace("-", "_").split("_", 1)[0].lower()
+    return (
+        value.strip()
+        .split(".", 1)[0]
+        .replace("-", "_")
+        .split("_", 1)[0]
+        .lower()
+    )
+
+
+def _system_language_candidates() -> tuple[str, ...]:
+    """Return system locale candidates from desktop and process settings.
+
+    Frozen Qt applications can report the generic ``C`` locale even when the
+    desktop session is configured differently.  Fedora and many other Linux
+    desktops expose the useful value through ``LANGUAGE`` or ``LC_*`` instead,
+    while Qt's ``uiLanguages`` is the most reliable source on Windows/macOS.
+    """
+
+    candidates: list[str] = []
+
+    def add(value: str | None) -> None:
+        if not value:
+            return
+        for part in value.replace(";", ":").split(":"):
+            normalised = _normalise_language(part)
+            if normalised and normalised not in candidates:
+                candidates.append(normalised)
+
+    for variable in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        add(os.environ.get(variable))
+    try:
+        from PySide6.QtCore import QLocale
+
+        system_locale = QLocale.system()
+        for value in system_locale.uiLanguages():
+            add(value)
+        add(system_locale.name())
+    except (ImportError, RuntimeError):
+        pass
+    try:
+        add(locale.getlocale()[0])
+    except (TypeError, ValueError):
+        pass
+    return tuple(candidates)
 
 
 def supported_languages() -> tuple[str, ...]:
@@ -46,13 +90,40 @@ def system_language() -> str:
     override = _normalise_language(os.environ.get("VITALCHRONICLE_LANGUAGE"))
     if override:
         return override if override in supported_languages() else DEFAULT_LANGUAGE
+    supported = set(supported_languages())
+    return next(
+        (candidate for candidate in _system_language_candidates() if candidate in supported),
+        DEFAULT_LANGUAGE,
+    )
+
+
+def startup_language(preference: str | None = SYSTEM_LANGUAGE) -> str:
+    """Resolve the persisted preference, preserving the environment override."""
+
+    if os.environ.get("VITALCHRONICLE_LANGUAGE"):
+        return system_language()
+    requested = _normalise_language(preference)
+    if preference != SYSTEM_LANGUAGE and requested in supported_languages():
+        return requested
+    return system_language()
+
+
+def language_name(language: str) -> str:
+    """Return a native display name for a language catalogue."""
+
+    code = _normalise_language(language)
+    built_in = {"en": "English", "it": "Italiano"}
+    if code in built_in:
+        return built_in[code]
     try:
         from PySide6.QtCore import QLocale
 
-        detected = _normalise_language(QLocale.system().name())
+        name = QLocale(code).nativeLanguageName().strip()
+        if name:
+            return name[0].upper() + name[1:]
     except (ImportError, RuntimeError):
-        detected = _normalise_language(locale.getlocale()[0])
-    return detected if detected in supported_languages() else DEFAULT_LANGUAGE
+        pass
+    return code.upper()
 
 
 _language = system_language()

@@ -27,9 +27,13 @@ VitalChronicle is and will remain free and open source. Voluntary support throug
 
 ## Interface language
 
-VitalChronicle selects the operating-system language at startup. English and Italian are included;
-when the detected language is not supported, the interface and local-AI answers use English.
-Advanced users and screenshot automation can override detection before starting the application:
+VitalChronicle reads the desktop and process locale at startup, including the Linux `LANGUAGE`,
+`LC_ALL`, `LC_MESSAGES`, and `LANG` settings. English and Italian are included; when no supported
+language is detected, the interface and local-AI answers use English.
+
+Use **Settings → Language** to select **System default** or a supported language manually. The
+choice is stored for future launches; restart VitalChronicle once after changing it. Advanced users
+and screenshot automation can temporarily override both automatic detection and the saved choice:
 
 ```bash
 VITALCHRONICLE_LANGUAGE=it vitalchronicle

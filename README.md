@@ -103,8 +103,8 @@ value remains editable and is limited only by the physical context reported by O
 - local Qwen analysis through Ollama, with NVIDIA 16 GB and CPU-only 32 GB profiles;
 - model-update notifications and model-context-aware token recommendations;
 - no cloud AI service and no transmission of health data to the developer.
-- automatic system-language detection, with English fallback and community catalogues managed
-  through Weblate.
+- robust system-language detection, a persistent **Settings → Language** selector, English
+  fallback, and community catalogues managed through Weblate.
 
 ## Quick start
 
