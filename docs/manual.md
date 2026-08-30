@@ -183,35 +183,80 @@ vitalchronicle
 
 Each user creates a personal OAuth client. The repository deliberately does not contain a
 shared client secret. This keeps control of the credentials with the person whose health
-data are being accessed.
+data are being accessed. No programming knowledge is required: choose **Google setup** in
+VitalChronicle and keep the seven-step wizard open while following the browser instructions.
+
+Before starting, prepare:
+
+- the Google account containing the health data;
+- an internet connection and a normal system browser;
+- about ten minutes;
+- a secure place for the downloaded OAuth JSON file.
+
+Never publish that JSON, attach it to an issue, or send it to the developer. It contains a
+client secret for the personal Google Cloud project.
 
 ## 4.1 Create a project
 
-1. Open [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a new project or select an existing personal project.
-3. Search for **Google Health API** in the API Library and enable it.
-4. Open **Google Auth Platform** for that project.
+1. In wizard step 1, click **Open project selector**.
+2. Sign in with the Google account containing the health data.
+3. In Google Cloud, click **New project**.
+4. Enter `VitalChronicle Personal` as the project name.
+5. If a **Location** field appears, choose **No organisation** for a normal personal account.
+6. Click **Create** and wait for the project to be prepared.
+7. Select the new project and confirm that its name appears in the Google Cloud top bar.
 
-## 4.2 Configure Branding and Audience
+The project is only a container for API and OAuth configuration. Creating it does not upload
+the local VitalChronicle archive and normally does not require enabling billing.
 
-Complete the required Branding fields. Under **Audience**, a personal project can remain
-in **Testing** mode. Add every Google account that will use VitalChronicle under **Test
-users**.
+## 4.2 Enable Google Health API
 
-Testing is not mandatory. It is normally the simplest personal-use configuration and
-does not require public verification. For an external OAuth project in Testing, Google
-normally issues refresh tokens that expire after seven days when broader scopes are used.
-VitalChronicle will then ask the user to authenticate again.
+1. In wizard step 2, click **Open Google Health API**.
+2. Check the project selector in the Google Cloud top bar. It must show the project created
+   above.
+3. Click **Enable**.
+4. Wait until the page shows **Manage** or otherwise confirms that the API is enabled.
 
-Moving to Production may remove that testing-token limitation, but an application using
-sensitive or restricted scopes for a wider audience can require Google verification,
-published policies, and other compliance work. Personal use by a small known group can
-remain unverified, subject to Google's user limits and warnings.
+If the button already says **Manage**, the API is already enabled and no further action is
+needed on that page.
 
-## 4.3 Add Data Access scopes
+## 4.3 Configure Branding and Audience
 
-Open **Data Access → Add or remove scopes**. The wizard can copy the complete list. The
-current read-only groups are:
+In wizard step 3, first click **Open Branding**. If the Google Auth Platform has not yet been
+configured, click **Get started** and enter:
+
+1. **App name:** `VitalChronicle Personal`.
+2. **User support email:** the user's own Google address.
+3. **Audience:** **External**.
+4. **Contact email:** the user's own address.
+5. Accept the policy acknowledgement if it is displayed, then click **Create**.
+
+Next, click **Open Audience / Test users**:
+
+1. Confirm **Publishing status: Testing** and **User type: External**.
+2. Find **Test users** and click **Add users**.
+3. Enter the exact Google address containing the health data.
+4. Click **Save**.
+5. Confirm that the address now appears in the Test users list before continuing.
+
+Testing is not mandatory. It is normally the simplest personal-use configuration and does
+not require public verification. Testing refresh tokens normally expire after seven days;
+VitalChronicle will then ask the user to authenticate again. Production can require Google
+verification and additional compliance work for sensitive or restricted scopes.
+
+## 4.4 Add Data Access scopes
+
+In wizard step 4:
+
+1. Click **Open Data Access**.
+2. Click **Add or remove scopes**.
+3. In the API filter, search for `Google Health API`.
+4. Select the required read-only scopes. For the complete dashboard, select all scopes listed
+   below; the wizard's **Copy all read-only scopes** button copies them exactly.
+5. Click **Update** at the bottom of the scope panel.
+6. Back on the Data Access page, click **Save**.
+
+The current read-only groups are:
 
 ```text
 https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly
@@ -228,35 +273,58 @@ https://www.googleapis.com/auth/googlehealth.location.readonly
 You can authorise fewer groups if you do not want the application to request every
 category. A denied scope simply makes the corresponding categories unavailable.
 
-## 4.4 Create the OAuth client
+## 4.5 Create and import the OAuth client
 
-1. Open **Clients → Create client**.
-2. Select **Web application**.
-3. Give the client a recognisable name, for example `VitalChronicle personal desktop`.
-4. Under **Authorised redirect URIs**, add exactly:
+In wizard step 5:
+
+1. Click **Open OAuth clients**.
+2. Click **Create client**.
+3. For **Application type**, select **Web application**. Do not select Desktop application.
+4. Enter `VitalChronicle personal desktop` as the client name.
+5. Leave **Authorised JavaScript origins** empty.
+6. Under **Authorised redirect URIs**, click **Add URI**.
+7. Use the wizard's **Copy local redirect URI** button and paste exactly:
 
    ```text
    http://localhost:8765/
    ```
 
-5. Create the client and immediately download its JSON file.
+8. Check the spelling, `http`, port `8765`, and final slash.
+9. Click **Create**.
+10. Immediately download the JSON credentials file.
+11. Return to VitalChronicle and click **Select downloaded JSON**.
+12. Continue only after the wizard displays **Valid OAuth client. The redirect URI is
+    correct.**
 
 Google may only show the complete client secret at creation time. Keep the JSON private.
 Never commit it to Git, attach it to an issue, or send it to the developer.
 
-## 4.5 Import and authenticate
+If the wizard rejects the file, read the specific message. The most common cause is a missing
+final slash or adding the URI under JavaScript origins instead of Authorised redirect URIs.
 
-1. Start VitalChronicle.
-2. Select **Configurazione Google**.
-3. Use the wizard buttons to open the relevant Google pages and copy the redirect URI or
-   scopes.
-4. Select the downloaded JSON file.
-5. Confirm the configured audience and scopes.
-6. Complete consent in the browser.
-7. Return to VitalChronicle after the local completion page appears.
+## 4.6 Choose the data groups
+
+Wizard step 6 lists the data groups that VitalChronicle can request. Leave all categories
+selected for the complete dashboard and full-history AI analysis. Deselecting a category is
+safe, but its charts and AI context will be unavailable. No write permission is requested.
+
+## 4.7 Authenticate in the browser
+
+1. In wizard step 7, confirm that the Google test-user account is ready.
+2. Click **Finish and sign in with Google**.
+3. The system browser should open automatically. VitalChronicle also displays a small window
+   containing **Open browser** and **Copy sign-in link** as fallbacks.
+4. Select the same Google account added under **Test users**.
+5. Google may display **This app has not been verified** for a private Testing project. Verify
+   that the project and app name are the ones just created, then use **Advanced → Go to
+   VitalChronicle Personal** to continue.
+6. Review the read-only permissions and click **Continue** or **Allow**.
+7. Wait until the browser says **Authentication completed**.
+8. Close the browser tab and return to VitalChronicle. The first update starts automatically.
 
 The browser redirects only to the loopback server on the same computer. Port `8765` must
-be free during sign-in.
+be free during sign-in. The wizard checks the port before it finishes; the callback is local and
+is not exposed to the internet. Do not close VitalChronicle during authentication.
 
 # 5. Synchronisation and local storage
 

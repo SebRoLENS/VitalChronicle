@@ -31,10 +31,13 @@ Before tagging, these files must agree:
 
 - `google_health_viewer/__init__.py`;
 - `pyproject.toml`;
-- `README.md`;
 - `docs/manual.md`;
 - `docs/quick-start.md`;
 - `CITATION.cff`.
+
+`README.md` deliberately has no hard-coded release number. Its version badge and all
+download buttons target GitHub's `releases/latest`, preventing the displayed version from
+becoming stale after an automated release.
 
 Run locally:
 
