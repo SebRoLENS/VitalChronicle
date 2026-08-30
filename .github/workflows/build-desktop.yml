@@ -102,6 +102,7 @@ jobs:
             --name VitalChronicle \
             --icon generated-icons/vitalchronicle.png \
             --add-data "google_health_viewer/assets:google_health_viewer/assets" \
+            --add-data "google_health_viewer/locales:google_health_viewer/locales" \
             --collect-all keyring \
             run.py
       - name: Smoke-test frozen GUI
@@ -180,6 +181,7 @@ jobs:
             --name VitalChronicle `
             --icon generated-icons\vitalchronicle.ico `
             --add-data "google_health_viewer/assets;google_health_viewer/assets" `
+            --add-data "google_health_viewer/locales;google_health_viewer/locales" `
             --collect-all keyring `
             run.py
           Move-Item dist\VitalChronicle.exe "VitalChronicle-$env:VERSION-windows-x86_64.exe"
@@ -233,6 +235,7 @@ jobs:
             --name VitalChronicle \
             --icon generated-icons/vitalchronicle.icns \
             --add-data "google_health_viewer/assets:google_health_viewer/assets" \
+            --add-data "google_health_viewer/locales:google_health_viewer/locales" \
             --collect-all keyring \
             run.py
       - name: Match the Intel OpenSSL runtime used by cryptography
