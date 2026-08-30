@@ -124,7 +124,12 @@ jobs:
             -f "source_ref=v${VERSION}"
           RUN_ID=""
           for attempt in $(seq 1 30); do
-            RUN_ID="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-desktop.yml/runs?event=workflow_dispatch&per_page=10" --jq '.workflow_runs[0].id // empty')"
+            RUN_ID="$(
+              gh api \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/build-desktop.yml/runs?event=workflow_dispatch&per_page=20" \
+                --jq ".workflow_runs[] | select(.head_sha == \"${RELEASE_SHA}\") | .id" \
+                | head -n 1
+            )"
             if [ -n "$RUN_ID" ]; then break; fi
             sleep 4
           done
