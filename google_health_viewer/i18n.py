@@ -28,7 +28,17 @@ def _normalise_language(value: str | None) -> str:
 def supported_languages() -> tuple[str, ...]:
     languages = {DEFAULT_LANGUAGE}
     if CATALOGUE_DIR.is_dir():
-        languages.update(path.stem.lower() for path in CATALOGUE_DIR.glob("*.json"))
+        for path in CATALOGUE_DIR.glob("*.json"):
+            if path.stem.lower() == DEFAULT_LANGUAGE:
+                continue
+            try:
+                catalogue = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(catalogue, dict) and any(
+                isinstance(value, str) and value.strip() for value in catalogue.values()
+            ):
+                languages.add(path.stem.lower())
     return tuple(sorted(languages))
 
 
