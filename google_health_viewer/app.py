@@ -1,0 +1,37 @@
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+from PySide6.QtCore import QCoreApplication, Qt, QTimer
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QApplication
+
+from .branding import APP_NAME
+from .main_window import MainWindow
+from .theme import APP_STYLESHEET
+
+
+def main() -> int:
+    os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
+    QCoreApplication.setOrganizationName("SebastianoRomi")
+    # Keep the historical application identifier to preserve QSettings across
+    # the 1.0 rebrand while exposing the new public name everywhere in the UI.
+    QCoreApplication.setApplicationName("GoogleHealthViewer")
+    QCoreApplication.setApplicationDisplayName(APP_NAME)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setStyleSheet(APP_STYLESHEET)
+    app.setWindowIcon(QIcon(str(Path(__file__).with_name("assets") / "app_icon.svg")))
+    smoke_test = os.environ.get("VITALCHRONICLE_SMOKE_TEST") == "1"
+    window = MainWindow(screenshot_mode=smoke_test)
+    window.show()
+    if smoke_test:
+        QTimer.singleShot(1200, app.quit)
+    return app.exec()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

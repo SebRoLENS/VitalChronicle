@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=VitalChronicle
+Comment=Private Google Health dashboard with local AI
+Exec=VitalChronicle
+Icon=vitalchronicle
+Terminal=false
+Categories=Science;Utility;
+Keywords=health;fitness;visualization;Google;Ollama;AI;

@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+generated-icons/
+.coverage
+htmlcov/
+client_secret*.json
+authorized_user*.json
+*.sqlite3
+*.db
+*.gguf
+health-export*.zip

@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vitalchronicle"
+version = "1.0.0"
+description = "Private desktop dashboard and local AI analysis for Google Health data"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sebastiano Romi", email = "romi@lens.unifi.it" }]
+dependencies = [
+  "PySide6>=6.7,<7",
+  "pyqtgraph>=0.13.7,<1",
+  "requests>=2.32,<3",
+  "google-auth>=2.35,<3",
+  "google-auth-oauthlib>=1.2,<2",
+  "keyring>=25.5,<26",
+  "platformdirs>=4.3,<5",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "Pillow>=11",
+  "pyinstaller>=6.18,<7",
+  "pytest>=8.3",
+  "ruff>=0.9",
+]
+
+[project.scripts]
+vitalchronicle = "google_health_viewer.app:main"
+google-health-viewer = "google_health_viewer.app:main"
+
+[project.urls]
+Homepage = "https://github.com/SebRoLENS/google-health-dashboard-ai"
+Documentation = "https://github.com/SebRoLENS/google-health-dashboard-ai/blob/main/docs/manual.md"
+Issues = "https://github.com/SebRoLENS/google-health-dashboard-ai/issues"
+Funding = "https://buymeacoffee.com/sebromi"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["google_health_viewer*"]
+
+[tool.setuptools.package-data]
+google_health_viewer = ["assets/*.svg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

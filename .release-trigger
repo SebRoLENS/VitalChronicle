@@ -1,0 +1,4 @@
+VitalChronicle automatic release marker.
+
+The first automated run publishes the declared 1.0.0 version. Later application changes
+advance the patch version through scripts/prepare_release.py.
