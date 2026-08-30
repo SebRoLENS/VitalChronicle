@@ -19,9 +19,9 @@ def main() -> int:
     # Keep the historical application identifier to preserve QSettings across
     # the 1.0 rebrand while exposing the new public name everywhere in the UI.
     QCoreApplication.setApplicationName("GoogleHealthViewer")
-    QCoreApplication.setApplicationDisplayName(APP_NAME)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
     app = QApplication(sys.argv)
+    app.setApplicationDisplayName(APP_NAME)
     app.setStyle("Fusion")
     app.setStyleSheet(APP_STYLESHEET)
     app.setWindowIcon(QIcon(str(Path(__file__).with_name("assets") / "app_icon.svg")))
