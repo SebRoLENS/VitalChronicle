@@ -9,7 +9,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from .branding import APP_NAME
-from .i18n import set_language, startup_language
+from .i18n import set_language, startup_language, supported_languages
 from .theme import APP_STYLESHEET
 
 
@@ -36,6 +36,9 @@ def main() -> int:
     app.setStyleSheet(APP_STYLESHEET)
     app.setWindowIcon(QIcon(str(Path(__file__).with_name("assets") / "app_icon.svg")))
     smoke_test = os.environ.get("VITALCHRONICLE_SMOKE_TEST") == "1"
+    if smoke_test and not {"en", "it"}.issubset(supported_languages()):
+        print("Frozen build is missing the bundled translation catalogues.", file=sys.stderr)
+        return 78
     window = MainWindow(screenshot_mode=smoke_test)
     window.show()
     if smoke_test:
