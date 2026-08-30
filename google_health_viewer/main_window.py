@@ -87,7 +87,7 @@ from .local_ai import (
     recommended_model,
 )
 from .oauth import CredentialStore
-from .setup_wizard import SetupWizard
+from .setup_wizard import AuthorizationHelpDialog, SetupWizard
 from .storage import HealthStore
 from .updates import ReleaseInfo, notification_due, semantic_version, update_kind
 from .utils import summarize
@@ -141,6 +141,7 @@ class MainWindow(QMainWindow):
         self.ai_analysis_thread: AIAnalysisThread | None = None
         self.update_check_thread: UpdateCheckThread | None = None
         self.progress_dialog: QProgressDialog | None = None
+        self._authorization_dialog: AuthorizationHelpDialog | None = None
         self.sync_warnings: list[tuple[str, str]] = []
         self._plot_scale_points: list[tuple[float, float]] = []
         self._plot_profile = None
@@ -971,14 +972,24 @@ class MainWindow(QMainWindow):
         self.auth_thread = AuthThread(self.credential_store, scopes)
         self.auth_thread.succeeded.connect(self._auth_succeeded)
         self.auth_thread.failed.connect(self._auth_failed)
-        self.auth_thread.url_ready.connect(
-            lambda url: self.statusBar().showMessage(
-                _("If the browser does not open, copy this URL: {url}", url=url), 300000
-            )
-        )
+        self.auth_thread.url_ready.connect(self._show_authorization_help)
         self.auth_thread.start()
 
+    def _show_authorization_help(self, url: str) -> None:
+        if self._authorization_dialog is not None:
+            self._authorization_dialog.close()
+        self._authorization_dialog = AuthorizationHelpDialog(url, self)
+        self._authorization_dialog.open()
+        self.statusBar().showMessage(_("Waiting for Google sign-in…"), 300000)
+
+    def _close_authorization_help(self) -> None:
+        if self._authorization_dialog is not None:
+            self._authorization_dialog.close()
+            self._authorization_dialog.deleteLater()
+            self._authorization_dialog = None
+
     def _auth_succeeded(self, credentials, secure: bool) -> None:
+        self._close_authorization_help()
         self.credentials = credentials
         self.auth_action.setEnabled(True)
         self._update_connection_status()
@@ -993,6 +1004,7 @@ class MainWindow(QMainWindow):
             )
 
     def _auth_failed(self, message: str) -> None:
+        self._close_authorization_help()
         self.auth_action.setEnabled(True)
         self._update_connection_status()
         QMessageBox.critical(self, _("Authentication failed"), message)

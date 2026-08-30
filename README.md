@@ -36,7 +36,11 @@ not a replacement for professional medical advice.
 
 ## Download
 
-**[Download VitalChronicle 1.0.6 for Linux, Windows, or macOS](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest)**
+**[Download the latest VitalChronicle release for Linux, Windows, or macOS](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest)**
+
+The exact current version is always shown by the **release** badge at the top of this
+README and by GitHub on the linked release page. These links update automatically whenever
+a new version is published.
 
 | Platform | Release package | Notes |
 |---|---|---|
@@ -45,7 +49,7 @@ not a replacement for professional medical advice.
 | macOS Apple Silicon | `.dmg` | Ad-hoc signed, not notarised |
 | macOS Intel x86-64 | `.dmg` | Ad-hoc signed, not notarised |
 | Python 3.10+ | Wheel and source archive | For development or unsupported systems |
-| Android | Not included in 1.0.6 | Requires a separate mobile UI and OAuth flow |
+| Android | Not currently included | Requires a separate mobile UI and OAuth flow |
 
 Windows and macOS packages are not signed with paid platform certificates. Download
 only from the official release page and verify `SHA256SUMS.txt`. The Linux AppImage is
@@ -91,7 +95,8 @@ value remains editable and is limited only by the physical context reported by O
 
 ## Main capabilities
 
-- guided Google Cloud and OAuth configuration inside the application;
+- seven-step beginner-friendly Google Cloud and OAuth configuration inside the application,
+  including direct links, completion checks, JSON validation, and browser fallbacks;
 - incremental synchronisation that downloads only missing intervals;
 - silent refresh at startup and every ten minutes while the application is open;
 - per-category error isolation, warnings, pagination, and resumable local coverage;
@@ -192,7 +197,7 @@ remote services contacted are Google for authorised health-data access and the O
 registry when checking whether model weights have changed.
 
 The application deliberately retains the historical internal `GoogleHealthViewer` data
-directory name so that upgrading from 0.2.12 to VitalChronicle 1.0.6 preserves existing
+directory name so that upgrading from 0.2.12 to current VitalChronicle releases preserves existing
 records, credentials, and settings.
 
 ## Support development

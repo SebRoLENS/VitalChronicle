@@ -160,7 +160,8 @@ def authenticate(
     server.timeout = timeout_seconds
     if on_authorization_url:
         on_authorization_url(authorization_url)
-    if not open_external_url(authorization_url):
+    browser_opened = open_external_url(authorization_url)
+    if not browser_opened and on_authorization_url is None:
         server.server_close()
         raise OAuthError(
             _("The browser could not be opened. Open the address shown by the application manually.")
