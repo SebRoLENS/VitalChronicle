@@ -36,7 +36,7 @@ not a replacement for professional medical advice.
 
 ## Download
 
-**[Download VitalChronicle 1.0.3 for Linux, Windows, or macOS](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest)**
+**[Download VitalChronicle 1.0.4 for Linux, Windows, or macOS](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest)**
 
 | Platform | Release package | Notes |
 |---|---|---|
@@ -45,7 +45,7 @@ not a replacement for professional medical advice.
 | macOS Apple Silicon | `.dmg` | Ad-hoc signed, not notarised |
 | macOS Intel x86-64 | `.dmg` | Ad-hoc signed, not notarised |
 | Python 3.10+ | Wheel and source archive | For development or unsupported systems |
-| Android | Not included in 1.0.3 | Requires a separate mobile UI and OAuth flow |
+| Android | Not included in 1.0.4 | Requires a separate mobile UI and OAuth flow |
 
 Windows and macOS packages are not signed with paid platform certificates. Download
 only from the official release page and verify `SHA256SUMS.txt`. The Linux AppImage is
@@ -190,7 +190,7 @@ remote services contacted are Google for authorised health-data access and the O
 registry when checking whether model weights have changed.
 
 The application deliberately retains the historical internal `GoogleHealthViewer` data
-directory name so that upgrading from 0.2.12 to VitalChronicle 1.0.3 preserves existing
+directory name so that upgrading from 0.2.12 to VitalChronicle 1.0.4 preserves existing
 records, credentials, and settings.
 
 ## Support development
