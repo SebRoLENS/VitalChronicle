@@ -54,6 +54,7 @@ enum class Screen(val label: String, val icon: ImageVector) {
     MaterialTheme(colorScheme=scheme, typography=Typography(), content=content)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable fun VitalApp(vm: VitalViewModel = viewModel()) {
     var screen by remember { mutableStateOf(Screen.Overview) }
     Scaffold(
@@ -177,6 +178,6 @@ enum class Screen(val label: String, val icon: ImageVector) {
 @Composable fun SectionTitle(title:String,subtitle:String){Column{Text(title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold);Text(subtitle,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}}
 @Composable fun EmptyCard(title:String,subtitle:String){Card{Column(Modifier.padding(18.dp)){Text(title,fontWeight=FontWeight.SemiBold);Text(subtitle,color=MaterialTheme.colorScheme.onSurfaceVariant)}}}
 @Composable fun ErrorCard(text:String){Card(colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.errorContainer)){Text(text,Modifier.padding(14.dp),color=MaterialTheme.colorScheme.onErrorContainer)}}
-@Composable fun SettingCard(icon:ImageVector,title:String,subtitle:String,action:@Composable()->Unit){Card{Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Icon(icon,null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text(title,fontWeight=FontWeight.SemiBold);Text(subtitle,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)};Spacer(Modifier.width(8.dp));action()}}}
+@Composable fun SettingCard(icon:ImageVector,title:String,subtitle:String,action: @Composable () -> Unit){Card{Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Icon(icon,null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text(title,fontWeight=FontWeight.SemiBold);Text(subtitle,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)};Spacer(Modifier.width(8.dp));action()}}}
 fun metricColor(type:String)=when { type.contains("heart")->Color(0xFFE84C4F);type.contains("sleep")->Color(0xFF7E57C2);type.contains("oxygen")->Color(0xFF4285F4);type.contains("weight")->Color(0xFF5C6BC0);type.contains("step")->Color(0xFF34A853);type.contains("temperature")->Color(0xFFE91E63);else->Color(0xFFF39C12)}
 fun formatMetric(v:Double)=if(kotlin.math.abs(v)>=100)"%.0f".format(v) else "%.1f".format(v)
