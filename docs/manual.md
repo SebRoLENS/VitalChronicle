@@ -1,7 +1,7 @@
 ---
 title: "VitalChronicle User Manual"
 author: "Sebastiano Romi"
-date: "Updated for VitalChronicle 1.1.2"
+date: "Updated for VitalChronicle 1.1.3"
 lang: en-US
 geometry: margin=2.2cm
 colorlinks: true
@@ -13,7 +13,7 @@ toc-depth: 3
 
 # About this manual
 
-This is the authoritative user manual for **VitalChronicle 1.1.2**. VitalChronicle is a
+This is the authoritative user manual for **VitalChronicle 1.1.3**. VitalChronicle is a
 local-first desktop dashboard for personal Google Health data and optional local AI
 analysis through Ollama.
 
@@ -43,8 +43,18 @@ VitalChronicle checks for a new public release shortly after startup without blo
 interface. The network check runs at most once per day; health data are never included in the
 request. To check immediately, choose **Help → Check for updates**. When a newer release is
 available, the dialog distinguishes maintenance, feature, and major updates and can open the
-official GitHub release page in the system browser. If postponed, the same release is not shown
-again for ten days.
+official GitHub release page in the system browser. Portable AppImage and Windows builds also
+offer **Update now** when the release contains the exact matching package. VitalChronicle
+downloads that asset beside the running file, verifies its SHA-256 checksum, replaces the file
+at the same path, and keeps the previous build with a `.previous` suffix. If postponed, the same
+release is not shown again for ten days.
+
+The badge next to the VitalChronicle title always shows the installed version. It turns amber
+and adds an upward arrow plus the latest version when an update is available. Selecting the
+normal badge starts an immediate check; selecting an update badge opens the official release.
+More precisely, the update badge refreshes the release metadata and opens the available update
+options. Python/virtual-environment and macOS installations use the release page because replacing
+those layouts automatically would not be reliably safe.
 
 Additional languages are maintained by the community on
 [Weblate](https://hosted.weblate.org/projects/vitalchronicle/application/) and are included in releases after
@@ -112,26 +122,26 @@ slow or may require more memory than the computer can provide.
 2. Make it executable:
 
    ```bash
-   chmod +x VitalChronicle-1.1.2-linux-x86_64.AppImage
+   chmod +x VitalChronicle-1.1.3-linux-x86_64.AppImage
    ```
 
 3. Start it:
 
    ```bash
-   ./VitalChronicle-1.1.2-linux-x86_64.AppImage
+   ./VitalChronicle-1.1.3-linux-x86_64.AppImage
    ```
 
 If FUSE is unavailable, run it with:
 
 ```bash
-APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.1.2-linux-x86_64.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.1.3-linux-x86_64.AppImage
 ```
 
 The AppImage is accompanied by a Sigstore bundle and release checksums.
 
 ## 3.2 Windows
 
-1. Download `VitalChronicle-1.1.2-windows-x86_64.exe`.
+1. Download `VitalChronicle-1.1.3-windows-x86_64.exe`.
 2. Verify its SHA-256 checksum against `SHA256SUMS.txt`.
 3. Start the executable.
 
@@ -360,7 +370,7 @@ from blocking health-data updates.
 ## 5.4 Storage locations
 
 VitalChronicle keeps the historical internal `GoogleHealthViewer` directory identifier so
-existing 0.2.12 archives survive the 1.1.2 upgrade. Typical locations are:
+existing 0.2.12 archives survive the 1.1.3 upgrade. Typical locations are:
 
 - Linux data: `~/.local/share/GoogleHealthViewer/`;
 - Linux configuration: `~/.config/GoogleHealthViewer/`;
@@ -482,7 +492,7 @@ The **Local AI analysis** tab is one coherent workspace with four internal secti
 The **Analysis and chat** section provides two main actions:
 
 - **Open AI chat** continues the most recent thread or creates one for the selected period;
-- **Deep analysis of complete history** creates a new thread using every locally available
+- **Analyse all data** creates a new thread using every locally available
   category, regardless of the question-period selector.
 
 For a first analysis:
@@ -491,15 +501,15 @@ For a first analysis:
 2. choose the hardware profile and an installed model;
 3. open **Model and tokens** if the output-token recommendation needs to be recalculated;
 4. choose the period immediately above the question actions when asking a focused question;
-5. select **Open AI chat** for that period, or **Deep analysis of complete history** to
+5. select **Open AI chat** for that period, or **Analyse all data** to
    inspect every locally stored category;
 6. enter a question and select **Send**;
 7. continue with follow-up questions in the same thread so recent dialogue is retained;
 8. inspect **Evidence** when an answer needs to be checked against the prepared statistics;
 9. select **Show prompt** in chat when the exact messages sent to Ollama need to be audited.
 
-The period selector applies to a new selected-period chat. It does not limit **Deep analysis
-of complete history**. The latter includes secondary numeric fields, sleep stages, workout
+The period selector applies to a new selected-period chat. It does not limit **Analyse all
+data**. The latter includes secondary numeric fields, sleep stages, workout
 types, heart-rate zones, body measurements, and any other locally available categories.
 
 ## 9.5 Conversation window, history, and data snapshots
@@ -626,6 +636,13 @@ partly observed interval is itself ranked evidence and is mandatory context for 
 This distinction is metric-specific: an irregular body-weight record is not expected every
 day, while daily totals such as steps can reveal missing calendar coverage. An interval is
 never considered complete merely because its requested dates span a month or year.
+
+For daily metrics, `missing_date_ranges` records every isolated or consecutive gap in a
+compact form. Each range includes its first and last date, length, and whether it is leading,
+internal, or trailing. Up to 64 ranges are included directly; longer histories report that
+the range list was truncated. Even minor gaps are kept as mandatory context: 29 observed days
+out of 32 is not complete, and a second metric with 32 days cannot hide the first metric's
+three missing dates. The AI is explicitly forbidden to fill or interpolate them.
 
 Google's dated personal heart-rate-zone limits are classified as
 `reference_configuration`. They describe the thresholds used to interpret other data; they
@@ -784,13 +801,31 @@ public issue containing credentials or health data.
 
 # 13. Android status
 
-VitalChronicle 1.1.2 does not ship an APK. The current application uses desktop Qt widgets,
+VitalChronicle 1.1.3 does not ship an APK. The current application uses desktop Qt widgets,
 a loopback-browser OAuth callback, desktop keyrings, and desktop chart interactions. A safe
 Android edition requires a dedicated mobile interface, Android OAuth credentials bound to
 a package name and signing certificate, mobile secure storage, lifecycle handling, and a
 separate validation effort. A repackaged desktop binary would not meet those requirements.
 
 # 14. Updates and releases
+
+## 14.1 In-app portable update
+
+When **Update now** is available, the installed package type determines the download:
+
+- a running Linux AppImage accepts only
+  `VitalChronicle-<version>-linux-x86_64.AppImage`;
+- a frozen Windows build accepts only
+  `VitalChronicle-<version>-windows-x86_64.exe`;
+- one format is never substituted with another.
+
+The replacement starts only after checksum verification. On Linux the current AppImage is
+replaced atomically and takes effect after restart. On Windows a small local helper completes
+the replacement after VitalChronicle closes, then restarts the app. In both cases the original
+file remains beside it with the `.previous` suffix. The application directory must be writable.
+If verification or replacement fails, the installed application remains unchanged.
+
+## 14.2 Release pipeline
 
 Every source change is validated on Linux, Windows, and macOS. The automatic release
 workflow prepares a semantic version, refreshes synthetic screenshots, builds the PDF

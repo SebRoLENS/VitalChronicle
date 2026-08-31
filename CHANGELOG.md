@@ -2,6 +2,22 @@
 
 All notable changes to VitalChronicle are documented here.
 
+## 1.1.3 — 2026-08-31
+
+- added exact compact missing-date ranges for the complete measurement scope and every
+  daily metric, including isolated and consecutive internal gaps;
+- made even minor gaps such as 29 observed days out of 32 mandatory AI coverage context,
+  while preventing one complete metric from hiding gaps in another;
+- instructed the local model never to fill, interpolate, or average across missing dates;
+- added a persistent clickable version badge that changes appearance and shows the latest
+  version whenever an update is available;
+- added verified in-app self-updates for portable Linux AppImages and Windows executables;
+  the matching package replaces the file in its current location and retains a backup;
+- shortened the AI question-period label and complete-history analysis button to prevent
+  truncation, while retaining their full explanations as tooltips;
+- added English/Italian translations, documentation, and regression tests, including
+  package-format selection, checksum failure, and same-path replacement coverage.
+
 ## 1.1.2 — 2026-08-31
 
 - fixed interval coverage being inflated by dated personal heart-rate-zone thresholds;

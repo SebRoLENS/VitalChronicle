@@ -10,6 +10,7 @@ from .constants import DATA_TYPES
 from .i18n import _
 from .local_ai import AIAnalysisCancelled, LocalAIError, OllamaClient
 from .oauth import CredentialStore, OAuthError, authenticate
+from .self_update import UpdateTarget, install_update
 from .storage import HealthStore
 from .updates import fetch_latest_release
 
@@ -199,6 +200,25 @@ class UpdateCheckThread(QThread):
         try:
             self.completed.emit(fetch_latest_release(self.current_version))
         except Exception as exc:  # noqa: BLE001 - thread boundary reports network failures.
+            self.failed.emit(str(exc))
+
+
+class AppUpdateThread(QThread):
+    progress = Signal(int, str)
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, release, target: UpdateTarget) -> None:
+        super().__init__()
+        self.release = release
+        self.target = target
+
+    def run(self) -> None:
+        try:
+            self.completed.emit(
+                install_update(self.release, self.target, self.progress.emit)
+            )
+        except Exception as exc:  # noqa: BLE001 - thread boundary reports failures.
             self.failed.emit(str(exc))
 
 

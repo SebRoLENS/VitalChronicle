@@ -15,9 +15,18 @@ LATEST_RELEASE_API = (
 
 
 @dataclass(frozen=True)
+class ReleaseAsset:
+    name: str
+    url: str
+    size: int = 0
+    digest: str | None = None
+
+
+@dataclass(frozen=True)
 class ReleaseInfo:
     version: str
     url: str
+    assets: tuple[ReleaseAsset, ...] = ()
 
 
 def semantic_version(value: str) -> tuple[int, int, int] | None:
@@ -57,7 +66,25 @@ def release_from_payload(payload: Any) -> ReleaseInfo:
     if parsed is None:
         raise ValueError("GitHub returned an unrecognised release version.")
     version = ".".join(str(value) for value in parsed)
-    return ReleaseInfo(version, str(payload.get("html_url") or RELEASES_URL))
+    assets = []
+    for item in payload.get("assets") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "")
+        url = str(item.get("browser_download_url") or "")
+        if not name or not url:
+            continue
+        try:
+            size = int(item.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        digest = str(item.get("digest") or "").strip() or None
+        assets.append(ReleaseAsset(name, url, size, digest))
+    return ReleaseInfo(
+        version,
+        str(payload.get("html_url") or RELEASES_URL),
+        tuple(assets),
+    )
 
 
 def fetch_latest_release(current_version: str) -> ReleaseInfo:
