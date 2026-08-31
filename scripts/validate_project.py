@@ -23,6 +23,7 @@ def main() -> int:
     version = declared_version()
     required_text = (
         "pyproject.toml",
+        "README.md",
         "docs/manual.md",
         "docs/quick-start.md",
         "docs/releasing.md",
@@ -35,7 +36,11 @@ def main() -> int:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "releases/latest" in readme
     assert "img.shields.io/github/v/release" in readme
-    assert f"VitalChronicle {version}" not in readme
+    assert (
+        f"[VitalChronicle v{version}]"
+        f"(https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v{version})"
+        in readme
+    )
     assert readme.count(SUPPORT_URL) >= 3
     assert "VitalChronicle is and will remain" in readme
     assert "http://localhost:8765/" in readme
@@ -72,6 +77,7 @@ def main() -> int:
         ".github/workflows/translations.yml",
         "docs/screenshots/overview.png",
         "docs/screenshots/data-explorer.png",
+        "docs/screenshots/ai-control-center.png",
         "docs/screenshots/local-ai.png",
         "docs/screenshots/ai-settings.png",
         "packaging/linux/vitalchronicle.desktop",

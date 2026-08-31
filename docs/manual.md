@@ -62,8 +62,12 @@ VitalChronicle can:
 - visualise each metric with an appropriate chart;
 - compare current values with a seven-day personal baseline;
 - export individual categories as CSV or the complete archive as ZIP/JSON;
-- prepare complete, time-aware summaries for a local Ollama model;
-- show the model's thinking while it runs and then display the final answer.
+- deterministically prepare personal baselines, trends, anomalies, data-quality limits,
+  structured sleep/workout comparisons, and cautious cross-metric associations;
+- run a two-pass complete-history analysis or answer questions about a selected period;
+- maintain private, persistent AI conversations with follow-up questions and pinned data;
+- show the model's thinking while it runs and replace it with the final answer in the
+  same assistant area.
 
 VitalChronicle does not upload health records to the developer or to a hosted AI
 provider. Google receives authenticated API requests, and local AI requests are sent to
@@ -463,6 +467,8 @@ declares a physical context limit.
 
 ## 9.4 AI control centre and conversation window
 
+![VitalChronicle AI control centre](screenshots/ai-control-center.png)
+
 The **Local AI analysis** tab is a control centre for Ollama status, hardware/model
 selection, the question-period selector, recent conversations, and two main actions:
 
@@ -470,28 +476,75 @@ selection, the question-period selector, recent conversations, and two main acti
 - **Deep analysis of complete history** creates a new thread using every locally available
   category, regardless of the question-period selector.
 
-The chat opens in a separate resizable window. Its left sidebar lists locally saved
-threads; the main area contains the full dialogue, one composer for follow-up questions,
-and controls to stop generation, regenerate, copy the latest answer, export Markdown, and
-inspect ranked evidence. Threads can be renamed or deleted without affecting health data.
+For a first analysis:
 
-Every thread stores a compact, processed data snapshot. Its header states when the data
-were analysed. If a later Google synchronisation changes the local archive, the thread is
-not silently altered: **Refresh conversation data** appears and the refresh is recorded as
-an event in the dialogue.
+1. confirm that the status indicator reports Ollama as available;
+2. choose the hardware profile and an installed model;
+3. open **AI settings** if the output-token recommendation needs to be recalculated;
+4. choose the period immediately above the question actions when asking a focused question;
+5. select **Open AI chat** for that period, or **Deep analysis of complete history** to
+   inspect every locally stored category;
+6. enter a question and select **Send**;
+7. continue with follow-up questions in the same thread so recent dialogue is retained;
+8. inspect **Evidence** when an answer needs to be checked against the prepared statistics.
 
-## 9.5 Periods and conversational context
+The period selector applies to a new selected-period chat. It does not limit **Deep analysis
+of complete history**. The latter includes secondary numeric fields, sleep stages, workout
+types, heart-rate zones, body measurements, and any other locally available categories.
+
+## 9.5 Conversation window, history, and data snapshots
+
+![VitalChronicle persistent local AI conversation](screenshots/local-ai.png)
+
+The chat opens in a separate, resizable window so a long answer can be read without
+compressing the dashboard. Its left sidebar lists locally saved threads, while the main
+area contains the complete dialogue and one composer for continuing the conversation.
+
+| Control | Effect |
+|---|---|
+| **New chat** | Creates an independent selected-period conversation |
+| **Deep analysis** | Creates a complete-history thread and starts the two-pass analysis |
+| **Send** | Adds a question or follow-up to the current thread |
+| **Stop** | Requests cancellation without deleting the existing conversation |
+| **Regenerate** | Repeats the most recent answer using the same thread and data snapshot |
+| **Copy answer** | Copies the latest completed answer |
+| **Export Markdown** | Saves a readable local copy of the dialogue |
+| **Evidence** | Shows the ranked deterministic evidence available to the model |
+| **Rename / Delete** | Manages only the selected local thread |
+
+Each conversation pins a compact processed snapshot, its selected period, model, and data
+revision. A later Google synchronisation therefore does not silently change the evidence
+behind an old answer. If the archive becomes newer, the header reports that newer local
+data exist and offers **Refresh conversation data**. Refreshing replaces the pinned
+snapshot and records the event in the dialogue.
+
+Recent user and assistant messages are supplied to the model for follow-up continuity.
+Older turns are compacted into short excerpts so they do not consume the entire model
+context. Thinking text is transient and is not stored as a second answer.
+
+Threads and their snapshots are stored locally in `ai_conversations.json`, next to the
+historical VitalChronicle data archive, with restrictive file permissions where supported.
+Deleting a thread does not delete health records. The privacy command that removes all
+local data also clears conversations and credentials.
+
+## 9.6 Periods and time-of-day handling
 
 New chats and direct questions use the explicit period selector: Today, last seven days,
 last month, last year, all data, or a custom interval. A complete-history analysis always
-uses the full local archive. Follow-up questions retain recent user/assistant turns; older
-turns are compacted into short continuity excerpts so the model context remains usable.
+uses the full local archive.
 
 For totals that accumulate during the day, VitalChronicle compares the partial value with
 previous days at the same local time when possible. It does not treat an absent current-day
-value as zero or extrapolate a morning total into an entire day.
+value as zero, compare a morning partial total with completed days, or extrapolate that
+partial total into an entire day. At least three comparable earlier days are required
+before a same-time difference becomes ranked evidence.
 
-## 9.6 Deterministic data preparation
+This rule is intended for cumulative metrics such as steps, distance, active minutes, and
+energy. Physiological measurements such as resting heart rate, HRV, oxygen saturation, and
+respiratory rate are described as neutral deviations from a personal baseline rather than
+as goals to complete.
+
+## 9.7 Deterministic data preparation
 
 Before a health snapshot is sent to local Ollama, Python calculates the evidence that a
 language model would otherwise have to infer unreliably from raw records:
@@ -505,22 +558,60 @@ language model would otherwise have to infer unreliably from raw records:
 - same-day and exploratory one-day-lagged associations supported by repeated paired days;
 - ranked evidence with explicit confidence and interpretation caveats.
 
+The main evidence families are:
+
+- **Personal baseline — 7, 28, and 90-day windows:** mean, median, standard
+  deviation, minimum, and maximum for the individual user.
+- **Matched change — at least three observed days in each adjacent seven-day window:**
+  recent mean versus the immediately preceding equivalent period.
+- **Multiweek trend — at least five observed days within 28 days:** direction, weekly
+  slope, and goodness of fit; confidence increases with coverage.
+- **Robust anomaly — at least seven observations within 90 days:** median/MAD deviation,
+  which is less sensitive to isolated extremes than mean and standard deviation.
+- **Weekly pattern — at least two samples for at least four weekdays:** repeated
+  day-of-week differences rather than one-off daily changes.
+- **Coverage and gaps:** expected versus observed daily samples, missing intervals,
+  recency, and the resulting interpretation limits.
+- **Same-time comparison — at least three comparable earlier days:** a fair comparison
+  of an incomplete cumulative day at the current local time.
+- **Cross-metric association — at least ten paired days:** same-day or exploratory
+  one-day-lagged co-movement, never causality.
+
+Sleep stages are compared over the latest seven days and the preceding seven days.
+Workout types are summarized over the latest 28 days and the preceding 28 days. Recent
+heart-rate-zone and active-minute categories are kept as structured totals instead of
+being flattened into ambiguous prose.
+
 This preparation is descriptive, not diagnostic. A higher or lower value is not labelled
 as better or worse, associations never imply causality, and missing measurements are never
 converted to zero.
+
+## 9.8 Ranked evidence and deep synthesis
+
+Potential observations are scored by magnitude, repeated support, coverage, and statistical
+reliability. At most 20 candidate insights are included, with the strongest evidence IDs
+prioritized for synthesis. Low-coverage warnings can outrank an apparent trend because a
+missing-data limitation may be more important than the numerical change itself.
 
 Complete-history analysis uses two model passes: an evidence-selection pass rejects weak
 or redundant claims, then a synthesis pass writes the user-facing answer. Direct questions
 use the same prepared evidence with conversational history and a faster single synthesis.
 
-## 9.7 Thinking display
+The evidence drawer exposes the headline, confidence, score, and evidence identifier used
+for this process. It is a verification aid: confidence describes support in the available
+personal history, not medical certainty. Increasing the output-token setting can allow a
+longer explanation, but it cannot create evidence that is absent from the archive.
+
+## 9.9 Thinking, stopping, and regeneration
 
 During a request, the current assistant area streams the model's thinking. When final
 answer text begins, that same area changes to the answer; no second thinking panel is
-created. **Stop** requests cancellation. If a thinking-capable model ends without a final
-answer, VitalChronicle automatically retries with thinking disabled.
+created. **Stop** requests cancellation; already completed messages remain available.
+**Regenerate** removes only the latest assistant response and requests a replacement from
+the same pinned snapshot. If a thinking-capable model ends without a final answer,
+VitalChronicle automatically retries with thinking disabled.
 
-## 9.8 Interpretation limits
+## 9.10 Interpretation limits
 
 Local language models can misunderstand data, omit important context, or produce
 incorrect statements. Wearable measurements also contain artefacts. Review the underlying
@@ -576,11 +667,31 @@ Confirm that the category contains meaningful values in the selected period. Som
 daily summaries arrive only after sleep processing or later in the day. Categories with no
 actual swimming lengths remain hidden even if an empty API record exists.
 
+## 10.9 The AI chat reports newer local data
+
+This is expected after a Google synchronisation. The existing answer remains tied to its
+original snapshot. Select **Refresh conversation data** to update that thread explicitly,
+or create a new conversation if the old analysis should remain reproducible.
+
+## 10.10 An AI answer is too short or superficial
+
+For a broad health review, use **Deep analysis of complete history**, not a short selected
+period. Confirm that the evidence drawer contains adequate coverage across the relevant
+metrics. A larger output-token value may allow more explanation, but missing or sparse
+measurements remain a real limitation. Focused follow-up questions often produce a clearer
+comparison than asking for every possible interpretation at once.
+
+## 10.11 A conversation is missing after local-data removal
+
+The privacy removal command intentionally clears the health database, OAuth credentials,
+and `ai_conversations.json` together. Export important conversations to Markdown before
+confirming that operation.
+
 # 11. Removing local data
 
-Use **Privacy → Elimina dati locali e accesso…**. This operation requires confirmation and
-removes the local database and stored Google credentials. Export anything you want to keep
-before confirming.
+Use **Privacy → Delete local data and access…**. This operation requires confirmation and
+removes the local database, AI conversations, and stored Google credentials. Export
+anything you want to keep before confirming.
 
 You can also revoke the OAuth grant from your Google Account security settings and delete
 the personal OAuth client from Google Cloud.

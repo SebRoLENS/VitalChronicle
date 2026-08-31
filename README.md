@@ -36,11 +36,13 @@ not a replacement for professional medical advice.
 
 ## Download
 
+**Current release: [VitalChronicle v1.0.9](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.0.9)**
+
 **[Download the latest VitalChronicle release for Linux, Windows, or macOS](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest)**
 
-The exact current version is always shown by the **release** badge at the top of this
-README and by GitHub on the linked release page. These links update automatically whenever
-a new version is published.
+The release workflow rewrites the explicit version and tag link above whenever it publishes
+a new version. The **release** badge and generic download links also follow GitHub's latest
+release; the explicit line does not depend on the external badge cache.
 
 | Platform | Release package | Notes |
 |---|---|---|
