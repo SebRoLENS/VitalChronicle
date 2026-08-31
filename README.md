@@ -81,10 +81,18 @@ vertical ranges for noisy measurements. Panning and zooming operate on time.
 
 ![VitalChronicle local AI analysis interface](docs/screenshots/local-ai.png)
 
-The AI page streams model thinking and then replaces it with the final answer in the
-same panel. Automatic analysis uses the complete local history; direct questions use the
-explicitly selected period. Incomplete current-day totals are compared with previous
-days at the same time of day.
+The AI tab is a control centre; conversations open in a larger, resizable window with
+local thread history, follow-up questions, stop/regenerate controls, Markdown export,
+and an evidence drawer. Thinking and the final answer share one assistant area. Each
+conversation pins its data snapshot and visibly offers a refresh when newer local data
+become available.
+
+Before Ollama receives anything, deterministic Python preparation calculates personal
+7/28/90-day baselines, matched recent-versus-previous periods, robust anomalies, trends,
+weekly patterns, coverage gaps, sleep-stage and workout comparisons, plus same-day and
+one-day-lagged associations. Evidence is ranked so the model can synthesize sustained,
+multi-metric patterns instead of merely reporting that one day differs from another.
+Incomplete cumulative totals are compared only with previous days at the same local time.
 
 ### AI memory and token settings
 
@@ -105,7 +113,12 @@ value remains editable and is limited only by the physical context reported by O
   workouts, sedentary time, body measurements, and other available categories;
 - readable time windows and robust vertical scales for dense measurements;
 - seven-day personal baselines and transparent statistical bands;
-- local Qwen analysis through Ollama, with NVIDIA 16 GB and CPU-only 32 GB profiles;
+- deterministic AI preparation with matched periods, multi-horizon personal baselines,
+  robust anomaly detection, data-quality scoring, and cautious cross-metric associations;
+- persistent local AI conversations in a separate resizable window, including follow-up
+  questions, pinned/updatable data snapshots, visible thinking, evidence, export, and stop;
+- two-pass complete-history synthesis through local Qwen/Ollama, with NVIDIA 16 GB and
+  CPU-only 32 GB profiles;
 - model-update notifications and model-context-aware token recommendations;
 - automatic in-app checks for new VitalChronicle releases, with a manual
   **Help → Check for updates** command and a direct link to the download page;
@@ -118,7 +131,7 @@ value remains editable and is limited only by the physical context reported by O
 1. Download the package for your operating system from the
    [latest release](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest).
 2. Start VitalChronicle.
-3. Select **Configurazione Google** and follow the wizard.
+3. Select **Google setup** and follow the wizard.
 4. Create a personal Google Cloud project, enable the Google Health API, and add your
    account as a test user if the OAuth project is in Testing mode.
 5. Create an OAuth client of type **Web application** with this exact redirect URI:
@@ -128,7 +141,7 @@ value remains editable and is limited only by the physical context reported by O
    ```
 
 6. Download the OAuth JSON once and import it in the wizard.
-7. Sign in through the browser and select **Scarica / aggiorna**.
+7. Sign in through the browser and select **Download / update**.
 
 The complete procedure, screenshots, scope list, and troubleshooting steps are in the
 **[detailed user manual](docs/manual.md)**. A versioned PDF manual is attached to every

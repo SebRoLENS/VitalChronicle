@@ -330,7 +330,7 @@ is not exposed to the internet. Do not close VitalChronicle during authenticatio
 
 ## 5.1 First download
 
-Choose a period in the top bar and select **Scarica / aggiorna**. The first download can
+Choose a period in the top bar and select **Download / update**. The first download can
 take time because many data categories are paginated independently.
 
 One failed or unavailable category does not stop the others. VitalChronicle completes the
@@ -418,12 +418,12 @@ Exports are not restricted by those display limits.
 
 ## 8.1 Current category
 
-Select a category and choose **Esporta CSV**. The CSV contains flattened original fields
+Select a category and choose **Export CSV**. The CSV contains flattened original fields
 and is suitable for spreadsheets or independent analysis.
 
 ## 8.2 Complete archive
 
-Choose **Esporta archivio** to create a ZIP containing JSON Lines files for downloaded
+Choose **Export archive** to create a ZIP containing JSON Lines files for downloaded
 categories plus account/device resources. Treat exported archives as sensitive health
 records and store them appropriately.
 
@@ -456,31 +456,71 @@ registry. Only model metadata are used for that update check; health data are no
 
 ## 9.3 RAM and token recommendation
 
-Open **Impostazioni AI**, enter installed RAM in GB, and request a recommendation. The
+Open **AI settings**, enter installed RAM in GB, and request a recommendation. The
 estimate considers model size, CPU/GPU profile, and the context length reported by
 Ollama. The token value remains manually editable and is capped only when the model
 declares a physical context limit.
 
-## 9.4 Complete analysis versus questions
+## 9.4 AI control centre and conversation window
 
-**Analizza tutta la cronologia** ignores the period displayed for questions and prepares a
-summary from all locally stored categories, including secondary numeric fields, sleep
-stages, workout types, and structured categorical details.
+The **Local AI analysis** tab is a control centre for Ollama status, hardware/model
+selection, the question-period selector, recent conversations, and two main actions:
 
-**Rispondi alla domanda** uses the explicit period selector inside the AI page: Today,
-last seven days, last month, last year, all data, or a custom interval.
+- **Open AI chat** continues the most recent thread or creates one for the selected period;
+- **Deep analysis of complete history** creates a new thread using every locally available
+  category, regardless of the question-period selector.
+
+The chat opens in a separate resizable window. Its left sidebar lists locally saved
+threads; the main area contains the full dialogue, one composer for follow-up questions,
+and controls to stop generation, regenerate, copy the latest answer, export Markdown, and
+inspect ranked evidence. Threads can be renamed or deleted without affecting health data.
+
+Every thread stores a compact, processed data snapshot. Its header states when the data
+were analysed. If a later Google synchronisation changes the local archive, the thread is
+not silently altered: **Refresh conversation data** appears and the refresh is recorded as
+an event in the dialogue.
+
+## 9.5 Periods and conversational context
+
+New chats and direct questions use the explicit period selector: Today, last seven days,
+last month, last year, all data, or a custom interval. A complete-history analysis always
+uses the full local archive. Follow-up questions retain recent user/assistant turns; older
+turns are compacted into short continuity excerpts so the model context remains usable.
 
 For totals that accumulate during the day, VitalChronicle compares the partial value with
 previous days at the same local time when possible. It does not treat an absent current-day
 value as zero or extrapolate a morning total into an entire day.
 
-## 9.5 Thinking display
+## 9.6 Deterministic data preparation
 
-During a request, one output area streams the model's thinking. When a final answer is
-available, the same area is replaced with the answer. If a thinking-capable model ends
-without a final answer, VitalChronicle automatically retries with thinking disabled.
+Before a health snapshot is sent to local Ollama, Python calculates the evidence that a
+language model would otherwise have to infer unreliably from raw records:
 
-## 9.6 Interpretation limits
+- personal baselines over 7, 28, and 90 days;
+- a matched seven-day period compared with the preceding seven-day period;
+- multiweek slope, variability, and day-of-week patterns;
+- robust personal anomalies based on the median and median absolute deviation;
+- expected daily coverage, missing intervals, and observation recency;
+- recent-versus-previous sleep-stage and workout-type summaries;
+- same-day and exploratory one-day-lagged associations supported by repeated paired days;
+- ranked evidence with explicit confidence and interpretation caveats.
+
+This preparation is descriptive, not diagnostic. A higher or lower value is not labelled
+as better or worse, associations never imply causality, and missing measurements are never
+converted to zero.
+
+Complete-history analysis uses two model passes: an evidence-selection pass rejects weak
+or redundant claims, then a synthesis pass writes the user-facing answer. Direct questions
+use the same prepared evidence with conversational history and a faster single synthesis.
+
+## 9.7 Thinking display
+
+During a request, the current assistant area streams the model's thinking. When final
+answer text begins, that same area changes to the answer; no second thinking panel is
+created. **Stop** requests cancellation. If a thinking-capable model ends without a final
+answer, VitalChronicle automatically retries with thinking disabled.
+
+## 9.8 Interpretation limits
 
 Local language models can misunderstand data, omit important context, or produce
 incorrect statements. Wearable measurements also contain artefacts. Review the underlying

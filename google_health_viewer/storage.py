@@ -367,6 +367,21 @@ class HealthStore:
         except (TypeError, ValueError):
             return None
 
+    def data_revision(self) -> str | None:
+        """Return a stable timestamp for detecting data newer than an AI snapshot."""
+
+        with self._connect() as db:
+            row = db.execute(
+                """
+                SELECT MAX(updated_at) AS revision FROM (
+                    SELECT updated_at FROM records
+                    UNION ALL
+                    SELECT updated_at FROM resources
+                )
+                """
+            ).fetchone()
+        return str(row["revision"]) if row and row["revision"] else None
+
     def export_csv(self, data_type: str, destination: Path) -> int:
         records = self.list_records(data_type, limit=10_000_000)
         flattened = []

@@ -32,6 +32,8 @@ QPushButton#primaryButton {
     padding: 9px 16px;
 }
 QPushButton#primaryButton:hover { background: #1765CC; }
+QPushButton#dangerButton { color: #B3261E; border-color: #F1C5C2; }
+QPushButton#dangerButton:hover { background: #FCE8E6; border-color: #E6A5A0; }
 QLabel#appTitle { font-size: 18pt; font-weight: 700; color: #174EA6; }
 QLabel#pageTitle { font-size: 20pt; font-weight: 700; color: #202124; }
 QLabel#pageSubtitle { color: #5F6368; font-size: 11pt; }
@@ -67,6 +69,30 @@ QFrame#metricCard, QFrame#chartCard, QFrame#aiCard, QFrame#statCard {
     border: 1px solid #E1E5EB;
     border-radius: 14px;
 }
+QFrame#aiLaunchCard {
+    background: #EEF4FF;
+    border: 1px solid #C7D7F4;
+    border-radius: 16px;
+}
+QFrame#chatSidebar {
+    background: #F0F4FA;
+    border: 1px solid #DCE3EE;
+    border-radius: 14px;
+}
+QFrame#chatComposer {
+    background: #FFFFFF;
+    border: 1px solid #D2E3FC;
+    border-radius: 14px;
+}
+QLabel#chatSectionTitle { font-size: 13pt; font-weight: 700; color: #174EA6; }
+QLabel#chatBadge {
+    color: #174EA6;
+    background: #E8F0FE;
+    border-radius: 9px;
+    padding: 5px 9px;
+    font-size: 9pt;
+    font-weight: 700;
+}
 QFrame#thinkingCard, QFrame#answerCard {
     background: #F8FAFD;
     border: 1px solid #D2E3FC;
@@ -86,14 +112,33 @@ QFrame#overviewHero {
     border: 1px solid #D2E3FC;
     border-radius: 16px;
 }
-QTreeWidget, QTableWidget, QPlainTextEdit, QTextBrowser, QComboBox, QDateEdit {
+QTreeWidget, QTableWidget, QListWidget, QPlainTextEdit, QTextBrowser, QComboBox, QDateEdit {
     background: #FFFFFF;
     border: 1px solid #DADCE0;
     border-radius: 8px;
     selection-background-color: #D2E3FC;
     selection-color: #174EA6;
 }
-QTreeWidget, QTableWidget { alternate-background-color: #F8FAFD; }
+QTreeWidget, QTableWidget, QListWidget { alternate-background-color: #F8FAFD; }
+QListWidget#conversationList, QListWidget#recentConversationList {
+    padding: 5px;
+    outline: none;
+}
+QListWidget#conversationList::item, QListWidget#recentConversationList::item {
+    border-radius: 9px;
+    padding: 9px;
+    margin: 2px;
+}
+QListWidget#conversationList::item:selected, QListWidget#recentConversationList::item:selected {
+    background: #D2E3FC;
+    color: #174EA6;
+}
+QTextBrowser#chatTranscript {
+    border: 1px solid #E1E5EB;
+    border-radius: 14px;
+    padding: 14px;
+}
+QTreeWidget#evidenceDrawer { background: #F8FAFD; border-color: #D2E3FC; }
 QHeaderView::section {
     background: #F1F3F4;
     color: #5F6368;

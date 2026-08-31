@@ -31,6 +31,7 @@ def test_upsert_and_export(tmp_path: Path):
     with zipfile.ZipFile(archive) as zipped:
         assert "steps.jsonl" in zipped.namelist()
         assert "account-and-devices.json" in zipped.namelist()
+    assert store.data_revision() is not None
 
 
 def test_sync_ranges_return_only_gaps_and_always_refresh_today(tmp_path: Path):
