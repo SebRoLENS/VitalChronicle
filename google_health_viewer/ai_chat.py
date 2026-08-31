@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import re
+import time
 import traceback
 from collections.abc import Callable
 from pathlib import Path
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QSplitter,
     QTextBrowser,
@@ -98,6 +100,13 @@ class AIChatWindow(QMainWindow):
         self._answer_received = False
         self._pending_mode = "question"
         self._prompt_sections: list[str] = []
+        self._activity_active = False
+        self._activity_started_at = 0.0
+        self._activity_events: list[str] = []
+        self._activity_phase = ""
+        self._activity_timer = QTimer(self)
+        self._activity_timer.setInterval(1000)
+        self._activity_timer.timeout.connect(self._update_activity_elapsed)
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
         self._render_timer.timeout.connect(self._render_transcript)
@@ -175,6 +184,38 @@ class AIChatWindow(QMainWindow):
         self.coverage_label.setWordWrap(True)
         self.coverage_label.setVisible(False)
         conversation_layout.addWidget(self.coverage_label)
+
+        self.activity_panel = QFrame()
+        self.activity_panel.setObjectName("aiActivityPanel")
+        activity_layout = QVBoxLayout(self.activity_panel)
+        activity_layout.setContentsMargins(14, 11, 14, 11)
+        activity_layout.setSpacing(6)
+        activity_header = QHBoxLayout()
+        self.activity_title = QLabel(_("VitalChronicle AI is working"))
+        self.activity_title.setObjectName("activityTitle")
+        activity_header.addWidget(self.activity_title, 1)
+        self.activity_elapsed = QLabel()
+        self.activity_elapsed.setObjectName("activityElapsed")
+        activity_header.addWidget(self.activity_elapsed)
+        activity_layout.addLayout(activity_header)
+        activity_hint = QLabel(
+            _("This may take some time depending on your model and hardware.")
+        )
+        activity_hint.setObjectName("activityHint")
+        activity_hint.setWordWrap(True)
+        activity_layout.addWidget(activity_hint)
+        self.activity_progress = QProgressBar()
+        self.activity_progress.setObjectName("aiActivityProgress")
+        self.activity_progress.setRange(0, 0)
+        self.activity_progress.setTextVisible(False)
+        self.activity_progress.setMaximumHeight(7)
+        activity_layout.addWidget(self.activity_progress)
+        self.activity_log = QLabel()
+        self.activity_log.setObjectName("activityLog")
+        self.activity_log.setWordWrap(True)
+        activity_layout.addWidget(self.activity_log)
+        self.activity_panel.setVisible(False)
+        conversation_layout.addWidget(self.activity_panel)
 
         self.transcript = QTextBrowser()
         self.transcript.setObjectName("chatTranscript")
@@ -362,6 +403,7 @@ class AIChatWindow(QMainWindow):
             return
         self._snapshot_action = (action, scope, auto_start, question)
         self.snapshot_label.setText(_("Preparing deterministic health evidence…"))
+        self._begin_activity(_("Reading and preparing local health data…"))
         self.refresh_data_button.setEnabled(False)
         self.send_button.setEnabled(False)
         self.snapshot_thread = SnapshotBuildThread(self.snapshot_builder, scope, period)
@@ -380,6 +422,7 @@ class AIChatWindow(QMainWindow):
         self.refresh_data_button.setEnabled(True)
         self.send_button.setEnabled(True)
         if not snapshot.get("metrics"):
+            self._finish_activity()
             QMessageBox.information(
                 self,
                 _("Insufficient data"),
@@ -414,6 +457,7 @@ class AIChatWindow(QMainWindow):
         self.refresh_threads(select_id=thread_id)
         self._load_current_thread()
         if auto_start:
+            self._activity_event(_("Health evidence is ready; preparing the AI request…"))
             QTimer.singleShot(
                 0,
                 lambda: self._start_request(
@@ -421,9 +465,12 @@ class AIChatWindow(QMainWindow):
                     "deep" if scope == "all" and not question else "question",
                 ),
             )
+        else:
+            self._finish_activity()
 
     def _snapshot_failed(self, message: str) -> None:
         self._snapshot_action = None
+        self._finish_activity()
         self.refresh_data_button.setEnabled(True)
         self.send_button.setEnabled(True)
         self._load_current_thread()
@@ -473,6 +520,10 @@ class AIChatWindow(QMainWindow):
         self.prompt_button.setEnabled(False)
         self.prompt_button.setChecked(False)
         self._set_running(True)
+        if self._activity_active:
+            self._activity_event(_("Question received; preparing the request for Ollama…"))
+        else:
+            self._begin_activity(_("Question received; preparing the request for Ollama…"))
         self.refresh_threads(select_id=thread["id"])
         self._render_transcript()
         self.analysis_thread = AIAnalysisThread(
@@ -493,6 +544,9 @@ class AIChatWindow(QMainWindow):
         self.analysis_thread.start()
 
     def _thinking_chunk(self, text: str) -> None:
+        if self._activity_phase != "thinking":
+            self._activity_phase = "thinking"
+            self._activity_event(_("Ollama is processing the health evidence…"))
         self._live_thinking += text
         self._schedule_render()
 
@@ -500,11 +554,20 @@ class AIChatWindow(QMainWindow):
         if not self._answer_received:
             self._answer_received = True
             self._live_thinking = ""
+            self._activity_phase = "answer"
+            self._activity_event(_("The model is writing the final answer…"))
         self._live_answer += text
         self._schedule_render()
 
     def _prompt_ready(self, text: str) -> None:
         self._prompt_sections.append(text)
+        prompt_number = len(self._prompt_sections)
+        if self._pending_mode == "deep" and prompt_number == 1:
+            self._activity_event(_("Ollama is ranking the strongest longitudinal evidence…"))
+        elif prompt_number <= 2:
+            self._activity_event(_("The evidence is ready; Ollama is building the analysis…"))
+        else:
+            self._activity_event(_("The model is retrying with a compact evidence packet…"))
         self.prompt_view.setPlainText("\n\n" + ("\n\n" + "=" * 72 + "\n\n").join(self._prompt_sections))
         self.prompt_button.setEnabled(True)
 
@@ -521,6 +584,7 @@ class AIChatWindow(QMainWindow):
             )
         self._live_thinking = ""
         self._live_answer = ""
+        self._finish_activity()
         self._set_running(False)
         self.refresh_threads(select_id=self.current_thread_id)
         self._load_current_thread()
@@ -534,6 +598,7 @@ class AIChatWindow(QMainWindow):
             )
         self._live_thinking = ""
         self._live_answer = ""
+        self._finish_activity()
         self._set_running(False)
         self.refresh_threads(select_id=self.current_thread_id)
         self._load_current_thread()
@@ -555,6 +620,7 @@ class AIChatWindow(QMainWindow):
             )
         self._live_thinking = ""
         self._live_answer = ""
+        self._finish_activity()
         self._set_running(False)
         self.refresh_threads(select_id=self.current_thread_id)
         self._load_current_thread()
@@ -717,6 +783,42 @@ class AIChatWindow(QMainWindow):
         self.stop_button.setEnabled(running)
         self.thread_list.setEnabled(not running)
         self.input.setEnabled(not running)
+
+    def _begin_activity(self, stage: str) -> None:
+        self._activity_active = True
+        self._activity_started_at = time.monotonic()
+        self._activity_events = []
+        self._activity_phase = ""
+        self.activity_panel.setVisible(True)
+        self._activity_timer.start()
+        self._activity_event(stage)
+        self._update_activity_elapsed()
+
+    def _activity_event(self, stage: str) -> None:
+        if not self._activity_active:
+            return
+        if self._activity_events and self._activity_events[-1] == stage:
+            return
+        self._activity_events.append(stage)
+        self.activity_log.setText(
+            "\n".join(f"• {message}" for message in self._activity_events[-4:])
+        )
+
+    def _update_activity_elapsed(self) -> None:
+        if not self._activity_active:
+            return
+        elapsed = max(0, int(time.monotonic() - self._activity_started_at))
+        minutes, seconds = divmod(elapsed, 60)
+        self.activity_elapsed.setText(
+            _("Working · {minutes:02d}:{seconds:02d}", minutes=minutes, seconds=seconds)
+        )
+
+    def _finish_activity(self) -> None:
+        self._activity_active = False
+        self._activity_timer.stop()
+        self.activity_panel.setVisible(False)
+        self._activity_events = []
+        self._activity_phase = ""
 
     def _current_thread(self) -> dict[str, Any] | None:
         return (

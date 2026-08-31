@@ -2,6 +2,17 @@
 
 All notable changes to VitalChronicle are documented here.
 
+## 1.1.6 — 2026-08-31
+
+- added a prominent animated working panel to the local-AI chat;
+- shows elapsed time and explains that processing time depends on the selected model and
+  hardware;
+- reports genuine application stages for local-data preparation, evidence ranking, Ollama
+  processing, synthesis, compact retry, and final-answer generation;
+- keeps the existing unified thinking/answer transcript unchanged and avoids invented
+  completion percentages;
+- added English/Italian translations, interface styling, documentation, and regression tests.
+
 ## 1.1.5 — 2026-08-31
 
 - automated maintenance release with validated application and packaging updates.

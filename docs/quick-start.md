@@ -1,6 +1,6 @@
 # VitalChronicle Quick Start
 
-Updated for VitalChronicle **1.1.5**.
+Updated for VitalChronicle **1.1.6**.
 
 1. Download the package for your operating system from the
    [latest GitHub release](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest).
@@ -25,6 +25,8 @@ Updated for VitalChronicle **1.1.5**.
    read the permanent English model rules. They are excluded from Weblate, while the final
    answer still follows the selected interface language. The preprocessing and conversation
    history remain local.
+   While Ollama works, an animated panel confirms the accepted request and shows elapsed time
+   plus the latest real preparation or inference stages.
 
 If the selected period is only partly represented—for example, one observed week inside a
 requested month—VitalChronicle shows the actual measurement dates and requires the AI to limit

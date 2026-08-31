@@ -128,6 +128,17 @@ QFrame#chatComposer {
     border: 1px solid #D2E3FC;
     border-radius: 14px;
 }
+QFrame#aiActivityPanel {
+    background: #EEF6FF;
+    border: 1px solid #AECBFA;
+    border-radius: 12px;
+}
+QLabel#activityTitle { color: #174EA6; font-weight: 700; font-size: 10.5pt; }
+QLabel#activityElapsed { color: #174EA6; font-weight: 700; }
+QLabel#activityHint { color: #5F6368; }
+QLabel#activityLog { color: #3C4043; font-size: 9pt; }
+QProgressBar#aiActivityProgress { background: #D2E3FC; border-radius: 3px; }
+QProgressBar#aiActivityProgress::chunk { background: #1A73E8; border-radius: 3px; }
 QLabel#chatSectionTitle { font-size: 13pt; font-weight: 700; color: #174EA6; }
 QLabel#chatBadge {
     color: #174EA6;
