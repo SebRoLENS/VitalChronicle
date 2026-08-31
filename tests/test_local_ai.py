@@ -17,6 +17,8 @@ def test_local_ai_profile_is_current_and_medically_guarded():
     assert "correlations" in SYSTEM_PROMPT.lower()
     assert "same_time_mean" in SYSTEM_PROMPT
     assert "incomplete day" in SYSTEM_PROMPT
+    assert "requested_interval_coverage" in SYSTEM_PROMPT
+    assert "one observed week" in SYSTEM_PROMPT
 
 
 def test_hardware_profiles_offer_larger_models():
@@ -364,3 +366,44 @@ def test_follow_up_history_is_sent_before_current_question(monkeypatch):
         {"role": "assistant", "content": "Sleep is stable."},
         {"role": "user", "content": "Current request: And what about HRV?"},
     ]
+
+
+def test_exact_prompt_is_exposed_for_each_model_request(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+        reason = "OK"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self, decode_unicode=False):
+            return [json.dumps({"message": {"content": "Answer"}})]
+
+    monkeypatch.setattr(
+        "google_health_viewer.local_ai.requests.post",
+        lambda *_args, **_kwargs: FakeResponse(),
+    )
+    prompts = []
+    OllamaClient().analyze_stream(
+        {
+            "metrics": [{"data_type": "steps"}],
+            "requested_interval_coverage": {
+                "scope_is_partially_observed": True,
+                "coverage_notice": "Only seven days are observed.",
+            },
+        },
+        "Analyse the last month",
+        prompt_callback=prompts.append,
+    )
+
+    assert len(prompts) == 1
+    assert "# Final synthesis request" in prompts[0]
+    assert "requested_interval_coverage" in prompts[0]
+    assert "Analyse the last month" in prompts[0]
+    assert SYSTEM_PROMPT in prompts[0]
