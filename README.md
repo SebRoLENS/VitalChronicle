@@ -36,7 +36,7 @@ not a replacement for professional medical advice.
 
 ## Download
 
-**Current release: [VitalChronicle v1.1.2](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.2)**
+**Current release: [VitalChronicle v1.1.3](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.3)**
 
 **[Download the latest VitalChronicle release for Linux, Windows, or macOS](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest)**
 
@@ -112,6 +112,11 @@ If a month was requested but only one week is observed, the interface reports bo
 and the AI must begin by limiting its conclusions to that week. Missing measurements are
 never silently treated as zero or as a complete requested interval.
 
+Isolated and consecutive missing dates are preserved as compact ranges for each daily
+metric. A metric with 29 observed days out of 32 therefore remains explicitly incomplete,
+even when another metric contains measurements on all 32 days; the AI is forbidden to
+interpolate across those gaps.
+
 Dated reference settings are kept separate from measurements. In particular, Google's
 personal heart-rate-zone thresholds remain available as context, but their dates cannot
 increase health-data coverage or generate physiological trends.
@@ -121,6 +126,13 @@ the question when the context is crowded. VitalChronicle reads and remembers the
 context limit reported by Ollama, removes duplicated evidence, preserves every calculated
 metric, and reduces only the available response budget when necessary. A false “no evidence
 provided” response is automatically rejected and retried with an evidence-first request.
+
+The header always shows the installed version. Its badge turns amber and displays the newer
+version after the existing private update check discovers a more recent GitHub release.
+Portable Linux AppImages and Windows executables can then install the matching package from
+inside the app: VitalChronicle verifies SHA-256, replaces the file in its current location,
+and keeps the previous build as a `.previous` backup. Source, virtual-environment, and macOS
+installs continue through the official release page rather than attempting an unsafe replacement.
 
 ### AI memory and token settings
 
@@ -161,8 +173,9 @@ copying or sharing.
 - two-pass complete-history synthesis through local Qwen/Ollama, with NVIDIA 16 GB and
   CPU-only 32 GB profiles;
 - model-update notifications and model-context-aware token recommendations;
-- automatic in-app checks for new VitalChronicle releases, with a manual
-  **Help → Check for updates** command and a direct link to the download page;
+- automatic in-app checks for new VitalChronicle releases, a manual
+  **Help → Check for updates** command, and verified same-format self-updates for portable
+  Linux AppImages and Windows executables;
 - no cloud AI service and no transmission of health data to the developer;
 - robust system-language detection, a persistent **Settings → Language** selector, English
   fallback, and community catalogues managed through Weblate.

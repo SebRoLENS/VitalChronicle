@@ -19,9 +19,25 @@ def test_semantic_versions_and_update_kind():
 
 
 def test_release_payload_and_fallback_url():
-    release = release_from_payload({"tag_name": "v1.4.0"})
+    release = release_from_payload(
+        {
+            "tag_name": "v1.4.0",
+            "assets": [
+                {
+                    "name": "VitalChronicle-1.4.0-linux-x86_64.AppImage",
+                    "browser_download_url": "https://example.test/appimage",
+                    "size": 123,
+                    "digest": "sha256:" + "a" * 64,
+                },
+                {"name": "ignored-without-url"},
+            ],
+        }
+    )
     assert release.version == "1.4.0"
     assert release.url == RELEASES_URL
+    assert len(release.assets) == 1
+    assert release.assets[0].size == 123
+    assert release.assets[0].digest == "sha256:" + "a" * 64
 
 
 def test_update_reminder_is_due_for_new_version_or_after_ten_days():

@@ -255,6 +255,69 @@ def _longest_gap(days: list[date]) -> int:
     return max(max(0, (right - left).days - 1) for left, right in pairwise(days))
 
 
+def _missing_date_details(
+    observed_dates: set[date],
+    start_day: date,
+    end_day: date,
+    *,
+    maximum_ranges: int = 64,
+) -> dict[str, Any]:
+    """Describe missing dates compactly without expanding long histories indefinitely."""
+
+    relevant = sorted(day for day in observed_dates if start_day <= day <= end_day)
+    requested_days = max(0, (end_day - start_day).days + 1)
+    requested = {start_day + timedelta(days=index) for index in range(requested_days)}
+    missing = sorted(requested - set(relevant))
+    ranges: list[dict[str, Any]] = []
+    for day in missing:
+        if ranges and day == date.fromisoformat(ranges[-1]["end"]) + timedelta(days=1):
+            ranges[-1]["end"] = day.isoformat()
+            ranges[-1]["days"] += 1
+        else:
+            ranges.append({"start": day.isoformat(), "end": day.isoformat(), "days": 1})
+
+    first_observed = relevant[0] if relevant else None
+    last_observed = relevant[-1] if relevant else None
+    internal_missing = [
+        day
+        for day in missing
+        if first_observed is not None
+        and last_observed is not None
+        and first_observed < day < last_observed
+    ]
+    for item in ranges:
+        range_start = date.fromisoformat(item["start"])
+        range_end = date.fromisoformat(item["end"])
+        if first_observed is None or last_observed is None:
+            position = "unobserved_interval"
+        elif range_end < first_observed:
+            position = "leading"
+        elif range_start > last_observed:
+            position = "trailing"
+        else:
+            position = "internal"
+        item["position"] = position
+
+    truncated = len(ranges) > maximum_ranges
+    shown_ranges = ranges
+    if truncated:
+        half = maximum_ranges // 2
+        shown_ranges = ranges[:half] + ranges[-half:]
+    isolated_dates = [item["start"] for item in ranges if item["days"] == 1]
+    return {
+        "missing_calendar_days": len(missing),
+        "internal_missing_days": len(internal_missing),
+        "longest_missing_run_days": max(
+            (int(item["days"]) for item in ranges), default=0
+        ),
+        "missing_date_ranges": shown_ranges,
+        "gap_ranges_total": len(ranges),
+        "gap_ranges_truncated": truncated,
+        "isolated_missing_dates": isolated_dates[:maximum_ranges],
+        "isolated_dates_truncated": len(isolated_dates) > maximum_ranges,
+    }
+
+
 def _metric_features(
     values: dict[date, float],
     data_type: str,
@@ -515,6 +578,9 @@ def _requested_interval_coverage(
     measurement_coverage = (
         days_with_measurements / requested_days * 100.0 if requested_days else None
     )
+    measurement_gaps = _missing_date_details(
+        set(measurement_days), start_day, end_day
+    )
 
     metric_rows = []
     limited_daily_metrics = []
@@ -525,6 +591,11 @@ def _requested_interval_coverage(
         is_reference = data_type in REFERENCE_CONFIGURATION_TYPES
         expected_daily = data_type in DAILY_EXPECTED_TYPES
         coverage = len(dates) / requested_days * 100.0 if expected_daily and requested_days else None
+        gap_details = (
+            _missing_date_details(set(dates), start_day, end_day)
+            if expected_daily
+            else None
+        )
         if is_reference:
             expected_frequency = "reference_or_configuration"
         elif expected_daily:
@@ -544,6 +615,8 @@ def _requested_interval_coverage(
             "records_considered": int(metric.get("records_considered", 0) or 0),
             "excluded_from_measurement_coverage": is_reference,
         }
+        if gap_details is not None:
+            row.update(gap_details)
         metric_rows.append(row)
         if is_reference:
             reference_configuration_metrics.append(
@@ -558,25 +631,57 @@ def _requested_interval_coverage(
                     ),
                 }
             )
-        if expected_daily and coverage is not None and coverage < 80.0:
+        if expected_daily and coverage is not None and coverage < 100.0:
             limited_daily_metrics.append(
                 {
                     "data_type": data_type,
                     "label": row["label"],
                     "coverage_percent": row["coverage_percent"],
                     "observed_calendar_days": len(dates),
+                    "missing_calendar_days": gap_details["missing_calendar_days"],
+                    "internal_missing_days": gap_details["internal_missing_days"],
+                    "longest_missing_run_days": gap_details[
+                        "longest_missing_run_days"
+                    ],
+                    "missing_date_ranges": gap_details["missing_date_ranges"],
+                    "coverage_severity": (
+                        "limited" if coverage < 80.0 else "minor_gaps"
+                    ),
                 }
             )
 
     starts_late = first_measurement is None or first_measurement > start_day
     ends_early = last_measurement is None or last_measurement < end_day
-    partial = bool(starts_late or ends_early or limited_daily_metrics)
+    partial = bool(measurement_gaps["missing_calendar_days"] or limited_daily_metrics)
     reference_note = (
         " Reference/configuration records such as personal heart-rate-zone thresholds are "
         "excluded because they are not health measurements."
         if reference_configuration_metrics
         else ""
     )
+    global_gap_note = ""
+    if measurement_gaps["internal_missing_days"]:
+        isolated = measurement_gaps["isolated_missing_dates"]
+        if (
+            measurement_gaps["internal_missing_days"] <= 8
+            and len(isolated) == measurement_gaps["internal_missing_days"]
+        ):
+            global_gap_note = (
+                " Internal dates without any health measurement: "
+                + ", ".join(isolated)
+                + "."
+            )
+        else:
+            global_gap_note = (
+                f" There are {measurement_gaps['internal_missing_days']} internal days without "
+                "any health measurement; inspect missing_date_ranges for their exact positions."
+            )
+    metric_gap_note = ""
+    if limited_daily_metrics:
+        metric_gap_note = (
+            f" {len(limited_daily_metrics)} daily metrics contain missing dates; use each "
+            "metric's missing_date_ranges and never fill or interpolate those days."
+        )
     if not measurement_days:
         notice = (
             f"The requested interval is {start_day.isoformat()} to {end_day.isoformat()} "
@@ -588,8 +693,8 @@ def _requested_interval_coverage(
             f"The requested interval is {start_day.isoformat()} to {end_day.isoformat()} "
             f"({requested_days} calendar days), but actual health measurements occur on "
             f"{days_with_measurements} calendar days from {first_measurement.isoformat()} to "
-            f"{last_measurement.isoformat()}. Daily metrics are incompletely covered; use each "
-            "metric's own observed-day count and never infer coverage from another metric. "
+            f"{last_measurement.isoformat()}.{global_gap_note}{metric_gap_note} Use each metric's "
+            "own observed-day count and never infer coverage from another metric. "
             "Explicitly limit every conclusion to the dates and metrics actually observed; do "
             f"not imply complete coverage of the requested interval.{reference_note}"
         )
@@ -618,6 +723,22 @@ def _requested_interval_coverage(
         ),
         "calendar_days_with_measurements": days_with_measurements,
         "calendar_days_with_measurements_percent": _round(measurement_coverage, 1),
+        "missing_measurement_calendar_days": measurement_gaps[
+            "missing_calendar_days"
+        ],
+        "internal_missing_measurement_days": measurement_gaps[
+            "internal_missing_days"
+        ],
+        "measurement_missing_date_ranges": measurement_gaps[
+            "missing_date_ranges"
+        ],
+        "measurement_gap_ranges_total": measurement_gaps["gap_ranges_total"],
+        "measurement_gap_ranges_truncated": measurement_gaps[
+            "gap_ranges_truncated"
+        ],
+        "longest_measurement_gap_days": measurement_gaps[
+            "longest_missing_run_days"
+        ],
         # Compatibility aliases; their semantics are now measurement-only.
         "calendar_days_with_any_data": days_with_measurements,
         "calendar_days_with_any_data_percent": _round(measurement_coverage, 1),
@@ -632,6 +753,8 @@ def _requested_interval_coverage(
             "State the requested interval and the actual measurement coverage near the start "
             "of the answer whenever scope_is_partially_observed is true. Use each metric's own "
             "observed-day count; one well-covered metric cannot establish coverage for another. "
+            "Read missing_date_ranges for exact isolated or consecutive gaps and never fill, "
+            "average across, or interpolate missing days. "
             "Reference/configuration records do not count as measurements. Never describe "
             "missing days as analysed and never treat absence as zero."
         ),

@@ -152,6 +152,62 @@ def test_reference_heart_rate_zones_do_not_inflate_measurement_coverage():
     assert "derived_evidence" not in zones
 
 
+def test_scattered_metric_gaps_remain_visible_when_other_metrics_fill_the_days():
+    interval_start = datetime(2026, 7, 31, 12, tzinfo=timezone.utc)
+    missing_offsets = {5, 14, 26}
+    steps = [
+        _daily_record(interval_start + timedelta(days=index), "steps", 6000 + index)
+        for index in range(32)
+        if index not in missing_offsets
+    ]
+    resting = [
+        _daily_record(
+            interval_start + timedelta(days=index),
+            "dailyRestingHeartRate",
+            58 + index / 10,
+        )
+        for index in range(32)
+    ]
+
+    class FakeStore:
+        def list_records(self, data_type, *_args, **_kwargs):
+            return {
+                "steps": steps,
+                "daily-resting-heart-rate": resting,
+            }.get(data_type, [])
+
+    snapshot = build_ai_ready_snapshot(
+        FakeStore(),
+        "2026-07-31",
+        "2026-09-01",
+        now=datetime(2026, 9, 1, 8, tzinfo=timezone.utc),
+    )
+    coverage = snapshot["requested_interval_coverage"]
+    rows = {row["data_type"]: row for row in coverage["metrics"]}
+    steps_coverage = rows["steps"]
+
+    assert coverage["calendar_days_with_measurements"] == 32
+    assert coverage["missing_measurement_calendar_days"] == 0
+    assert coverage["scope_is_partially_observed"]
+    assert steps_coverage["observed_calendar_days"] == 29
+    assert steps_coverage["coverage_percent"] == 90.6
+    assert steps_coverage["missing_calendar_days"] == 3
+    assert steps_coverage["internal_missing_days"] == 3
+    assert steps_coverage["longest_missing_run_days"] == 1
+    assert steps_coverage["isolated_missing_dates"] == [
+        "2026-08-05",
+        "2026-08-14",
+        "2026-08-26",
+    ]
+    assert [item["position"] for item in steps_coverage["missing_date_ranges"]] == [
+        "internal",
+        "internal",
+        "internal",
+    ]
+    assert coverage["limited_daily_metrics"][0]["coverage_severity"] == "minor_gaps"
+    assert "missing dates" in coverage["coverage_notice"].lower()
+
+
 def test_ai_preprocessing_finds_repeated_cross_metric_associations():
     start = datetime(2026, 7, 1, 12, tzinfo=timezone.utc)
     steps = []

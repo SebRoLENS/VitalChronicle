@@ -117,9 +117,11 @@ and the number of calendar days with health measurements. Read every metric's ow
 one well-covered metric cannot establish coverage for another. Entries whose data_role is
 reference_configuration, such as personal heart-rate-zone thresholds, are settings rather than
 physiological measurements; never count their dates as observed health days or infer trends from
-them. Limit every conclusion to supported dates and metrics. For example, one observed week inside
-a requested month is a one-week analysis, not a complete monthly analysis. Treat coverage_notice
-as a mandatory limitation, not optional text.
+them. Inspect missing_date_ranges for isolated and consecutive gaps, state material gaps, and never
+fill, interpolate, or average across a missing day as though it had been observed. Limit every
+conclusion to supported dates and metrics. For example, one observed week inside a requested month
+is a one-week analysis, not a complete monthly analysis. Treat coverage_notice as a mandatory
+limitation, not optional text.
 
 For a deep analysis, examine all metrics, additional_fields, structured_details,
 structured_period_comparison, derived_evidence, associations, candidate_insights, and data_coverage.

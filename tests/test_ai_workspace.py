@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 from google_health_viewer.local_ai import SYSTEM_PROMPT
 from google_health_viewer.main_window import MainWindow
 from google_health_viewer.storage import HealthStore
+from google_health_viewer.updates import ReleaseInfo
 
 
 def _application() -> QApplication:
@@ -25,6 +26,13 @@ def test_ai_settings_metrics_and_prompt_share_one_main_tab(tmp_path: Path):
     assert window.ai_sections.isAncestorOf(window.ai_ram_edit)
     assert window.ai_sections.isAncestorOf(window.ai_metrics_tree)
     assert SYSTEM_PROMPT in window.ai_system_prompt_view.toPlainText()
+    assert window.ai_question_period_label.text() == "Question period"
+    assert window.ai_deep_analysis_button.text() == "Analyse all data"
+    assert window.version_badge.text().startswith("v")
+    assert window.version_badge.objectName() == "versionBadge"
+    window._set_version_badge(ReleaseInfo("9.9.9", "https://example.test/release"))
+    assert "9.9.9" in window.version_badge.text()
+    assert window.version_badge.objectName() == "versionBadgeUpdate"
     window.close()
 
 

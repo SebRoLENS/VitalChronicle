@@ -35,6 +35,25 @@ QPushButton#primaryButton:hover { background: #1765CC; }
 QPushButton#dangerButton { color: #B3261E; border-color: #F1C5C2; }
 QPushButton#dangerButton:hover { background: #FCE8E6; border-color: #E6A5A0; }
 QLabel#appTitle { font-size: 18pt; font-weight: 700; color: #174EA6; }
+QToolButton#versionBadge {
+    color: #174EA6;
+    background: #E8F0FE;
+    border: 1px solid #D2E3FC;
+    border-radius: 10px;
+    padding: 4px 9px;
+    font-size: 8.8pt;
+    font-weight: 700;
+}
+QToolButton#versionBadgeUpdate {
+    color: #8A4B08;
+    background: #FEF3E2;
+    border: 1px solid #F2C779;
+    border-radius: 10px;
+    padding: 4px 9px;
+    font-size: 8.8pt;
+    font-weight: 800;
+}
+QToolButton#versionBadgeUpdate:hover { background: #FDE7C2; border-color: #E9A846; }
 QLabel#pageTitle { font-size: 20pt; font-weight: 700; color: #202124; }
 QLabel#pageSubtitle { color: #5F6368; font-size: 11pt; }
 QLabel#cardTitle { color: #5F6368; font-weight: 600; }

@@ -10,6 +10,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QDate, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIntValidator
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDateEdit,
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QTabWidget,
     QToolBar,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -92,6 +94,7 @@ from .local_ai import (
     recommended_model,
 )
 from .oauth import CredentialStore
+from .self_update import launch_windows_helper, select_update_target
 from .setup_wizard import AuthorizationHelpDialog, SetupWizard
 from .storage import HealthStore
 from .updates import ReleaseInfo, notification_due, semantic_version, update_kind
@@ -99,6 +102,7 @@ from .utils import summarize
 from .workers import (
     AIPullThread,
     AIStatusThread,
+    AppUpdateThread,
     AuthThread,
     SyncThread,
     UpdateCheckThread,
@@ -149,6 +153,8 @@ class MainWindow(QMainWindow):
         self.ai_metrics_thread: SnapshotBuildThread | None = None
         self._deterministic_snapshot: dict | None = None
         self.update_check_thread: UpdateCheckThread | None = None
+        self.app_update_thread: AppUpdateThread | None = None
+        self.app_update_dialog: QProgressDialog | None = None
         self.progress_dialog: QProgressDialog | None = None
         self._authorization_dialog: AuthorizationHelpDialog | None = None
         self.sync_warnings: list[tuple[str, str]] = []
@@ -227,6 +233,11 @@ class MainWindow(QMainWindow):
         app_title = QLabel(APP_NAME)
         app_title.setObjectName("appTitle")
         header.addWidget(app_title)
+        self.version_badge = QToolButton()
+        self.version_badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.version_badge.clicked.connect(self._version_badge_clicked)
+        header.addWidget(self.version_badge)
+        self._restore_version_badge()
         self.status_label = QLabel()
         header.addWidget(self.status_label, 1)
         header.addWidget(QLabel(_("Period")))
@@ -322,6 +333,51 @@ class MainWindow(QMainWindow):
     def _automatic_update_check(self) -> None:
         self.check_for_updates(force=False)
 
+    def _set_version_badge(self, release: ReleaseInfo | None = None) -> None:
+        current = semantic_version(__version__)
+        latest = semantic_version(release.version) if release is not None else None
+        update_available = (
+            current is not None and latest is not None and latest > current
+        )
+        if update_available and release is not None:
+            self.version_badge.setObjectName("versionBadgeUpdate")
+            self.version_badge.setText(
+                _(
+                    "v{current} · ↑ {latest}",
+                    current=__version__,
+                    latest=release.version,
+                )
+            )
+            self.version_badge.setToolTip(
+                _(
+                    "Update {version} available · click to view update options",
+                    version=release.version,
+                )
+            )
+        else:
+            self.version_badge.setObjectName("versionBadge")
+            self.version_badge.setText(_("v{version}", version=__version__))
+            self.version_badge.setToolTip(
+                _(
+                    "Installed version {version} · click to check for updates",
+                    version=__version__,
+                )
+            )
+        self.version_badge.style().unpolish(self.version_badge)
+        self.version_badge.style().polish(self.version_badge)
+
+    def _restore_version_badge(self) -> None:
+        if self._screenshot_mode:
+            self._set_version_badge()
+            return
+        version = str(self.settings.value("updates/latest_version", "") or "")
+        url = str(self.settings.value("updates/latest_url", "") or "")
+        self._set_version_badge(ReleaseInfo(version, url) if version else None)
+
+    def _version_badge_clicked(self) -> None:
+        # Refresh metadata so the dialog can offer the matching downloadable asset.
+        self.check_for_updates(force=True)
+
     def check_for_updates(self, *, force: bool = False) -> None:
         if self.update_check_thread is not None:
             if force:
@@ -374,6 +430,9 @@ class MainWindow(QMainWindow):
                 _("GitHub returned an unrecognised release version."), force
             )
             return
+        self.settings.setValue("updates/latest_version", release.version)
+        self.settings.setValue("updates/latest_url", release.url)
+        self._set_version_badge(release)
         if latest <= current:
             self.settings.remove("updates/last_notified_version")
             self.settings.remove("updates/last_notified_at")
@@ -431,13 +490,104 @@ class MainWindow(QMainWindow):
         box.setIcon(QMessageBox.Icon.Information)
         box.setWindowTitle(_("VitalChronicle update available"))
         box.setText(message)
+        target = select_update_target(release)
+        update_button = None
+        if target is not None:
+            update_button = box.addButton(
+                _("Update now"), QMessageBox.ButtonRole.AcceptRole
+            )
         open_button = box.addButton(
-            _("Open release page"), QMessageBox.ButtonRole.AcceptRole
+            _("Open release page"), QMessageBox.ButtonRole.ActionRole
         )
         box.addButton(_("Later"), QMessageBox.ButtonRole.RejectRole)
         box.exec()
-        if box.clickedButton() is open_button:
+        if update_button is not None and box.clickedButton() is update_button:
+            self._start_app_update(release, target)
+        elif box.clickedButton() is open_button:
             self.open_url(release.url)
+
+    def _start_app_update(self, release: ReleaseInfo, target) -> None:
+        if self.app_update_thread is not None:
+            return
+        dialog = QProgressDialog(
+            _("Downloading the verified update…"), "", 0, 100, self
+        )
+        dialog.setWindowTitle(_("Updating VitalChronicle"))
+        dialog.setCancelButton(None)
+        dialog.setAutoClose(False)
+        dialog.setMinimumDuration(0)
+        dialog.setValue(0)
+        self.app_update_dialog = dialog
+
+        thread = AppUpdateThread(release, target)
+        thread.progress.connect(self._app_update_progress)
+        thread.completed.connect(self._app_update_completed)
+        thread.failed.connect(self._app_update_failed)
+        thread.finished.connect(self._app_update_finished)
+        self.app_update_thread = thread
+        thread.start()
+
+    def _app_update_progress(self, percent: int, detail: str) -> None:
+        if self.app_update_dialog is None:
+            return
+        if percent > 0:
+            self.app_update_dialog.setValue(percent)
+        self.app_update_dialog.setLabelText(
+            _("Downloading the verified update… {detail}", detail=detail)
+        )
+
+    def _app_update_completed(self, result) -> None:
+        if self.app_update_dialog is not None:
+            self.app_update_dialog.setValue(100)
+            self.app_update_dialog.close()
+            self.app_update_dialog = None
+        if result.pending_exit:
+            QMessageBox.information(
+                self,
+                _("Update ready"),
+                _(
+                    "VitalChronicle will close, replace the Windows executable in its "
+                    "current folder, and restart. The previous version is kept as a backup."
+                ),
+            )
+            try:
+                launch_windows_helper(result)
+            except Exception as exc:  # noqa: BLE001 - report launch failure to the user.
+                self._app_update_failed(str(exc))
+                return
+            QApplication.quit()
+            return
+        QMessageBox.information(
+            self,
+            _("Update installed"),
+            _(
+                "The AppImage was verified and replaced in its current location. "
+                "Restart VitalChronicle to use version {version}. The previous file is "
+                "available at {backup}.",
+                version=str(self.settings.value("updates/latest_version", "")),
+                backup=str(result.backup),
+            ),
+        )
+
+    def _app_update_failed(self, message: str) -> None:
+        if self.app_update_dialog is not None:
+            self.app_update_dialog.close()
+            self.app_update_dialog = None
+        QMessageBox.warning(
+            self,
+            _("Update failed"),
+            _(
+                "The update could not be installed and the current application was kept: "
+                "{message}",
+                message=message,
+            ),
+        )
+
+    def _app_update_finished(self) -> None:
+        thread = self.app_update_thread
+        self.app_update_thread = None
+        if thread is not None:
+            thread.deleteLater()
 
     def _select_interface_language(self, preference: str) -> None:
         self.settings.setValue("interface/language", preference)
@@ -682,9 +832,9 @@ class MainWindow(QMainWindow):
         launch_description.setMinimumHeight(52)
         intelligence_layout.addWidget(launch_description, 1, 0, 1, 3)
 
-        question_label = QLabel(_("Period used for questions and new chats"))
-        question_label.setStyleSheet("font-weight: 700;")
-        intelligence_layout.addWidget(question_label, 2, 0)
+        self.ai_question_period_label = QLabel(_("Question period"))
+        self.ai_question_period_label.setStyleSheet("font-weight: 700;")
+        intelligence_layout.addWidget(self.ai_question_period_label, 2, 0)
         self.ai_range_combo = QComboBox()
         self.ai_range_combo.setMinimumWidth(210)
         for index in range(self.range_combo.count()):
@@ -707,12 +857,15 @@ class MainWindow(QMainWindow):
         new_chat = QPushButton(_("New conversation"))
         new_chat.clicked.connect(self.start_new_ai_chat)
         intelligence_layout.addWidget(new_chat, 4, 1)
-        deep_analysis = QPushButton(_("Deep analysis of complete history"))
-        deep_analysis.setObjectName("primaryButton")
-        deep_analysis.clicked.connect(
+        self.ai_deep_analysis_button = QPushButton(_("Analyse all data"))
+        self.ai_deep_analysis_button.setObjectName("primaryButton")
+        self.ai_deep_analysis_button.setToolTip(
+            _("Start an in-depth analysis of the complete local history")
+        )
+        self.ai_deep_analysis_button.clicked.connect(
             lambda: self.start_ai_analysis("", use_all_data=True)
         )
-        intelligence_layout.addWidget(deep_analysis, 4, 2)
+        intelligence_layout.addWidget(self.ai_deep_analysis_button, 4, 2)
         intelligence_layout.setColumnStretch(1, 1)
 
         action_cards = QHBoxLayout()
@@ -1197,9 +1350,12 @@ class MainWindow(QMainWindow):
         start = self.start_date.date().toString("dd/MM/yyyy")
         end = self.end_date.date().toString("dd/MM/yyyy")
         self.ai_interval_label.setText(
-            _("New chats and questions use: {period} · {start}–{end}. The separate deep-analysis "
-              "action always uses the complete local history.", period=label,
-              start=start, end=end)
+            _(
+                "{period} · {start}–{end} · Deep analysis: all data",
+                period=label,
+                start=start,
+                end=end,
+            )
         )
 
     def _sync_ai_range_combo(self) -> None:

@@ -1,6 +1,6 @@
 # VitalChronicle Quick Start
 
-Updated for VitalChronicle **1.1.2**.
+Updated for VitalChronicle **1.1.3**.
 
 1. Download the package for your operating system from the
    [latest GitHub release](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest).
@@ -19,7 +19,7 @@ Updated for VitalChronicle **1.1.2**.
 8. Complete browser sign-in, then select **Download / update**.
 9. To use local AI, install Ollama, pull a model such as `qwen3.5:9b`, and verify it from
    **Local AI analysis → Analysis and chat**. Open the separate chat window for follow-up
-   questions, or choose **Deep analysis of complete history** for a two-pass review of every
+   questions, or choose **Analyse all data** for a two-pass review of every
    available category. Use **Deterministic metrics** to inspect baselines and actual data
    coverage, **Model and tokens** for output settings, and **Prompt and instructions** to
    read the permanent model rules. The preprocessing and conversation history remain local.
@@ -30,6 +30,11 @@ its answer accordingly. In chat, **Show prompt** reveals the exact latest local 
 
 Personal heart-rate-zone thresholds are reference settings, not measurements. Their dated
 records do not increase the reported health-data coverage.
+
+Daily metrics retain compact ranges for isolated and consecutive missing dates. The version
+badge beside the application title turns amber when a newer release is available.
+Portable AppImage and Windows builds can select **Update now** to download only the matching
+package, verify SHA-256, replace the file at the same path, and retain the previous build.
 
 Read the [complete manual](manual.md) for platform-specific installation, privacy,
 troubleshooting, exports, and AI configuration.
