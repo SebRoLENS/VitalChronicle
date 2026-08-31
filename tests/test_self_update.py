@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -90,7 +91,8 @@ def test_verified_appimage_replaces_same_path_and_keeps_backup(
     assert result.destination == current
     assert current.read_bytes() == new_content
     assert result.backup.read_bytes() == b"old application"
-    assert current.stat().st_mode & 0o100
+    if os.name != "nt":
+        assert current.stat().st_mode & 0o100
 
 
 def test_checksum_failure_keeps_current_app(
