@@ -49,11 +49,13 @@ chaquopy {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
+    // Compose 1.10 is the newest stable generation which remains compatible
+    // with compileSdk 36 / AGP 8.x. Compose 1.12 requires SDK 37 and AGP 9.
+    val composeBom = platform("androidx.compose:compose-bom:2025.12.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
-    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.activity:activity-compose:1.12.1")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
