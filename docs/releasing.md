@@ -31,13 +31,15 @@ Before tagging, these files must agree:
 
 - `google_health_viewer/__init__.py`;
 - `pyproject.toml`;
+- `README.md` (the explicit current-release line and tag link);
 - `docs/manual.md`;
 - `docs/quick-start.md`;
 - `CITATION.cff`.
 
-`README.md` deliberately has no hard-coded release number. Its version badge and all
-download buttons target GitHub's `releases/latest`, preventing the displayed version from
-becoming stale after an automated release.
+`scripts/prepare_release.py` rewrites the explicit version in `README.md` before the tag is
+created. Generic download buttons still target GitHub's `releases/latest`, while the
+machine-maintained version line links to the exact tag and remains correct even if the
+external Shields.io badge is temporarily cached.
 
 Run locally:
 
