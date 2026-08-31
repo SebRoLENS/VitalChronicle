@@ -109,6 +109,13 @@ incomplete day: never compare them with complete-day totals. When same_time_mean
 only that comparison and state how many days it includes; otherwise say it is too early to judge.
 Never treat missing data as zero and never linearly extrapolate a partial day.
 
+Always inspect requested_interval_coverage before interpreting any metric. The requested date range
+is not proof that data exist for the whole range. When scope_is_partially_observed is true, begin the
+answer with a concise data-scope notice stating the requested interval, the first and last observed
+dates, and the number of calendar days with any data. Limit every conclusion to those supported
+dates and metrics. For example, one observed week inside a requested month is a one-week analysis,
+not a complete monthly analysis. Treat coverage_notice as a mandatory limitation, not optional text.
+
 For a deep analysis, examine all metrics, additional_fields, structured_details,
 structured_period_comparison, derived_evidence, associations, candidate_insights, and data_coverage.
 Cover every available domain, but give space in proportion to evidence strength. A useful deep answer
@@ -116,6 +123,23 @@ contains: an executive synthesis; the strongest longitudinal patterns; interacti
 activity, workouts and vital signs; what is uncertain; and a short list of concrete things to monitor.
 Do not manufacture a section for an absent category.
 """)
+
+
+def render_prompt_messages(messages: list[dict[str, str]], stage: str) -> str:
+    """Return the exact chat messages in a readable, local-only inspector format."""
+
+    sections = [f"# {stage}"]
+    for index, message in enumerate(messages, start=1):
+        role = str(message.get("role", "unknown")).upper()
+        sections.extend(
+            [
+                "",
+                f"## {index}. {role}",
+                "",
+                str(message.get("content", "")),
+            ]
+        )
+    return "\n".join(sections).strip()
 
 
 class OllamaClient:
@@ -370,6 +394,7 @@ class OllamaClient:
         history: list[dict[str, str]] | None = None,
         analysis_mode: str = "question",
         cancel_callback: Callable[[], bool] | None = None,
+        prompt_callback: Callable[[str], None] | None = None,
     ) -> str:
         if not snapshot.get("metrics"):
             raise LocalAIError(_("There is not enough local data in the selected period."))
@@ -425,6 +450,10 @@ class OllamaClient:
                         ),
                     },
                 ]
+                if prompt_callback:
+                    prompt_callback(
+                        render_prompt_messages(planning_messages, _("Evidence selection pass"))
+                    )
                 evidence_plan = self._chat_stream(
                     planning_messages,
                     think=True,
@@ -455,6 +484,8 @@ class OllamaClient:
                     ]
                 if thinking_callback:
                     thinking_callback(_("\nSynthesis pass: connecting the strongest evidence…\n"))
+            if prompt_callback:
+                prompt_callback(render_prompt_messages(messages, _("Final synthesis request")))
             answer = self._chat_stream(
                 messages,
                 think=True,
@@ -480,6 +511,10 @@ class OllamaClient:
                         ),
                     },
                 ]
+                if prompt_callback:
+                    prompt_callback(
+                        render_prompt_messages(fallback_messages, _("Final-answer retry"))
+                    )
                 answer = self._chat_stream(
                     fallback_messages,
                     think=False,
