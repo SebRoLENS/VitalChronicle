@@ -182,7 +182,7 @@ def test_dashboard_adds_today_heart_rate_sparkline(tmp_path: Path):
     heart = next(
         metric
         for metric in snapshot["metrics"]
-        if metric["data_type"] == "daily-resting-heart-rate"
+        if metric["data_type"] == "heart-rate-today"
     )
 
     assert len(heart["heart_day_points"]) == 3
@@ -233,7 +233,7 @@ def test_dashboard_heart_rate_uses_all_today_samples_and_prior_week_band(tmp_pat
     heart = next(
         metric
         for metric in snapshot["metrics"]
-        if metric["data_type"] == "daily-resting-heart-rate"
+        if metric["data_type"] == "heart-rate-today"
     )
 
     assert len(heart["heart_day_points"]) == 300
@@ -248,9 +248,8 @@ def test_dashboard_heart_rate_uses_all_today_samples_and_prior_week_band(tmp_pat
         datetime.fromtimestamp(timestamp, timezone.utc).date() == date(2026, 8, 29)
         for timestamp, _value in heart["heart_day_smoothed"]
     )
-    assert heart["heart_baseline_mean"] == 70.0
-    assert heart["heart_baseline_std"] == 10.0
-    assert heart["heart_baseline_days"] == 7
+    assert heart["heart_day_mean"] == 69.5
+    assert heart["heart_day_sample_count"] == 300
 
 
 def test_dashboard_reads_multiple_heart_rate_samples_from_one_record(tmp_path: Path):
@@ -277,7 +276,7 @@ def test_dashboard_reads_multiple_heart_rate_samples_from_one_record(tmp_path: P
     heart = next(
         metric
         for metric in snapshot["metrics"]
-        if metric["data_type"] == "daily-resting-heart-rate"
+        if metric["data_type"] == "heart-rate-today"
     )
 
     assert [value for _timestamp, value in heart["heart_day_points"]] == [61, 79, 96]
@@ -309,11 +308,63 @@ def test_dashboard_heart_graph_uses_current_day_not_selected_period_end(tmp_path
     heart = next(
         metric
         for metric in snapshot["metrics"]
-        if metric["data_type"] == "daily-resting-heart-rate"
+        if metric["data_type"] == "heart-rate-today"
     )
 
     assert [value for _timestamp, value in heart["heart_day_points"]] == [82]
     assert heart["heart_day_date"] == "2026-08-29"
+
+
+def test_dashboard_keeps_resting_and_intraday_heart_rate_in_separate_cards(
+    tmp_path: Path,
+):
+    store = HealthStore(tmp_path / "health.sqlite3")
+    resting_values = [60, 62, 64, 66, 68, 70, 72]
+    for offset, bpm in enumerate(resting_values, start=22):
+        store.upsert_records(
+            "daily-resting-heart-rate",
+            [
+                {
+                    "name": f"resting-{offset}",
+                    "dailyRestingHeartRate": {
+                        "date": {"year": 2026, "month": 8, "day": offset},
+                        "beatsPerMinute": bpm,
+                    },
+                }
+            ],
+        )
+    store.upsert_records(
+        "heart-rate",
+        [
+            {
+                "name": "heart-today",
+                "heartRate": {
+                    "sampleTime": {"physicalTime": "2026-08-29T10:00:00Z"},
+                    "beatsPerMinute": 75,
+                },
+            }
+        ],
+    )
+
+    snapshot = build_daily_progress_snapshot(store, date(2026, 8, 29))
+    resting = next(
+        metric
+        for metric in snapshot["metrics"]
+        if metric["data_type"] == "daily-resting-heart-rate"
+    )
+    intraday = next(
+        metric
+        for metric in snapshot["metrics"]
+        if metric["data_type"] == "heart-rate-today"
+    )
+
+    assert [value for _timestamp, value in resting["sparkline"]] == resting_values
+    assert resting["sparkline_kind"] == "previous_seven_days"
+    assert resting["sparkline_mean"] == 66.0
+    assert resting["sparkline_std"] > 0
+    assert "heart_day_smoothed" not in resting
+    assert [value for _timestamp, value in intraday["heart_day_smoothed"]] == [75]
+    assert "sparkline" not in intraday
 
 
 def test_dashboard_daily_vital_sparkline_has_mean_and_standard_deviation(tmp_path: Path):

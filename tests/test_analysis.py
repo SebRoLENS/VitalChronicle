@@ -195,6 +195,29 @@ def test_sleep_exposes_derived_duration():
     assert raw_points(records, "__duration_hours__")[0][1] == 7.5
 
 
+def test_sleep_duration_subtracts_awake_time_when_minutes_asleep_is_missing():
+    records = [
+        {
+            "start_time": "2026-08-01T22:00:00+00:00",
+            "end_time": "2026-08-02T06:00:00+00:00",
+            "payload": {
+                "sleep": {
+                    "sleepSummary": {
+                        "stagesSummary": [
+                            {"type": "AWAKE", "minutes": "45"},
+                            {"type": "DEEP", "minutes": "90"},
+                            {"type": "REM", "minutes": "110"},
+                            {"type": "LIGHT", "minutes": "235"},
+                        ]
+                    }
+                }
+            },
+        }
+    ]
+
+    assert raw_points(records, "__duration_hours__")[0][1] == 7.25
+
+
 def test_sleep_stage_summary_is_available_for_stacked_bars():
     records = [
         {

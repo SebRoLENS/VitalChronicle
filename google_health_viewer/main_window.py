@@ -1652,7 +1652,9 @@ class MainWindow(QMainWindow):
                 )
                 self.model_update_button.setText(f"{action} · {target}")
         else:
-            self.ai_status_label.setText(_("○ Ollama is not running · open the Fedora guide"))
+            self.ai_status_label.setText(
+                _("○ Ollama is not running · open the installation guide")
+            )
             self.ai_status_label.setStyleSheet("font-weight: 700; color: #D93025")
             self.pull_button.setEnabled(False)
             self._pending_model_update = None
