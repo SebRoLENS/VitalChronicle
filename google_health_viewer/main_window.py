@@ -976,17 +976,28 @@ class MainWindow(QMainWindow):
         self.ai_metrics_tree.clear()
         coverage = snapshot.get("requested_interval_coverage") or {}
         requested_days = coverage.get("requested_calendar_days", 0)
-        observed_days = coverage.get("calendar_days_with_any_data", 0)
-        first_observed = coverage.get("first_observed_date") or _("none")
-        last_observed = coverage.get("last_observed_date") or _("none")
+        observed_days = coverage.get(
+            "calendar_days_with_measurements",
+            coverage.get("calendar_days_with_any_data", 0),
+        )
+        first_observed = (
+            coverage.get("first_measurement_date")
+            or coverage.get("first_observed_date")
+            or _("none")
+        )
+        last_observed = (
+            coverage.get("last_measurement_date")
+            or coverage.get("last_observed_date")
+            or _("none")
+        )
         partial = bool(coverage.get("scope_is_partially_observed"))
         self.ai_metrics_coverage.setObjectName(
             "coverageWarning" if partial else "coverageComplete"
         )
         self.ai_metrics_coverage.setText(
             _(
-                "Requested: {period} ({requested} days) · observed dates: {first} to {last} · "
-                "days with any data: {observed}. {notice}",
+                "Requested: {period} ({requested} days) · measurement dates: {first} to {last} · "
+                "days with health measurements: {observed}. {notice}",
                 period=period.get("label", _("Selected period")),
                 requested=requested_days,
                 first=first_observed,
@@ -1024,9 +1035,17 @@ class MainWindow(QMainWindow):
             matched = derived.get("matched_recent_comparison") or {}
             trend = derived.get("trend") or {}
             anomaly = derived.get("robust_anomaly_check") or {}
-            observed_text = _("{days} days", days=quality.get("observed_calendar_days", 0))
-            if quality.get("coverage_percent") is not None:
-                observed_text += f" · {quality['coverage_percent']}%"
+            if quality.get("data_role") == "reference_configuration":
+                observed_text = _(
+                    "Reference settings · {records} records",
+                    records=quality.get("records_considered", 0),
+                )
+            else:
+                observed_text = _(
+                    "{days} days", days=quality.get("observed_calendar_days", 0)
+                )
+                if quality.get("coverage_percent") is not None:
+                    observed_text += f" · {quality['coverage_percent']}%"
             baseline_text = (
                 f"{baseline.get('mean')} ± {baseline.get('standard_deviation')}"
                 if baseline

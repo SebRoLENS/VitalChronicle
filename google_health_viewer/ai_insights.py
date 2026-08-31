@@ -47,6 +47,14 @@ DAILY_EXPECTED_TYPES = {
     "total-calories",
 }
 
+# Google emits these records on dated endpoints, but their values describe a
+# reference/configuration rather than a physiological observation.  They remain
+# useful context for the model, but must never make a requested interval look
+# measured or feed longitudinal health trends and associations.
+REFERENCE_CONFIGURATION_TYPES = {
+    "daily-heart-rate-zones",
+}
+
 VITAL_TYPES = {
     "daily-heart-rate-variability",
     "daily-oxygen-saturation",
@@ -492,40 +500,64 @@ def _requested_interval_coverage(
     end_day: date,
 ) -> dict[str, Any]:
     requested_days = max(0, (end_day - start_day).days + 1)
-    observed_days = sorted(
+    measurement_days = sorted(
         {
             day
-            for days in observed_dates_by_type.values()
+            for data_type, days in observed_dates_by_type.items()
+            if data_type not in REFERENCE_CONFIGURATION_TYPES
             for day in days
             if start_day <= day <= end_day
         }
     )
-    first_observed = observed_days[0] if observed_days else None
-    last_observed = observed_days[-1] if observed_days else None
-    days_with_any_data = len(observed_days)
-    any_data_coverage = (
-        days_with_any_data / requested_days * 100.0 if requested_days else None
+    first_measurement = measurement_days[0] if measurement_days else None
+    last_measurement = measurement_days[-1] if measurement_days else None
+    days_with_measurements = len(measurement_days)
+    measurement_coverage = (
+        days_with_measurements / requested_days * 100.0 if requested_days else None
     )
 
     metric_rows = []
     limited_daily_metrics = []
+    reference_configuration_metrics = []
     for metric in snapshot.get("metrics", []):
         data_type = str(metric.get("data_type", ""))
         dates = sorted(observed_dates_by_type.get(data_type, set()))
+        is_reference = data_type in REFERENCE_CONFIGURATION_TYPES
         expected_daily = data_type in DAILY_EXPECTED_TYPES
         coverage = len(dates) / requested_days * 100.0 if expected_daily and requested_days else None
+        if is_reference:
+            expected_frequency = "reference_or_configuration"
+        elif expected_daily:
+            expected_frequency = "daily_or_more"
+        else:
+            expected_frequency = "event_or_irregular"
         row = {
             "data_type": data_type,
             "label": str(metric.get("label", data_type)),
-            "expected_frequency": "daily_or_more" if expected_daily else "event_or_irregular",
+            "data_role": "reference_configuration" if is_reference else "measurement",
+            "expected_frequency": expected_frequency,
             "observed_calendar_days": len(dates),
             "requested_calendar_days": requested_days,
             "coverage_percent": _round(coverage, 1),
             "first_observation": dates[0].isoformat() if dates else None,
             "last_observation": dates[-1].isoformat() if dates else None,
             "records_considered": int(metric.get("records_considered", 0) or 0),
+            "excluded_from_measurement_coverage": is_reference,
         }
         metric_rows.append(row)
+        if is_reference:
+            reference_configuration_metrics.append(
+                {
+                    "data_type": data_type,
+                    "label": row["label"],
+                    "records_considered": row["records_considered"],
+                    "dated_records": len(dates),
+                    "interpretation": (
+                        "Reference thresholds/settings, not physiological measurements. Their "
+                        "dates do not establish health-data coverage."
+                    ),
+                }
+            )
         if expected_daily and coverage is not None and coverage < 80.0:
             limited_daily_metrics.append(
                 {
@@ -536,54 +568,72 @@ def _requested_interval_coverage(
                 }
             )
 
-    starts_late = first_observed is None or first_observed > start_day
-    ends_early = last_observed is None or last_observed < end_day
+    starts_late = first_measurement is None or first_measurement > start_day
+    ends_early = last_measurement is None or last_measurement < end_day
     partial = bool(starts_late or ends_early or limited_daily_metrics)
-    if not observed_days:
+    reference_note = (
+        " Reference/configuration records such as personal heart-rate-zone thresholds are "
+        "excluded because they are not health measurements."
+        if reference_configuration_metrics
+        else ""
+    )
+    if not measurement_days:
         notice = (
             f"The requested interval is {start_day.isoformat()} to {end_day.isoformat()} "
-            f"({requested_days} calendar days), but no supported observation dates are "
-            "available. Do not describe the requested interval as analysed."
+            f"({requested_days} calendar days), but no supported health-measurement dates are "
+            f"available. Do not describe the requested interval as analysed.{reference_note}"
         )
     elif partial:
         notice = (
             f"The requested interval is {start_day.isoformat()} to {end_day.isoformat()} "
-            f"({requested_days} calendar days), but the local archive contains observations "
-            f"from {first_observed.isoformat()} to {last_observed.isoformat()} and has at least "
-            f"one measurement on {days_with_any_data} calendar days. Explicitly limit every "
-            "conclusion to the dates and metrics actually observed; do not imply complete "
-            "coverage of the requested interval."
+            f"({requested_days} calendar days), but actual health measurements occur on "
+            f"{days_with_measurements} calendar days from {first_measurement.isoformat()} to "
+            f"{last_measurement.isoformat()}. Daily metrics are incompletely covered; use each "
+            "metric's own observed-day count and never infer coverage from another metric. "
+            "Explicitly limit every conclusion to the dates and metrics actually observed; do "
+            f"not imply complete coverage of the requested interval.{reference_note}"
         )
     else:
         notice = (
             f"The requested interval is {start_day.isoformat()} to {end_day.isoformat()} "
-            f"({requested_days} calendar days). Observations span the complete requested "
-            "interval, although individual metrics may still be intermittent."
+            f"({requested_days} calendar days). Health measurements span the complete requested "
+            f"interval, although individual metrics may still be intermittent.{reference_note}"
         )
 
     return {
         "requested_start": start_day.isoformat(),
         "requested_end": end_day.isoformat(),
         "requested_calendar_days": requested_days,
-        "first_observed_date": first_observed.isoformat() if first_observed else None,
-        "last_observed_date": last_observed.isoformat() if last_observed else None,
+        "first_measurement_date": (
+            first_measurement.isoformat() if first_measurement else None
+        ),
+        "last_measurement_date": last_measurement.isoformat() if last_measurement else None,
+        # Compatibility aliases used by existing saved conversations and UI code.
+        "first_observed_date": first_measurement.isoformat() if first_measurement else None,
+        "last_observed_date": last_measurement.isoformat() if last_measurement else None,
         "observed_span_days": (
-            (last_observed - first_observed).days + 1
-            if first_observed is not None and last_observed is not None
+            (last_measurement - first_measurement).days + 1
+            if first_measurement is not None and last_measurement is not None
             else 0
         ),
-        "calendar_days_with_any_data": days_with_any_data,
-        "calendar_days_with_any_data_percent": _round(any_data_coverage, 1),
+        "calendar_days_with_measurements": days_with_measurements,
+        "calendar_days_with_measurements_percent": _round(measurement_coverage, 1),
+        # Compatibility aliases; their semantics are now measurement-only.
+        "calendar_days_with_any_data": days_with_measurements,
+        "calendar_days_with_any_data_percent": _round(measurement_coverage, 1),
         "starts_after_requested_start": starts_late,
         "ends_before_requested_end": ends_early,
         "scope_is_partially_observed": partial,
         "limited_daily_metrics": limited_daily_metrics,
+        "reference_configuration_metrics": reference_configuration_metrics,
         "metrics": metric_rows,
         "coverage_notice": notice,
         "response_rule": (
-            "State the requested interval and the actually observed date range near the start "
-            "of the answer whenever scope_is_partially_observed is true. Never describe missing "
-            "days as analysed and never treat absence as zero."
+            "State the requested interval and the actual measurement coverage near the start "
+            "of the answer whenever scope_is_partially_observed is true. Use each metric's own "
+            "observed-day count; one well-covered metric cannot establish coverage for another. "
+            "Reference/configuration records do not count as measurements. Never describe "
+            "missing days as analysed and never treat absence as zero."
         ),
     }
 
@@ -746,6 +796,15 @@ def build_ai_ready_snapshot(
         observed_dates_by_type[data_type] = {
             day for record in records if (day := _record_day(record)) is not None
         }
+        if data_type in REFERENCE_CONFIGURATION_TYPES:
+            metric["data_role"] = "reference_configuration"
+            metric["interpretation_rule"] = (
+                "These dated values are personal reference thresholds/settings, not health "
+                "measurements. Do not calculate physiological trends from them or use their "
+                "dates as evidence of health-data coverage."
+            )
+            labels[data_type] = str(metric.get("label") or DATA_TYPE_BY_KEY[data_type].label)
+            continue
         daily_result = _daily_values(records, data_type)
         if daily_result:
             daily, _unit, _aggregation = daily_result

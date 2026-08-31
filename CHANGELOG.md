@@ -2,6 +2,18 @@
 
 All notable changes to VitalChronicle are documented here.
 
+## 1.1.2 — 2026-08-31
+
+- fixed interval coverage being inflated by dated personal heart-rate-zone thresholds;
+- classified heart-rate-zone limits as reference configuration rather than physiological
+  measurements, while retaining their latest values as useful context;
+- excluded reference settings from measured-day counts, baselines, trends, anomalies, and
+  cross-metric associations;
+- made the AI and deterministic-metrics inspector use actual measurement days and each
+  metric's own observed-day coverage;
+- added English/Italian interface text, documentation, and a regression test reproducing
+  32 days of thresholds alongside only six days of real measurements.
+
 ## 1.1.1 — 2026-08-31
 
 - fixed long local-AI prompts that could cause Ollama to discard the deterministic health
