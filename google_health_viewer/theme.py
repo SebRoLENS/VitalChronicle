@@ -50,6 +50,31 @@ QLabel#aiInterval {
     padding: 7px 10px;
     font-size: 9.3pt;
 }
+QLabel#coverageWarning {
+    color: #8A4B08;
+    background: #FEF3E2;
+    border: 1px solid #F2C779;
+    border-radius: 10px;
+    padding: 9px 11px;
+    font-size: 9.4pt;
+    font-weight: 600;
+}
+QLabel#coverageComplete {
+    color: #137333;
+    background: #E6F4EA;
+    border: 1px solid #A8DAB5;
+    border-radius: 10px;
+    padding: 9px 11px;
+    font-size: 9.4pt;
+}
+QLabel#coverageNeutral {
+    color: #3C4043;
+    background: #EEF3FD;
+    border: 1px solid #D2E3FC;
+    border-radius: 10px;
+    padding: 9px 11px;
+    font-size: 9.4pt;
+}
 QLabel#overviewPill {
     color: #174EA6;
     background: #D2E3FC;
@@ -139,6 +164,21 @@ QTextBrowser#chatTranscript {
     padding: 14px;
 }
 QTreeWidget#evidenceDrawer { background: #F8FAFD; border-color: #D2E3FC; }
+QTreeWidget#deterministicTree {
+    background: #FFFFFF;
+    border: 1px solid #D2E3FC;
+    border-radius: 12px;
+    font-size: 9.4pt;
+}
+QPlainTextEdit#promptInspector {
+    background: #111827;
+    color: #E5E7EB;
+    border: 1px solid #334155;
+    border-radius: 11px;
+    padding: 10px;
+    font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace;
+    font-size: 9.2pt;
+}
 QHeaderView::section {
     background: #F1F3F4;
     color: #5F6368;
@@ -149,6 +189,16 @@ QHeaderView::section {
 }
 QComboBox, QDateEdit { padding: 6px 10px; }
 QTabWidget::pane { border: none; }
+QTabWidget#aiWorkspaceTabs::pane {
+    background: #F8FAFD;
+    border: 1px solid #DCE3EE;
+    border-radius: 14px;
+    top: -1px;
+}
+QTabWidget#aiWorkspaceTabs QTabBar::tab {
+    padding: 9px 16px;
+    margin-right: 4px;
+}
 QTabBar::tab {
     background: transparent;
     color: #5F6368;
