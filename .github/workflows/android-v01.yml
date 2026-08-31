@@ -1,0 +1,46 @@
+name: Android 0.1 build
+on:
+  push:
+    branches: [android-v0.1]
+    paths:
+      - 'android/**'
+      - 'google_health_viewer/analysis.py'
+      - 'google_health_viewer/ai_insights.py'
+      - 'google_health_viewer/constants.py'
+      - 'google_health_viewer/i18n.py'
+      - 'google_health_viewer/utils.py'
+      - '.github/workflows/android-v01.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+      - name: Sync deterministic desktop core into Android
+        run: python android/scripts/sync_shared_core.py --source . --dest android/app/src/main/python --assets android/app/src/main/assets
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Build Android 0.1
+        run: gradle -p android :app:assembleDebug --stacktrace
+      - name: Name APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk VitalChronicle-Android-0.1.0.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VitalChronicle-Android-0.1.0
+          path: VitalChronicle-Android-0.1.0.apk
+          if-no-files-found: error
