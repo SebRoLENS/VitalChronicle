@@ -8,10 +8,8 @@ from typing import Any
 
 import requests
 
-RELEASES_URL = "https://github.com/SebRoLENS/google-health-dashboard-ai/releases"
-LATEST_RELEASE_API = (
-    "https://api.github.com/repos/SebRoLENS/google-health-dashboard-ai/releases/latest"
-)
+RELEASES_URL = "https://github.com/SebRoLENS/VitalChronicle/releases"
+LATEST_RELEASE_API = "https://api.github.com/repos/SebRoLENS/VitalChronicle/releases/latest"
 
 
 @dataclass(frozen=True)
@@ -88,7 +86,7 @@ def release_from_payload(payload: Any) -> ReleaseInfo:
 
 
 def fetch_latest_release(current_version: str) -> ReleaseInfo:
-    """Fetch the latest public release without blocking the GUI thread."""
+    """Fetch the latest public VitalChronicle release without blocking the GUI thread."""
     response = requests.get(
         LATEST_RELEASE_API,
         headers={
