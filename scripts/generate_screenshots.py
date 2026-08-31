@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render documentation screenshots from the real GUI and synthetic health data."""
+"""Render real-GUI documentation screenshots, including the separate AI chat."""
 
 from __future__ import annotations
 
