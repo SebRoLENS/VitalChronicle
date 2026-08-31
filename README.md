@@ -36,7 +36,7 @@ not a replacement for professional medical advice.
 
 ## Download
 
-**Current release: [VitalChronicle v1.0.10](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.0.10)**
+**Current release: [VitalChronicle v1.1.0](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.0)**
 
 **[Download the latest VitalChronicle release for Linux, Windows, or macOS](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest)**
 
@@ -79,15 +79,20 @@ Charts adapt to the selected record: daily bars for steps and energy, point clou
 dense measurements, stacked bars for sleep stages and heart-rate zones, and readable
 vertical ranges for noisy measurements. Panning and zooming operate on time.
 
-### Private local AI
+### Private local AI workspace
 
-![VitalChronicle local AI analysis interface](docs/screenshots/local-ai.png)
+![VitalChronicle local AI control centre](docs/screenshots/ai-control-center.png)
 
-The AI tab is a control centre; conversations open in a larger, resizable window with
-local thread history, follow-up questions, stop/regenerate controls, Markdown export,
-and an evidence drawer. Thinking and the final answer share one assistant area. Each
-conversation pins its data snapshot and visibly offers a refresh when newer local data
-become available.
+All AI controls now live in one workspace. Its four internal sections separate analysis
+and chat, deterministic metrics, model/token configuration, and prompt inspection without
+adding unrelated top-level pages. Conversations open in a larger, resizable window with
+local thread history, follow-up questions, stop/regenerate controls, Markdown export, an
+evidence drawer, and the exact prompt used for the latest query.
+
+![VitalChronicle local AI conversation](docs/screenshots/local-ai.png)
+
+Thinking and the final answer share one assistant area. Each conversation pins its data
+snapshot and visibly offers a refresh when newer local data become available.
 
 Before Ollama receives anything, deterministic Python preparation calculates personal
 7/28/90-day baselines, matched recent-versus-previous periods, robust anomalies, trends,
@@ -96,12 +101,33 @@ one-day-lagged associations. Evidence is ranked so the model can synthesize sust
 multi-metric patterns instead of merely reporting that one day differs from another.
 Incomplete cumulative totals are compared only with previous days at the same local time.
 
+### Transparent deterministic evidence
+
+![VitalChronicle deterministic metrics inspector](docs/screenshots/ai-deterministic-metrics.png)
+
+The inspector shows exactly what Python calculated before Ollama is called: observation
+coverage, 7-day baselines, matched changes, trends, robust anomalies, associations, and
+ranked evidence. Selecting a row reveals the complete local JSON and interpretation limits.
+If a month was requested but only one week is observed, the interface reports both ranges
+and the AI must begin by limiting its conclusions to that week. Missing measurements are
+never silently treated as zero or as a complete requested interval.
+
 ### AI memory and token settings
 
 ![VitalChronicle local AI RAM and token settings](docs/screenshots/ai-settings.png)
 
 The user enters installed RAM and receives a model-aware token recommendation. The
 value remains editable and is limited only by the physical context reported by Ollama.
+
+### Inspectable model instructions
+
+![VitalChronicle system prompt inspector](docs/screenshots/ai-prompt.png)
+
+The permanent system prompt is readable inside the AI workspace. During a conversation,
+**Show prompt** displays the exact messages sent for the latest request, including the
+processed evidence JSON, retained conversation context, and current question. This view
+remains local and may contain processed health information, so it should be reviewed before
+copying or sharing.
 
 ## Main capabilities
 
@@ -116,9 +142,12 @@ value remains editable and is limited only by the physical context reported by O
 - readable time windows and robust vertical scales for dense measurements;
 - seven-day personal baselines and transparent statistical bands;
 - deterministic AI preparation with matched periods, multi-horizon personal baselines,
-  robust anomaly detection, data-quality scoring, and cautious cross-metric associations;
+  robust anomaly detection, requested-versus-observed coverage, data-quality scoring, and
+  cautious cross-metric associations;
+- a dedicated inspector for every calculated deterministic parameter and its raw local JSON;
 - persistent local AI conversations in a separate resizable window, including follow-up
-  questions, pinned/updatable data snapshots, visible thinking, evidence, export, and stop;
+  questions, pinned/updatable data snapshots, visible thinking, evidence, exact-prompt
+  inspection, export, and stop;
 - two-pass complete-history synthesis through local Qwen/Ollama, with NVIDIA 16 GB and
   CPU-only 32 GB profiles;
 - model-update notifications and model-context-aware token recommendations;
