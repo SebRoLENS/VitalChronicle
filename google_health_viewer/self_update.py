@@ -30,7 +30,7 @@ class UpdateTarget:
 @dataclass(frozen=True)
 class UpdateResult:
     destination: Path
-    backup: Path
+    backup: Path | None = None
     helper: Path | None = None
 
     @property
@@ -138,7 +138,6 @@ def install_update(
         raise SelfUpdateError("The application folder is not writable.")
 
     staged = destination.with_name(f".{destination.name}.update")
-    backup = destination.with_name(f"{destination.name}.previous")
     try:
         actual = _download(target.asset, staged, progress)
         expected = _expected_digest(release, target.asset)
@@ -148,41 +147,46 @@ def install_update(
         if target.kind == "appimage":
             mode = stat.S_IMODE(destination.stat().st_mode)
             staged.chmod(mode | stat.S_IXUSR)
-            os.replace(destination, backup)
-            try:
-                os.replace(staged, destination)
-            except Exception:
-                os.replace(backup, destination)
-                raise
-            return UpdateResult(destination, backup)
+            # os.replace() atomically replaces the old AppImage at the same path.
+            # No .previous copy is kept after a successful update.
+            os.replace(staged, destination)
+            return UpdateResult(destination)
 
         if target.kind == "windows-exe":
             helper = destination.with_name(f".{destination.stem}-update.cmd")
+            rollback = destination.with_name(f".{destination.name}.rollback")
             if any(character in str(destination) for character in ("%", "\r", "\n")):
                 raise SelfUpdateError(
                     "The application path contains characters that the Windows updater "
                     "cannot handle safely."
                 )
-            # The helper runs only after the GUI exits, then restores the original path.
+            # The helper runs only after the GUI exits. It keeps a temporary rollback
+            # copy, deletes the old executable, installs the new one, then removes the
+            # rollback copy immediately after success.
             helper.write_text(
                 "@echo off\r\n"
                 "setlocal\r\n"
+                f'copy /b /y "{destination}" "{rollback}" >nul 2>&1\r\n'
+                "if errorlevel 1 exit /b 1\r\n"
                 "for /l %%i in (1,1,30) do (\r\n"
-                f'  move /y "{destination}" "{backup}" >nul 2>&1 && goto replace\r\n'
+                f'  del /f /q "{destination}" >nul 2>&1\r\n'
+                f'  if not exist "{destination}" goto replace\r\n'
                 "  timeout /t 1 /nobreak >nul\r\n"
                 ")\r\n"
+                f'del /f /q "{rollback}" >nul 2>&1\r\n'
                 "exit /b 1\r\n"
                 ":replace\r\n"
                 f'move /y "{staged}" "{destination}" >nul 2>&1\r\n'
                 "if errorlevel 1 (\r\n"
-                f'  move /y "{backup}" "{destination}" >nul 2>&1\r\n'
+                f'  move /y "{rollback}" "{destination}" >nul 2>&1\r\n'
                 "  exit /b 1\r\n"
                 ")\r\n"
+                f'del /f /q "{rollback}" >nul 2>&1\r\n'
                 f'start "" "{destination}"\r\n'
                 'del "%~f0"\r\n',
                 encoding="utf-8",
             )
-            return UpdateResult(destination, backup, helper)
+            return UpdateResult(destination, helper=helper)
         raise SelfUpdateError("This package type cannot be updated automatically.")
     except Exception:
         staged.unlink(missing_ok=True)
