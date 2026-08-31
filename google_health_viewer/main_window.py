@@ -86,12 +86,12 @@ from .local_ai import (
     HARDWARE_PROFILE_LABELS,
     MODEL_DESCRIPTIONS,
     MODEL_OPTIONS,
-    SYSTEM_PROMPT,
     LocalAIError,
     OllamaClient,
     OllamaStatus,
     detected_hardware_profile,
     recommended_model,
+    system_prompt,
 )
 from .oauth import CredentialStore
 from .self_update import launch_windows_helper, select_update_target
@@ -384,13 +384,6 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(_("An update check is already in progress."), 5000)
             return
         now = time.time()
-        try:
-            last_check = float(self.settings.value("updates/last_check", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            last_check = 0.0
-        if not force and now - last_check < 24 * 60 * 60:
-            return
-
         self.settings.setValue("updates/last_check", now)
         if force:
             self.statusBar().showMessage(_("Checking for VitalChronicle updates…"))
@@ -1088,7 +1081,7 @@ class MainWindow(QMainWindow):
         self.ai_system_prompt_view = QPlainTextEdit()
         self.ai_system_prompt_view.setObjectName("promptInspector")
         self.ai_system_prompt_view.setReadOnly(True)
-        self.ai_system_prompt_view.setPlainText(SYSTEM_PROMPT)
+        self.ai_system_prompt_view.setPlainText(system_prompt())
         prompt_layout.addWidget(self.ai_system_prompt_view, 1)
         root.addWidget(prompt_card, 1)
 

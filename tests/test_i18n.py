@@ -51,6 +51,10 @@ def test_catalogues_are_valid_and_preserve_placeholders():
     assert set(catalogues["it"]) == set(catalogues["en"])
     assert all(catalogues["it"].values())
     assert all(message == translation for message, translation in catalogues["en"].items())
+    assert not any(
+        message.startswith("You are VitalChronicle's local health-data analysis module")
+        for message in catalogues["en"]
+    )
     formatter = string.Formatter()
     for language, catalogue in catalogues.items():
         assert isinstance(catalogue, dict)
