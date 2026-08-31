@@ -2,6 +2,10 @@
 
 All notable changes to VitalChronicle are documented here.
 
+## 1.0.10 — 2026-08-31
+
+- automated maintenance release with validated application and packaging updates.
+
 ## 1.0.9 — 2026-08-31
 
 - automated maintenance release with validated application and packaging updates.

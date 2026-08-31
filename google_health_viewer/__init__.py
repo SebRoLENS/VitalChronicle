@@ -1,3 +1,3 @@
 """VitalChronicle: a local-first Google Health dashboard."""
 
-__version__ = "1.0.9"
+__version__ = "1.0.10"
