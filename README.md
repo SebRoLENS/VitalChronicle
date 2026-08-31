@@ -36,7 +36,7 @@ not a replacement for professional medical advice.
 
 ## Download
 
-**Current release: [VitalChronicle v1.1.0](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.0)**
+**Current release: [VitalChronicle v1.1.1](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.1)**
 
 **[Download the latest VitalChronicle release for Linux, Windows, or macOS](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest)**
 
@@ -111,6 +111,12 @@ ranked evidence. Selecting a row reveals the complete local JSON and interpretat
 If a month was requested but only one week is observed, the interface reports both ranges
 and the AI must begin by limiting its conclusions to that week. Missing measurements are
 never silently treated as zero or as a complete requested interval.
+
+The evidence packet is placed in the latest model message so it cannot be discarded before
+the question when the context is crowded. VitalChronicle reads and remembers the physical
+context limit reported by Ollama, removes duplicated evidence, preserves every calculated
+metric, and reduces only the available response budget when necessary. A false “no evidence
+provided” response is automatically rejected and retried with an evidence-first request.
 
 ### AI memory and token settings
 

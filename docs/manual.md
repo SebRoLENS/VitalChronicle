@@ -1,7 +1,7 @@
 ---
 title: "VitalChronicle User Manual"
 author: "Sebastiano Romi"
-date: "Updated for VitalChronicle 1.1.0"
+date: "Updated for VitalChronicle 1.1.1"
 lang: en-US
 geometry: margin=2.2cm
 colorlinks: true
@@ -13,7 +13,7 @@ toc-depth: 3
 
 # About this manual
 
-This is the authoritative user manual for **VitalChronicle 1.1.0**. VitalChronicle is a
+This is the authoritative user manual for **VitalChronicle 1.1.1**. VitalChronicle is a
 local-first desktop dashboard for personal Google Health data and optional local AI
 analysis through Ollama.
 
@@ -112,26 +112,26 @@ slow or may require more memory than the computer can provide.
 2. Make it executable:
 
    ```bash
-   chmod +x VitalChronicle-1.1.0-linux-x86_64.AppImage
+   chmod +x VitalChronicle-1.1.1-linux-x86_64.AppImage
    ```
 
 3. Start it:
 
    ```bash
-   ./VitalChronicle-1.1.0-linux-x86_64.AppImage
+   ./VitalChronicle-1.1.1-linux-x86_64.AppImage
    ```
 
 If FUSE is unavailable, run it with:
 
 ```bash
-APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.1.0-linux-x86_64.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.1.1-linux-x86_64.AppImage
 ```
 
 The AppImage is accompanied by a Sigstore bundle and release checksums.
 
 ## 3.2 Windows
 
-1. Download `VitalChronicle-1.1.0-windows-x86_64.exe`.
+1. Download `VitalChronicle-1.1.1-windows-x86_64.exe`.
 2. Verify its SHA-256 checksum against `SHA256SUMS.txt`.
 3. Start the executable.
 
@@ -360,7 +360,7 @@ from blocking health-data updates.
 ## 5.4 Storage locations
 
 VitalChronicle keeps the historical internal `GoogleHealthViewer` directory identifier so
-existing 0.2.12 archives survive the 1.1.0 upgrade. Typical locations are:
+existing 0.2.12 archives survive the 1.1.1 upgrade. Typical locations are:
 
 - Linux data: `~/.local/share/GoogleHealthViewer/`;
 - Linux configuration: `~/.config/GoogleHealthViewer/`;
@@ -638,6 +638,18 @@ Complete-history analysis uses two model passes: an evidence-selection pass reje
 or redundant claims, then a synthesis pass writes the user-facing answer. Direct questions
 use the same prepared evidence with conversational history and a faster single synthesis.
 
+The deterministic JSON is attached to the latest user message in each model call. This is
+important because an overfull chat context is normally shortened from its older content;
+placing evidence immediately beside the current request prevents the question from becoming
+separated from its data. Repeated copies of candidate evidence are removed, but every
+calculated metric, structured detail, period comparison, association, and coverage limit is
+retained.
+
+VitalChronicle reads the physical context length from Ollama and remembers it for the selected
+model. It estimates the input size before inference and, if input plus the requested response
+cannot fit together, preserves the evidence while reducing the maximum response tokens. The
+exact estimated input, context size, and response allowance appear under **Show prompt**.
+
 The evidence drawer exposes the headline, confidence, score, and evidence identifier used
 for this process. It is a verification aid: confidence describes support in the available
 personal history, not medical certainty. Increasing the output-token setting can allow a
@@ -651,6 +663,12 @@ created. **Stop** requests cancellation; already completed messages remain avail
 **Regenerate** removes only the latest assistant response and requests a replacement from
 the same pinned snapshot. If a thinking-capable model ends without a final answer,
 VitalChronicle automatically retries with thinking disabled.
+
+If a model nevertheless returns a statement such as “no health evidence was provided” while
+the deterministic snapshot contains metrics, VitalChronicle does not save or display that
+answer. It automatically retries with a compact evidence-first request. If the physical model
+context is too small even for the compact packet, the application reports the estimated input
+and context sizes instead of silently analysing truncated data.
 
 The permanent model instructions are visible under **Prompt and instructions**:
 
@@ -760,7 +778,7 @@ public issue containing credentials or health data.
 
 # 13. Android status
 
-VitalChronicle 1.1.0 does not ship an APK. The current application uses desktop Qt widgets,
+VitalChronicle 1.1.1 does not ship an APK. The current application uses desktop Qt widgets,
 a loopback-browser OAuth callback, desktop keyrings, and desktop chart interactions. A safe
 Android edition requires a dedicated mobile interface, Android OAuth credentials bound to
 a package name and signing certificate, mobile secure storage, lifecycle handling, and a

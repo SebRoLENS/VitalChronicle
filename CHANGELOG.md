@@ -2,6 +2,19 @@
 
 All notable changes to VitalChronicle are documented here.
 
+## 1.1.1 — 2026-08-31
+
+- fixed long local-AI prompts that could cause Ollama to discard the deterministic health
+  evidence and incorrectly report that no data had been supplied;
+- moved the evidence JSON into the latest user message, removed only duplicated payloads,
+  and sized the request from the estimated input rather than the output budget alone;
+- automatically reads and persists each Ollama model's physical context limit, preserving
+  all calculated metrics while reducing response space when the shared context is crowded;
+- detects false missing-evidence answers, discards them before chat persistence, and retries
+  with a compact evidence-first request;
+- added context-budget visibility, English/Italian translations, and regression tests for
+  large evidence packets and evidence-preserving retries.
+
 ## 1.1.0 — 2026-08-31
 
 - reorganized local AI into one coherent workspace with dedicated **Analysis and chat**,
