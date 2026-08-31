@@ -227,6 +227,7 @@ class AIAnalysisThread(QThread):
     cancelled = Signal()
     thinking_chunk = Signal(str)
     answer_chunk = Signal(str)
+    prompt_ready = Signal(str)
 
     def __init__(
         self,
@@ -262,6 +263,7 @@ class AIAnalysisThread(QThread):
                 history=self.history,
                 analysis_mode=self.analysis_mode,
                 cancel_callback=self.isInterruptionRequested,
+                prompt_callback=self.prompt_ready.emit,
             )
             self.completed.emit(answer)
         except AIAnalysisCancelled:
