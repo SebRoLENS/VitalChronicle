@@ -485,8 +485,125 @@ def _associations(
     return result[:12]
 
 
+def _requested_interval_coverage(
+    snapshot: dict[str, Any],
+    observed_dates_by_type: dict[str, set[date]],
+    start_day: date,
+    end_day: date,
+) -> dict[str, Any]:
+    requested_days = max(0, (end_day - start_day).days + 1)
+    observed_days = sorted(
+        {
+            day
+            for days in observed_dates_by_type.values()
+            for day in days
+            if start_day <= day <= end_day
+        }
+    )
+    first_observed = observed_days[0] if observed_days else None
+    last_observed = observed_days[-1] if observed_days else None
+    days_with_any_data = len(observed_days)
+    any_data_coverage = (
+        days_with_any_data / requested_days * 100.0 if requested_days else None
+    )
+
+    metric_rows = []
+    limited_daily_metrics = []
+    for metric in snapshot.get("metrics", []):
+        data_type = str(metric.get("data_type", ""))
+        dates = sorted(observed_dates_by_type.get(data_type, set()))
+        expected_daily = data_type in DAILY_EXPECTED_TYPES
+        coverage = len(dates) / requested_days * 100.0 if expected_daily and requested_days else None
+        row = {
+            "data_type": data_type,
+            "label": str(metric.get("label", data_type)),
+            "expected_frequency": "daily_or_more" if expected_daily else "event_or_irregular",
+            "observed_calendar_days": len(dates),
+            "requested_calendar_days": requested_days,
+            "coverage_percent": _round(coverage, 1),
+            "first_observation": dates[0].isoformat() if dates else None,
+            "last_observation": dates[-1].isoformat() if dates else None,
+            "records_considered": int(metric.get("records_considered", 0) or 0),
+        }
+        metric_rows.append(row)
+        if expected_daily and coverage is not None and coverage < 80.0:
+            limited_daily_metrics.append(
+                {
+                    "data_type": data_type,
+                    "label": row["label"],
+                    "coverage_percent": row["coverage_percent"],
+                    "observed_calendar_days": len(dates),
+                }
+            )
+
+    starts_late = first_observed is None or first_observed > start_day
+    ends_early = last_observed is None or last_observed < end_day
+    partial = bool(starts_late or ends_early or limited_daily_metrics)
+    if not observed_days:
+        notice = (
+            f"The requested interval is {start_day.isoformat()} to {end_day.isoformat()} "
+            f"({requested_days} calendar days), but no supported observation dates are "
+            "available. Do not describe the requested interval as analysed."
+        )
+    elif partial:
+        notice = (
+            f"The requested interval is {start_day.isoformat()} to {end_day.isoformat()} "
+            f"({requested_days} calendar days), but the local archive contains observations "
+            f"from {first_observed.isoformat()} to {last_observed.isoformat()} and has at least "
+            f"one measurement on {days_with_any_data} calendar days. Explicitly limit every "
+            "conclusion to the dates and metrics actually observed; do not imply complete "
+            "coverage of the requested interval."
+        )
+    else:
+        notice = (
+            f"The requested interval is {start_day.isoformat()} to {end_day.isoformat()} "
+            f"({requested_days} calendar days). Observations span the complete requested "
+            "interval, although individual metrics may still be intermittent."
+        )
+
+    return {
+        "requested_start": start_day.isoformat(),
+        "requested_end": end_day.isoformat(),
+        "requested_calendar_days": requested_days,
+        "first_observed_date": first_observed.isoformat() if first_observed else None,
+        "last_observed_date": last_observed.isoformat() if last_observed else None,
+        "observed_span_days": (
+            (last_observed - first_observed).days + 1
+            if first_observed is not None and last_observed is not None
+            else 0
+        ),
+        "calendar_days_with_any_data": days_with_any_data,
+        "calendar_days_with_any_data_percent": _round(any_data_coverage, 1),
+        "starts_after_requested_start": starts_late,
+        "ends_before_requested_end": ends_early,
+        "scope_is_partially_observed": partial,
+        "limited_daily_metrics": limited_daily_metrics,
+        "metrics": metric_rows,
+        "coverage_notice": notice,
+        "response_rule": (
+            "State the requested interval and the actually observed date range near the start "
+            "of the answer whenever scope_is_partially_observed is true. Never describe missing "
+            "days as analysed and never treat absence as zero."
+        ),
+    }
+
+
 def _candidate_insights(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
+    interval_coverage = snapshot.get("requested_interval_coverage") or {}
+    if interval_coverage.get("scope_is_partially_observed"):
+        candidates.append(
+            {
+                "evidence_id": "quality:requested-interval",
+                "kind": "requested_interval_data_limit",
+                "data_types": [],
+                "headline": "The requested interval is only partially represented in local data",
+                "evidence": interval_coverage,
+                "relevance_score": 100.0,
+                "confidence": "high",
+                "caveat": interval_coverage.get("coverage_notice", ""),
+            }
+        )
     for metric in snapshot.get("metrics", []):
         data_type = str(metric.get("data_type", ""))
         label = str(metric.get("label", data_type))
@@ -621,10 +738,14 @@ def build_ai_ready_snapshot(
     end_day = min(exclusive_end - timedelta(days=1), local_now.date())
     snapshot = build_health_snapshot(store, start, end, now=local_now, record_limit=record_limit)
     daily_by_type: dict[str, dict[date, float]] = {}
+    observed_dates_by_type: dict[str, set[date]] = {}
     labels: dict[str, str] = {}
     metric_by_type = {str(item.get("data_type")): item for item in snapshot.get("metrics", [])}
     for data_type, metric in metric_by_type.items():
         records = store.list_records(data_type, start, end, limit=record_limit, newest=True)
+        observed_dates_by_type[data_type] = {
+            day for record in records if (day := _record_day(record)) is not None
+        }
         daily_result = _daily_values(records, data_type)
         if daily_result:
             daily, _unit, _aggregation = daily_result
@@ -638,7 +759,7 @@ def build_ai_ready_snapshot(
         labels[data_type] = str(metric.get("label") or DATA_TYPE_BY_KEY[data_type].label)
 
     snapshot["preprocessing"] = {
-        "version": "health-evidence-v2",
+        "version": "health-evidence-v3",
         "performed_at": local_now.isoformat(),
         "principles": [
             "personal baselines instead of generic population thresholds",
@@ -647,13 +768,21 @@ def build_ai_ready_snapshot(
             "robust median-and-MAD anomaly detection",
             "correlations require repeated paired days and never imply causation",
             "missing recordings are treated as missing, never as zero",
+            "requested intervals are distinguished from the dates actually observed",
         ],
     }
+    snapshot["requested_interval_coverage"] = _requested_interval_coverage(
+        snapshot, observed_dates_by_type, start_day, end_day
+    )
     snapshot["associations"] = _associations(daily_by_type, labels)
     snapshot["candidate_insights"] = _candidate_insights(snapshot)
     snapshot["analysis_brief"] = {
         "available_metric_count": len(snapshot.get("metrics", [])),
         "top_evidence_ids": [item["evidence_id"] for item in snapshot["candidate_insights"][:8]],
+        "coverage_notice": snapshot["requested_interval_coverage"]["coverage_notice"],
+        "must_state_data_limitations_first": snapshot["requested_interval_coverage"][
+            "scope_is_partially_observed"
+        ],
         "requested_synthesis": (
             "Prioritize sustained or multi-metric patterns over trivial day-to-day arithmetic. "
             "Explain the strongest evidence, its magnitude, confidence, and limitations."
