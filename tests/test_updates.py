@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from google_health_viewer.updates import (
+    LATEST_RELEASE_API,
     RELEASES_URL,
     notification_due,
     release_from_payload,
@@ -16,6 +17,13 @@ def test_semantic_versions_and_update_kind():
     assert update_kind((1, 2, 3), (1, 2, 4)) == "patch"
     assert update_kind((1, 2, 3), (1, 3, 0)) == "minor"
     assert update_kind((1, 2, 3), (2, 0, 0)) == "major"
+
+
+def test_updater_points_to_vitalchronicle_latest_release():
+    assert RELEASES_URL == "https://github.com/SebRoLENS/VitalChronicle/releases"
+    assert LATEST_RELEASE_API == (
+        "https://api.github.com/repos/SebRoLENS/VitalChronicle/releases/latest"
+    )
 
 
 def test_release_payload_and_fallback_url():
