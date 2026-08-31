@@ -791,8 +791,12 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(QLabel(_("Maximum tokens")), 1, 0)
         self.ai_token_edit = QLineEdit()
-        self._model_token_limit: int | None = None
-        self.ai_token_edit.setValidator(QIntValidator(1, 2_147_483_647, self))
+        self._model_token_limit = self._stored_model_context_limit(
+            self.ai_model_combo.currentText()
+        )
+        self.ai_token_edit.setValidator(
+            QIntValidator(1, self._model_token_limit or 2_147_483_647, self)
+        )
         self.ai_token_edit.setText(
             str(self.settings.value("ai/max_generation_tokens", 3200, type=int))
         )
@@ -1209,6 +1213,20 @@ class MainWindow(QMainWindow):
         except ValueError:
             pass
 
+    def _model_context_settings_key(self, model: str) -> str:
+        safe_model = model.strip().replace("/", "_") or "default"
+        return f"ai/model_context_limit/{safe_model}"
+
+    def _stored_model_context_limit(self, model: str) -> int | None:
+        value = self.settings.value(
+            self._model_context_settings_key(model), 0, type=int
+        )
+        return int(value) if value and int(value) > 0 else None
+
+    def _remember_model_context_limit(self, model: str, limit: int | None) -> None:
+        if limit is not None and limit > 0:
+            self.settings.setValue(self._model_context_settings_key(model), limit)
+
     def _recommend_ai_tokens(self) -> None:
         try:
             ram_gb = int(self.ai_ram_edit.text())
@@ -1223,6 +1241,9 @@ class MainWindow(QMainWindow):
             return
 
         self._model_token_limit = recommendation.model_context_limit
+        self._remember_model_context_limit(
+            self.ai_model_combo.currentText(), recommendation.model_context_limit
+        )
         validator = self.ai_token_edit.validator()
         if isinstance(validator, QIntValidator):
             validator.setTop(
@@ -2038,10 +2059,10 @@ class MainWindow(QMainWindow):
         self._pending_model_update = None
         self.model_update_button.setVisible(False)
         if hasattr(self, "ai_token_edit"):
-            self._model_token_limit = None
+            self._model_token_limit = self._stored_model_context_limit(model)
             validator = self.ai_token_edit.validator()
             if isinstance(validator, QIntValidator):
-                validator.setTop(2_147_483_647)
+                validator.setTop(self._model_token_limit or 2_147_483_647)
             self.ai_token_recommendation.setText(
                 _("Model changed: recalculate the recommendation from RAM.")
             )
@@ -2076,6 +2097,15 @@ class MainWindow(QMainWindow):
                 else "font-weight: 700; color: #188038"
             )
             self.pull_button.setEnabled(not installed)
+            if installed and status.model_context_limit:
+                self._model_token_limit = status.model_context_limit
+                self._remember_model_context_limit(
+                    self.ai_model_combo.currentText(), status.model_context_limit
+                )
+                validator = self.ai_token_edit.validator()
+                if isinstance(validator, QIntValidator):
+                    validator.setTop(status.model_context_limit)
+                self._save_ai_token_settings()
             self._pending_model_update = status.update_target
             self.model_update_button.setVisible(status.update_available)
             if status.update_available:

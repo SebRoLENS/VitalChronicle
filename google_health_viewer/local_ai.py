@@ -77,6 +77,7 @@ class OllamaStatus:
     update_available: bool = False
     update_message: str = ""
     update_target: str | None = None
+    model_context_limit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,97 @@ def render_prompt_messages(messages: list[dict[str, str]], stage: str) -> str:
     return "\n".join(sections).strip()
 
 
+def _copy_without_keys(value: Any, excluded: set[str]) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _copy_without_keys(item, excluded)
+            for key, item in value.items()
+            if str(key) not in excluded
+        }
+    if isinstance(value, list):
+        return [_copy_without_keys(item, excluded) for item in value]
+    return value
+
+
+def _prompt_snapshot(snapshot: dict[str, Any], *, slim: bool = False) -> dict[str, Any]:
+    """Remove prompt-only duplication while retaining every calculated metric."""
+
+    result = {
+        str(key): value for key, value in snapshot.items() if str(key) != "correlations"
+    }
+    result["candidate_insights"] = [
+        {
+            key: value
+            for key, value in insight.items()
+            if key != "evidence"
+        }
+        for insight in snapshot.get("candidate_insights", [])
+    ]
+    if slim:
+        result = _copy_without_keys(
+            result,
+            {
+                "principles",
+                "interpretation",
+                "interpretation_rule",
+                "response_rule",
+            },
+        )
+    result["prompt_payload"] = {
+        "health_evidence_present": True,
+        "metric_count": len(snapshot.get("metrics", [])),
+        "candidate_evidence_count": len(snapshot.get("candidate_insights", [])),
+        "representation": (
+            "All calculated metrics are retained. Repeated candidate evidence payloads and "
+            "legacy correlations are omitted because their source values already appear in "
+            "metrics, requested_interval_coverage, and associations."
+        ),
+    }
+    return result
+
+
+def _estimate_message_tokens(messages: list[dict[str, str]]) -> int:
+    # Health JSON contains many punctuation tokens, so three UTF-8 characters per
+    # token is deliberately more conservative than the usual prose heuristic.
+    characters = sum(
+        len(str(message.get("role", ""))) + len(str(message.get("content", "")))
+        for message in messages
+    )
+    return max(1, math.ceil(characters / 3.0))
+
+
+def _request_budget(
+    messages: list[dict[str, str]],
+    max_tokens: int,
+    model_context_limit: int | None,
+) -> tuple[int, int, int]:
+    estimated_input = _estimate_message_tokens(messages)
+    reserve = 512
+    desired_context = max(16384, max_tokens * 2, estimated_input + max_tokens + reserve)
+    num_ctx = int(desired_context)
+    if model_context_limit is not None and model_context_limit > 0:
+        num_ctx = min(num_ctx, model_context_limit)
+    available_output = max(1, num_ctx - estimated_input - reserve)
+    return num_ctx, min(max_tokens, available_output), estimated_input
+
+
+def _claims_health_evidence_is_missing(answer: str) -> bool:
+    prefix = " ".join(answer.lower().split())[:1600]
+    markers = (
+        "non è stata fornita alcuna evidenza sanitaria",
+        "nessuna evidenza sanitaria fornita",
+        "nessun dato sanitario è stato fornito",
+        "nessun dato sanitario fornito",
+        "nessun dato è stato incluso nella richiesta",
+        "no health evidence was provided",
+        "no health evidence has been provided",
+        "no health data was provided",
+        "no health data has been provided",
+        "no data was included in the request",
+    )
+    return any(marker in prefix for marker in markers)
+
+
 class OllamaClient:
     def __init__(
         self,
@@ -179,6 +271,34 @@ class OllamaClient:
         response.raise_for_status()
         return response.headers.get("Docker-Content-Digest")
 
+    @staticmethod
+    def _context_limit_from_show(payload: dict[str, Any]) -> int | None:
+        model_info = payload.get("model_info") or {}
+        context_limits = []
+        if isinstance(model_info, dict):
+            for key, value in model_info.items():
+                if not str(key).lower().endswith(".context_length"):
+                    continue
+                try:
+                    parsed = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if parsed > 0:
+                    context_limits.append(parsed)
+        return max(context_limits) if context_limits else None
+
+    def _local_model_context_limit(self) -> int | None:
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/show",
+                json={"model": self.model, "verbose": False},
+                timeout=6,
+            )
+            response.raise_for_status()
+            return self._context_limit_from_show(response.json())
+        except (requests.RequestException, AttributeError, TypeError, ValueError):
+            return None
+
     def token_recommendation(self, ram_gb: int) -> TokenRecommendation:
         """Estimate a useful generation budget and respect model-declared context."""
         if ram_gb <= 0:
@@ -190,19 +310,7 @@ class OllamaClient:
                 timeout=6,
             )
             show_response.raise_for_status()
-            show_payload = show_response.json()
-            model_info = show_payload.get("model_info") or {}
-            context_limits = []
-            if isinstance(model_info, dict):
-                for key, value in model_info.items():
-                    if str(key).lower().endswith(".context_length"):
-                        try:
-                            parsed = int(value)
-                        except (TypeError, ValueError):
-                            continue
-                        if parsed > 0:
-                            context_limits.append(parsed)
-            context_limit = max(context_limits) if context_limits else None
+            context_limit = self._context_limit_from_show(show_response.json())
 
             tags_response = requests.get(f"{self.base_url}/api/tags", timeout=4)
             tags_response.raise_for_status()
@@ -293,12 +401,15 @@ class OllamaClient:
             update_target = successor
 
         return OllamaStatus(
-            True,
-            models,
-            message,
-            bool(update_messages),
-            " · ".join(update_messages),
-            update_target,
+            online=True,
+            models=models,
+            message=message,
+            update_available=bool(update_messages),
+            update_message=" · ".join(update_messages),
+            update_target=update_target,
+            model_context_limit=(
+                self._local_model_context_limit() if installed_item else None
+            ),
         )
 
     def pull(self, progress: Callable[[str], None] | None = None) -> None:
@@ -404,130 +515,246 @@ class OllamaClient:
             "and explain uncertainty. Include sleep stages, workouts, secondary fields, "
             "data quality, and useful monitoring questions."
         )
-        context = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
         max_tokens = max(1, int(max_tokens))
         if model_context_limit is not None and model_context_limit > 0:
             max_tokens = min(max_tokens, model_context_limit)
-        num_ctx = max(16384, max_tokens * 2)
-        if model_context_limit is not None and model_context_limit > 0:
-            num_ctx = min(num_ctx, model_context_limit)
-        context_messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    _(
-                        "Deterministic local health evidence (JSON):\n{context}\n\n"
-                        "Use this as the only source of health facts.",
-                        context=context,
-                    )
-                ),
-            },
-        ]
+        physical_limit = (
+            model_context_limit
+            if model_context_limit is not None and model_context_limit > 0
+            else None
+        )
         safe_history = [
             {"role": item["role"], "content": item["content"]}
             for item in (history or [])
             if item.get("role") in {"user", "assistant"} and item.get("content")
         ]
-        messages = [
-            *context_messages,
-            *safe_history,
-            {"role": "user", "content": _("Current request: {request}", request=request_text)},
-        ]
+
+        prompt_payload = _prompt_snapshot(snapshot)
+        context = json.dumps(prompt_payload, ensure_ascii=False, separators=(",", ":"))
+
+        def evidence_message(instruction: str, plan: str = "") -> str:
+            plan_section = (
+                _(
+                    "Evidence plan from the preceding local pass (selection aid only):\n{plan}\n\n",
+                    plan=plan,
+                )
+                if plan
+                else ""
+            )
+            return _(
+                "The deterministic health-evidence JSON below is present and contains "
+                "{metrics} calculated metrics. Read it before answering.\n\n"
+                "{plan_section}{instruction}\n\n"
+                "BEGIN_HEALTH_EVIDENCE_JSON\n{context}\nEND_HEALTH_EVIDENCE_JSON\n\n"
+                "Current request: {request}\n\n"
+                "Do not claim that health evidence is absent: the JSON block above is the "
+                "authoritative local evidence for this request.",
+                metrics=len(snapshot.get("metrics", [])),
+                plan_section=plan_section,
+                instruction=instruction,
+                context=context,
+                request=request_text,
+            )
+
+        final_instruction = _(
+            "Write a readable answer grounded in the evidence. Synthesize instead of listing "
+            "every metric, and keep important health claims traceable to evidence_id values."
+        )
+
+        def final_messages(plan: str = "") -> list[dict[str, str]]:
+            return [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                *safe_history,
+                {"role": "user", "content": evidence_message(final_instruction, plan)},
+            ]
+
+        messages = final_messages()
+        minimum_answer_tokens = min(max_tokens, 1024)
+        if (
+            physical_limit is not None
+            and _estimate_message_tokens(messages) + minimum_answer_tokens + 512
+            > physical_limit
+        ):
+            prompt_payload = _prompt_snapshot(snapshot, slim=True)
+            context = json.dumps(prompt_payload, ensure_ascii=False, separators=(",", ":"))
+            messages = final_messages()
+            if thinking_callback:
+                thinking_callback(
+                    _(
+                        "The evidence packet was compacted without removing calculated metric "
+                        "values, so it fits the model context.\n"
+                    )
+                )
+        while safe_history and physical_limit is not None:
+            messages = final_messages()
+            if (
+                _estimate_message_tokens(messages) + minimum_answer_tokens + 512
+                <= physical_limit
+            ):
+                break
+            safe_history.pop(0)
+        messages = final_messages()
+
+        def emit_prompt(
+            stage: str,
+            request_messages: list[dict[str, str]],
+            num_ctx: int,
+            num_predict: int,
+            estimated_input: int,
+        ) -> None:
+            if not prompt_callback:
+                return
+            prompt_callback(
+                render_prompt_messages(request_messages, stage)
+                + _(
+                    "\n\n# Context budget\n\nEstimated input: {input} tokens · context: "
+                    "{context} tokens · maximum response: {output} tokens",
+                    input=estimated_input,
+                    context=num_ctx,
+                    output=num_predict,
+                )
+            )
         try:
+            evidence_plan = ""
             if analysis_mode == "deep":
                 if thinking_callback:
                     thinking_callback(_("Evidence pass: ranking longitudinal patterns…\n"))
                 planning_messages = [
-                    *context_messages,
+                    {"role": "system", "content": SYSTEM_PROMPT},
                     {
                         "role": "user",
-                        "content": _(
-                            "Create a concise evidence plan for the final deep analysis. Select the "
-                            "strongest candidate_insights, connect related domains, reject weak or "
-                            "redundant claims, and list the evidence_id values to cite. Do not write "
-                            "the user-facing answer yet."
-                        ),
-                    },
-                ]
-                if prompt_callback:
-                    prompt_callback(
-                        render_prompt_messages(planning_messages, _("Evidence selection pass"))
-                    )
-                evidence_plan = self._chat_stream(
-                    planning_messages,
-                    think=True,
-                    num_predict=min(2048, max(512, max_tokens // 3)),
-                    num_ctx=num_ctx,
-                    thinking_callback=thinking_callback,
-                    answer_callback=None,
-                    cancel_callback=cancel_callback,
-                )
-                if evidence_plan:
-                    messages = [
-                        *messages,
-                        {
-                            "role": "assistant",
-                            "content": _(
-                                "Evidence plan (selection aid, not an additional source):\n{plan}",
-                                plan=evidence_plan,
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": _(
-                                "Now write the final, readable deep analysis. Synthesize instead of "
-                                "listing every metric and keep every health claim traceable to the "
-                                "deterministic evidence."
-                            ),
-                        },
-                    ]
-                if thinking_callback:
-                    thinking_callback(_("\nSynthesis pass: connecting the strongest evidence…\n"))
-            if prompt_callback:
-                prompt_callback(render_prompt_messages(messages, _("Final synthesis request")))
-            answer = self._chat_stream(
-                messages,
-                think=True,
-                num_predict=max_tokens,
-                num_ctx=num_ctx,
-                thinking_callback=thinking_callback,
-                answer_callback=answer_callback,
-                cancel_callback=cancel_callback,
-            )
-            if not answer:
-                if thinking_callback:
-                    thinking_callback(
-                        _("\n\nThinking complete. Preparing the final answer…\n")
-                    )
-                fallback_messages = [
-                    *messages,
-                    {
-                        "role": "user",
-                        "content": (
+                        "content": evidence_message(
                             _(
-                                "Now provide the final answer in English, without further internal reasoning."
+                                "Create a concise evidence plan for the final deep analysis. Select "
+                                "the strongest candidate_insights, connect related domains, reject "
+                                "weak or redundant claims, and list the evidence_id values to cite. "
+                                "Do not write the user-facing answer yet."
                             )
                         ),
                     },
                 ]
-                if prompt_callback:
-                    prompt_callback(
-                        render_prompt_messages(fallback_messages, _("Final-answer retry"))
-                    )
-                answer = self._chat_stream(
-                    fallback_messages,
-                    think=False,
-                    num_predict=max_tokens,
-                    num_ctx=num_ctx,
-                    thinking_callback=None,
-                    answer_callback=answer_callback,
+                planning_predict = min(2048, max(512, max_tokens // 3))
+                planning_ctx, planning_predict, planning_input = _request_budget(
+                    planning_messages, planning_predict, physical_limit
+                )
+                emit_prompt(
+                    _("Evidence selection pass"),
+                    planning_messages,
+                    planning_ctx,
+                    planning_predict,
+                    planning_input,
+                )
+                evidence_plan = self._chat_stream(
+                    planning_messages,
+                    think=True,
+                    num_predict=planning_predict,
+                    num_ctx=planning_ctx,
+                    thinking_callback=thinking_callback,
+                    answer_callback=None,
                     cancel_callback=cancel_callback,
                 )
-            if not answer:
-                raise LocalAIError(
-                    _("Ollama did not produce a final answer after the second attempt.")
+                if _claims_health_evidence_is_missing(evidence_plan):
+                    evidence_plan = ""
+                messages = final_messages(evidence_plan)
+                if thinking_callback:
+                    thinking_callback(_("\nSynthesis pass: connecting the strongest evidence…\n"))
+            num_ctx, num_predict, estimated_input = _request_budget(
+                messages, max_tokens, physical_limit
+            )
+            if num_predict < minimum_answer_tokens and evidence_plan:
+                evidence_plan = ""
+                messages = final_messages()
+                num_ctx, num_predict, estimated_input = _request_budget(
+                    messages, max_tokens, physical_limit
                 )
+            if num_predict < minimum_answer_tokens:
+                raise LocalAIError(
+                    _(
+                        "The prepared health evidence requires about {input} input tokens, but "
+                        "the model context is {context}. Select a model with a larger physical "
+                        "context window or shorten the conversation history.",
+                        input=estimated_input,
+                        context=num_ctx,
+                    )
+                )
+            if thinking_callback and num_predict < max_tokens:
+                thinking_callback(
+                    _(
+                        "The response budget was adjusted to {tokens} tokens so all health "
+                        "evidence remains inside the physical model context.\n",
+                        tokens=num_predict,
+                    )
+                )
+            emit_prompt(
+                _("Final synthesis request"),
+                messages,
+                num_ctx,
+                num_predict,
+                estimated_input,
+            )
+            answer_chunks: list[str] = []
+            answer = self._chat_stream(
+                messages,
+                think=True,
+                num_predict=num_predict,
+                num_ctx=num_ctx,
+                thinking_callback=thinking_callback,
+                answer_callback=answer_chunks.append,
+                cancel_callback=cancel_callback,
+            )
+            evidence_missing = _claims_health_evidence_is_missing(answer)
+            if not answer or evidence_missing:
+                if thinking_callback:
+                    thinking_callback(
+                        _(
+                            "\n\nThe model overlooked the supplied evidence. Retrying with a "
+                            "compact evidence-first request…\n"
+                        )
+                        if evidence_missing
+                        else _("\n\nThinking complete. Preparing the final answer…\n")
+                    )
+                recovery_instruction = _(
+                    "The previous response was empty or incorrectly claimed that evidence was "
+                    "missing. Read the complete JSON block below and provide the final answer now, "
+                    "without further internal reasoning."
+                )
+                recovery_messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": evidence_message(recovery_instruction)},
+                ]
+                recovery_ctx, recovery_predict, recovery_input = _request_budget(
+                    recovery_messages, max_tokens, physical_limit
+                )
+                emit_prompt(
+                    _("Evidence-preserving retry")
+                    if evidence_missing
+                    else _("Final-answer retry"),
+                    recovery_messages,
+                    recovery_ctx,
+                    recovery_predict,
+                    recovery_input,
+                )
+                answer_chunks = []
+                answer = self._chat_stream(
+                    recovery_messages,
+                    think=False,
+                    num_predict=recovery_predict,
+                    num_ctx=recovery_ctx,
+                    thinking_callback=None,
+                    answer_callback=answer_chunks.append,
+                    cancel_callback=cancel_callback,
+                )
+            if not answer or _claims_health_evidence_is_missing(answer):
+                raise LocalAIError(
+                    _(
+                        "Ollama did not produce an evidence-grounded final answer after the "
+                        "second attempt. The deterministic snapshot is present; try a model with "
+                        "a larger context window."
+                    )
+                )
+            if answer_callback:
+                for chunk in answer_chunks or [answer]:
+                    answer_callback(chunk)
             return answer
         except LocalAIError:
             raise

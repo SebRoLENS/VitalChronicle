@@ -86,12 +86,19 @@ def test_status_detects_new_weights_for_installed_model(monkeypatch):
         return FakeResponse(digest="sha256:new")
 
     monkeypatch.setattr("google_health_viewer.local_ai.requests.get", fake_get)
+    monkeypatch.setattr(
+        "google_health_viewer.local_ai.requests.post",
+        lambda *_args, **_kwargs: FakeResponse(
+            {"model_info": {"qwen35.context_length": 65536}}
+        ),
+    )
     status = OllamaClient(model="qwen3.5:9b", hardware_profile="gpu16").status()
 
     assert status.online
     assert status.update_available
     assert status.update_target == "qwen3.5:9b"
     assert "new weights" in status.update_message
+    assert status.model_context_limit == 65536
 
 
 def test_analysis_streams_thinking_and_final_answer(monkeypatch):
@@ -322,7 +329,8 @@ def test_deep_analysis_uses_evidence_selection_then_streams_final_answer(monkeyp
 
     assert answer == "Sintesi profonda [change:steps]."
     assert len(calls) == 2
-    assert "evidence plan" in calls[1]["json"]["messages"][-2]["content"].lower()
+    assert "evidence plan" in calls[1]["json"]["messages"][-1]["content"].lower()
+    assert "BEGIN_HEALTH_EVIDENCE_JSON" in calls[1]["json"]["messages"][-1]["content"]
     assert "Evidence pass" in "".join(thinking)
     assert answer_chunks == ["Sintesi profonda [change:steps]."]
 
@@ -361,11 +369,127 @@ def test_follow_up_history_is_sent_before_current_question(monkeypatch):
     )
 
     messages = captured["json"]["messages"]
-    assert messages[-3:] == [
+    assert messages[-3:-1] == [
         {"role": "user", "content": "How is sleep?"},
         {"role": "assistant", "content": "Sleep is stable."},
-        {"role": "user", "content": "Current request: And what about HRV?"},
     ]
+    assert messages[-1]["role"] == "user"
+    assert "BEGIN_HEALTH_EVIDENCE_JSON" in messages[-1]["content"]
+    assert "Current request: And what about HRV?" in messages[-1]["content"]
+
+
+def test_false_missing_evidence_answer_is_retried_with_evidence_last(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+        reason = "OK"
+
+        def __init__(self, content):
+            self.content = content
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self, decode_unicode=False):
+            assert decode_unicode
+            return [json.dumps({"message": {"content": self.content}})]
+
+    responses = [
+        FakeResponse(
+            "Non è stata fornita alcuna evidenza sanitaria nel contesto richiesto."
+        ),
+        FakeResponse("Analisi recuperata e fondata sui dati [change:steps]."),
+    ]
+
+    def fake_post(_url, **kwargs):
+        calls.append(kwargs)
+        return responses.pop(0)
+
+    monkeypatch.setattr("google_health_viewer.local_ai.requests.post", fake_post)
+    answer_chunks = []
+    thinking = []
+    answer = OllamaClient().analyze_stream(
+        {
+            "metrics": [
+                {
+                    "data_type": "steps",
+                    "summary": {"mean": 7000},
+                    "derived_evidence": {
+                        "matched_recent_comparison": {"percent_change": 8.0}
+                    },
+                }
+            ],
+            "candidate_insights": [
+                {
+                    "evidence_id": "change:steps",
+                    "evidence": {"percent_change": 8.0},
+                }
+            ],
+        },
+        "Analizza tutta la cronologia",
+        thinking_callback=thinking.append,
+        answer_callback=answer_chunks.append,
+        model_context_limit=32768,
+    )
+
+    assert answer == "Analisi recuperata e fondata sui dati [change:steps]."
+    assert answer_chunks == [answer]
+    assert len(calls) == 2
+    assert calls[1]["json"]["think"] is False
+    retry_content = calls[1]["json"]["messages"][-1]["content"]
+    assert "BEGIN_HEALTH_EVIDENCE_JSON" in retry_content
+    assert '"health_evidence_present":true' in retry_content
+    assert "overlooked the supplied evidence" in "".join(thinking)
+
+
+def test_large_evidence_reduces_output_instead_of_dropping_input(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        reason = "OK"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self, decode_unicode=False):
+            return [json.dumps({"message": {"content": "Evidence retained."}})]
+
+    def fake_post(_url, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr("google_health_viewer.local_ai.requests.post", fake_post)
+    OllamaClient().analyze_stream(
+        {
+            "metrics": [
+                {
+                    "data_type": "sleep",
+                    "structured_details": {"summary": "x" * 24000},
+                }
+            ]
+        },
+        max_tokens=8192,
+        model_context_limit=16384,
+    )
+
+    options = captured["json"]["options"]
+    assert options["num_ctx"] == 16384
+    assert 1024 <= options["num_predict"] < 8192
+    assert '"summary":"' + "x" * 100 in captured["json"]["messages"][-1]["content"]
 
 
 def test_exact_prompt_is_exposed_for_each_model_request(monkeypatch):
