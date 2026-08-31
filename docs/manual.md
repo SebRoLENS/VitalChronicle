@@ -1,7 +1,7 @@
 ---
 title: "VitalChronicle User Manual"
 author: "Sebastiano Romi"
-date: "Updated for VitalChronicle 1.1.5"
+date: "Updated for VitalChronicle 1.1.6"
 lang: en-US
 geometry: margin=2.2cm
 colorlinks: true
@@ -13,7 +13,7 @@ toc-depth: 3
 
 # About this manual
 
-This is the authoritative user manual for **VitalChronicle 1.1.5**. VitalChronicle is a
+This is the authoritative user manual for **VitalChronicle 1.1.6**. VitalChronicle is a
 local-first desktop dashboard for personal Google Health data and optional local AI
 analysis through Ollama.
 
@@ -123,26 +123,26 @@ slow or may require more memory than the computer can provide.
 2. Make it executable:
 
    ```bash
-   chmod +x VitalChronicle-1.1.5-linux-x86_64.AppImage
+   chmod +x VitalChronicle-1.1.6-linux-x86_64.AppImage
    ```
 
 3. Start it:
 
    ```bash
-   ./VitalChronicle-1.1.5-linux-x86_64.AppImage
+   ./VitalChronicle-1.1.6-linux-x86_64.AppImage
    ```
 
 If FUSE is unavailable, run it with:
 
 ```bash
-APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.1.5-linux-x86_64.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.1.6-linux-x86_64.AppImage
 ```
 
 The AppImage is accompanied by a Sigstore bundle and release checksums.
 
 ## 3.2 Windows
 
-1. Download `VitalChronicle-1.1.5-windows-x86_64.exe`.
+1. Download `VitalChronicle-1.1.6-windows-x86_64.exe`.
 2. Verify its SHA-256 checksum against `SHA256SUMS.txt`.
 3. Start the executable.
 
@@ -371,7 +371,7 @@ from blocking health-data updates.
 ## 5.4 Storage locations
 
 VitalChronicle keeps the historical internal `GoogleHealthViewer` directory identifier so
-existing 0.2.12 archives survive the 1.1.5 upgrade. Typical locations are:
+existing 0.2.12 archives survive the 1.1.6 upgrade. Typical locations are:
 
 - Linux data: `~/.local/share/GoogleHealthViewer/`;
 - Linux configuration: `~/.config/GoogleHealthViewer/`;
@@ -706,6 +706,13 @@ interface. JSON field names and `evidence_id` values remain unchanged. The
 chat's **Show prompt** control is more specific: it displays the exact payload assembled for
 the latest evidence-selection, synthesis, or retry pass.
 
+During processing, a blue animated panel confirms that the request was accepted. It shows the
+elapsed time, notes that duration depends on the model and hardware, and records up to four
+recent real stages: reading local data, preparing evidence, ranking longitudinal findings,
+Ollama processing, synthesis, compact retry, and final-answer generation. The animation is
+indeterminate because Ollama does not provide a trustworthy total percentage. The panel closes
+only after completion, cancellation, or a reported failure.
+
 ## 9.11 Interpretation limits
 
 Local language models can misunderstand data, omit important context, or produce
@@ -806,7 +813,7 @@ public issue containing credentials or health data.
 
 # 13. Android status
 
-VitalChronicle 1.1.5 does not ship an APK. The current application uses desktop Qt widgets,
+VitalChronicle 1.1.6 does not ship an APK. The current application uses desktop Qt widgets,
 a loopback-browser OAuth callback, desktop keyrings, and desktop chart interactions. A safe
 Android edition requires a dedicated mobile interface, Android OAuth credentials bound to
 a package name and signing certificate, mobile secure storage, lifecycle handling, and a

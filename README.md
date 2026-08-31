@@ -36,7 +36,7 @@ not a replacement for professional medical advice.
 
 ## Download
 
-**Current release: [VitalChronicle v1.1.5](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.5)**
+**Current release: [VitalChronicle v1.1.6](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.6)**
 
 **[Download the latest VitalChronicle release for Linux, Windows, or macOS](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest)**
 
@@ -153,6 +153,11 @@ selects the language of the final answer from the interface language. During a c
 processed evidence JSON, retained conversation context, and current question. This view
 remains local and may contain processed health information, so it should be reviewed before
 copying or sharing.
+
+While a request is active, the chat displays an animated working panel with elapsed time and
+the real stage reached by the application: local-data preparation, evidence ranking, Ollama
+processing, synthesis, retry, or final-answer generation. It deliberately avoids a fictional
+percentage because local models do not expose reliable total progress.
 
 ## Main capabilities
 

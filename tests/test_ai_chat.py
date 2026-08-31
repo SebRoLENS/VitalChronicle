@@ -94,6 +94,26 @@ def test_thinking_and_answer_use_the_same_live_assistant_area(tmp_path: Path):
     window.close()
 
 
+def test_running_indicator_is_animated_and_reports_real_stages(tmp_path: Path):
+    window, thread, _revision = _window(tmp_path)
+    window.open_thread(thread["id"])
+
+    window._begin_activity("Question received")
+    assert window.activity_panel.isVisible()
+    assert window.activity_progress.minimum() == 0
+    assert window.activity_progress.maximum() == 0
+    assert window._activity_timer.isActive()
+    assert "Question received" in window.activity_log.text()
+    assert "Working" in window.activity_elapsed.text()
+
+    window._activity_event("Ollama is processing the evidence")
+    assert "Ollama is processing" in window.activity_log.text()
+    window._finish_activity()
+    assert not window.activity_panel.isVisible()
+    assert not window._activity_timer.isActive()
+    window.close()
+
+
 def test_exact_prompt_can_be_opened_in_the_chat_window(tmp_path: Path):
     window, thread, _revision = _window(tmp_path)
     window.open_thread(thread["id"])
