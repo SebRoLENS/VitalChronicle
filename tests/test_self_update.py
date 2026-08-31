@@ -66,7 +66,7 @@ def test_parse_sha256_manifest_ignores_invalid_rows():
     ) == {"package.AppImage": digest}
 
 
-def test_verified_appimage_replaces_same_path_and_keeps_backup(
+def test_verified_appimage_replaces_same_path_without_backup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     current = tmp_path / "custom-name.AppImage"
@@ -89,10 +89,41 @@ def test_verified_appimage_replaces_same_path_and_keeps_backup(
     result = install_update(release, UpdateTarget("appimage", current, asset))
 
     assert result.destination == current
+    assert result.backup is None
     assert current.read_bytes() == new_content
-    assert result.backup.read_bytes() == b"old application"
+    assert not current.with_name(f"{current.name}.previous").exists()
     if os.name != "nt":
         assert current.stat().st_mode & 0o100
+
+
+def test_windows_helper_deletes_old_executable_and_removes_rollback_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    current = tmp_path / "VitalChronicle.exe"
+    current.write_bytes(b"old application")
+    new_content = b"new verified application"
+    digest = hashlib.sha256(new_content).hexdigest()
+    asset = ReleaseAsset(
+        "VitalChronicle-1.2.3-windows-x86_64.exe",
+        "https://example.test/windows",
+        digest=f"sha256:{digest}",
+    )
+
+    def fake_download(_asset, destination, _progress):
+        destination.write_bytes(new_content)
+        return digest
+
+    monkeypatch.setattr("google_health_viewer.self_update._download", fake_download)
+    result = install_update(_release(asset), UpdateTarget("windows-exe", current, asset))
+
+    assert result.pending_exit
+    assert result.backup is None
+    assert result.helper is not None
+    helper_text = result.helper.read_text(encoding="utf-8")
+    assert f'del /f /q "{current}"' in helper_text
+    assert f'move /y "{current}"' not in helper_text
+    assert ".rollback" in helper_text
+    assert helper_text.count("del /f /q") >= 2
 
 
 def test_checksum_failure_keeps_current_app(
