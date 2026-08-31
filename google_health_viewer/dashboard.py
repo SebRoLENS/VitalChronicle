@@ -198,8 +198,11 @@ class MetricCard(QFrame):
         def formatted(value: float | None) -> str:
             return _format_metric_value(data_type, value, unit)
 
+        is_heart_day = data_type == "heart-rate-today"
         self.value.setText(formatted(current))
-        if current is None:
+        if is_heart_day and current is not None:
+            self.trend.setText(_("Latest measurement from today's series"))
+        elif current is None:
             self.trend.setText(_("No data for this day"))
         elif baseline is None:
             self.trend.setText(_("Data from previous days is required"))
@@ -241,14 +244,13 @@ class MetricCard(QFrame):
             self.trend.setText(_("Latest value: {date} · {trend}", date=measured,
                                   trend=self.trend.text()))
 
-        is_heart_day = data_type == "daily-resting-heart-rate"
         if is_heart_day:
             # Never read the generic `sparkline` field for the cardiac card.
             # Only the dedicated, smoothed intraday series is accepted. Raw
             # samples remain available for the real minimum and maximum.
             sparkline = metric.get("heart_day_smoothed") or []
-            mean = metric.get("heart_baseline_mean")
-            std = metric.get("heart_baseline_std")
+            mean = None
+            std = None
         else:
             sparkline = metric.get("sparkline") or []
             mean = metric.get("sparkline_mean")
@@ -275,25 +277,25 @@ class MetricCard(QFrame):
                 )
                 minimum = format_value(metric.get("heart_day_min"), unit)
                 maximum = format_value(metric.get("heart_day_max"), unit)
-                days = metric.get("heart_baseline_days", 0)
-                baseline_text = (
-                    _(" · {days}-day average {mean} · ±1σ band ({std})", days=days,
-                      mean=format_value(mean, unit), std=format_value(std, unit))
-                    if mean is not None and std is not None
-                    else ""
-                )
                 smoothing = metric.get("heart_smoothing_minutes", 15)
                 caption = (
                     _("Today only · {minutes}-minute smoothed curve · actual min–max "
-                      "{minimum}–{maximum}{baseline}", minutes=smoothing, minimum=minimum,
-                      maximum=maximum, baseline=baseline_text)
+                      "{minimum}–{maximum}", minutes=smoothing, minimum=minimum,
+                      maximum=maximum)
                 )
             else:
                 self.sparkline.set_series(sparkline, mean, std)
-                caption = (
-                    _("Last 7 days · average {mean} · ±1σ band ({std})",
-                      mean=format_value(mean, unit), std=format_value(std, unit))
-                )
+                if metric.get("sparkline_kind") == "previous_seven_days":
+                    caption = _(
+                        "Previous 7 days · average {mean} · ±1σ band ({std})",
+                        mean=format_value(mean, unit),
+                        std=format_value(std, unit),
+                    )
+                else:
+                    caption = (
+                        _("Last 7 days · average {mean} · ±1σ band ({std})",
+                          mean=format_value(mean, unit), std=format_value(std, unit))
+                    )
             self.sparkline.setVisible(bool(sparkline))
             self.sparkline_caption.setText(caption)
             self.sparkline_caption.setVisible(bool(sparkline))
@@ -301,6 +303,24 @@ class MetricCard(QFrame):
             self.sparkline.set_series([])
             self.sparkline.setVisible(False)
             self.sparkline_caption.setVisible(False)
+
+        if is_heart_day:
+            self.baseline.setText(
+                _(
+                    "Today's average · {value}",
+                    value=formatted(metric.get("heart_day_mean")),
+                )
+            )
+            self.ratio.setText(
+                _("{count} samples", count=int(metric.get("heart_day_sample_count", 0)))
+            )
+            self.progress.setValue(0)
+            self.progress.setVisible(False)
+            self.ratio.setStyleSheet(
+                "background: #FCE8E6; color: #C5221F; border-radius: 8px; "
+                "padding: 3px 7px; font-weight: 700;"
+            )
+            return
 
         self.baseline.setText(
             _("{days}-day average · {value}", days=days_used, value=formatted(baseline))
@@ -344,6 +364,7 @@ class MetricCard(QFrame):
 CARD_COLORS = {
     "steps": "#34A853",
     "daily-resting-heart-rate": "#EA4335",
+    "heart-rate-today": "#F4511E",
     "sleep": "#7E57C2",
     "daily-heart-rate-variability": "#673AB7",
     "daily-oxygen-saturation": "#4285F4",
@@ -450,6 +471,7 @@ def _fallback_label(key: str) -> str:
     labels = {
         "steps": _("Steps"),
         "daily-resting-heart-rate": _("Resting heart rate"),
+        "heart-rate-today": _("Today's heart rate"),
         "sleep": _("Sleep"),
         "daily-heart-rate-variability": _("Daily HRV"),
         "daily-oxygen-saturation": _("Oxygen saturation"),

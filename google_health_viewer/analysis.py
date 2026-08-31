@@ -48,6 +48,7 @@ TYPE_VISUALS: dict[str, tuple[str, str, str, str]] = {
     "swim-lengths-data": ("bar", "sum", "#039BE5", _("lengths")),
     "heart-rate": ("scatter", "none", "#EA4335", "bpm"),
     "daily-resting-heart-rate": ("line", "none", "#D93025", "bpm"),
+    "heart-rate-today": ("line", "none", "#F4511E", "bpm"),
     "heart-rate-variability": ("scatter", "none", "#7E57C2", "ms"),
     "daily-heart-rate-variability": ("line", "none", "#673AB7", "ms"),
     "oxygen-saturation": ("scatter", "none", "#4285F4", "%"),
@@ -141,13 +142,14 @@ INTRADAY_CUMULATIVE_TYPES = {
 }
 
 SEVEN_DAY_SPARKLINE_TYPES = {
+    "daily-resting-heart-rate",
     "daily-heart-rate-variability",
     "daily-oxygen-saturation",
     "daily-respiratory-rate",
     "daily-sleep-temperature-derivations",
 }
 
-LATEST_DAILY_VALUE_TYPES = SEVEN_DAY_SPARKLINE_TYPES | {"daily-resting-heart-rate"}
+LATEST_DAILY_VALUE_TYPES = SEVEN_DAY_SPARKLINE_TYPES
 
 _CAMEL_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
 _IGNORED_NUMERIC_FIELDS = {
@@ -240,7 +242,36 @@ def duration_hours(record: dict[str, Any]) -> float | None:
     start = parse_timestamp(record.get("start_time"))
     end = parse_timestamp(record.get("end_time"))
     if start is not None and end is not None and end >= start:
-        return (end - start) / 3600.0
+        interval_hours = (end - start) / 3600.0
+        is_sleep = any(
+            part.lower() == "sleep"
+            for path in payload
+            for part in path.split(".")
+        )
+        if is_sleep:
+            explicit_awake_minutes = next(
+                (
+                    number
+                    for key, value in payload.items()
+                    if key.lower().rsplit(".", 1)[-1]
+                    in {"minutesawake", "awakeminutes", "minuteswake", "wakeminutes"}
+                    and (number := coerce_number(value)) is not None
+                ),
+                None,
+            )
+            stage_totals = _sleep_stage_totals(record)
+            awake_hours = (
+                explicit_awake_minutes / 60.0
+                if explicit_awake_minutes is not None
+                else sum(
+                    hours
+                    for stage, hours in stage_totals.items()
+                    if stage in {"AWAKE", "WAKE", "OUT_OF_BED"}
+                )
+            )
+            if awake_hours > 0:
+                return max(0.0, interval_hours - awake_hours)
+        return interval_hours
     return None
 
 
@@ -422,8 +453,8 @@ def meaningful_record_count(data_type: str, records: list[dict[str, Any]]) -> in
     return len(records)
 
 
-def sleep_stage_points(records: list[dict[str, Any]]) -> list[tuple[float, dict[str, float]]]:
-    """Return per-session sleep-stage durations in hours."""
+def _sleep_stage_totals(record: dict[str, Any]) -> dict[str, float]:
+    """Return the duration of each sleep stage for one session."""
 
     def find_stages(value: Any) -> list[dict[str, Any]]:
         if isinstance(value, dict):
@@ -441,31 +472,38 @@ def sleep_stage_points(records: list[dict[str, Any]]) -> list[tuple[float, dict[
                     return found
         return []
 
+    totals: dict[str, float] = defaultdict(float)
+    summarized_stages = find_stages(record["payload"])
+    for stage in summarized_stages:
+        stage_type = str(stage.get("type", "ALTRO")).upper()
+        minutes = coerce_number(stage.get("minutes"))
+        if minutes is not None:
+            totals[stage_type] += minutes / 60.0
+    # Some sleep sessions expose only the raw stage intervals. Keep those
+    # sessions available to both the chart and the complete AI analysis.
+    if not summarized_stages:
+        for stage in _find_named_list(record["payload"], "stages"):
+            stage_type = str(stage.get("type", "ALTRO")).upper()
+            start = parse_timestamp(
+                _find_named_value(stage, {"starttime", "physicaltime"})
+            )
+            end = parse_timestamp(_find_named_value(stage, {"endtime"}))
+            if start is not None and end is not None and end > start:
+                totals[stage_type] += (end - start) / 3600.0
+    return dict(totals)
+
+
+def sleep_stage_points(records: list[dict[str, Any]]) -> list[tuple[float, dict[str, float]]]:
+    """Return per-session sleep-stage durations in hours."""
+
     result = []
     for record in records:
         timestamp = parse_timestamp(record.get("start_time") or record.get("end_time"))
         if timestamp is None:
             continue
-        totals: dict[str, float] = defaultdict(float)
-        summarized_stages = find_stages(record["payload"])
-        for stage in summarized_stages:
-            stage_type = str(stage.get("type", "ALTRO")).upper()
-            minutes = coerce_number(stage.get("minutes"))
-            if minutes is not None:
-                totals[stage_type] += minutes / 60.0
-        # Some sleep sessions expose only the raw stage intervals. Keep those
-        # sessions available to both the chart and the complete AI analysis.
-        if not summarized_stages:
-            for stage in _find_named_list(record["payload"], "stages"):
-                stage_type = str(stage.get("type", "ALTRO")).upper()
-                start = parse_timestamp(
-                    _find_named_value(stage, {"starttime", "physicaltime"})
-                )
-                end = parse_timestamp(_find_named_value(stage, {"endtime"}))
-                if start is not None and end is not None and end > start:
-                    totals[stage_type] += (end - start) / 3600.0
+        totals = _sleep_stage_totals(record)
         if totals:
-            result.append((timestamp, dict(totals)))
+            result.append((timestamp, totals))
     return sorted(result, key=lambda item: item[0])
 
 
@@ -1227,17 +1265,26 @@ def build_daily_progress_snapshot(
             **comparison,
         }
         if data_type in SEVEN_DAY_SPARKLINE_TYPES:
+            sparkline_day = (
+                reference_day - timedelta(days=1)
+                if data_type == "daily-resting-heart-rate"
+                else value_day
+            )
             sparkline = recent_daily_series(
                 shown,
                 "sum" if profile.aggregation == "sum" else "mean",
-                value_day,
+                sparkline_day,
             )
             values = [value for _timestamp, value in sparkline]
             if values:
                 item.update(
                     {
                         "sparkline": sparkline,
-                        "sparkline_kind": "seven_day",
+                        "sparkline_kind": (
+                            "previous_seven_days"
+                            if data_type == "daily-resting-heart-rate"
+                            else "seven_day"
+                        ),
                         "sparkline_mean": statistics.fmean(values),
                         "sparkline_std": statistics.pstdev(values) if len(values) > 1 else 0.0,
                     }
@@ -1259,65 +1306,34 @@ def build_daily_progress_snapshot(
                 for point in heart_points
                 if datetime.fromtimestamp(point[0]).date() == heart_day  # noqa: DTZ006
             ]
-            baseline_start = heart_day - timedelta(days=7)
-            baseline_values = [
-                value
-                for timestamp, value in heart_points
-                if baseline_start
-                <= datetime.fromtimestamp(timestamp).date()  # noqa: DTZ006
-                < heart_day
-                and 20 <= value <= 250
+            today_points = [
+                point for point in today_points if 20 <= point[1] <= 250
             ]
             if today_points:
-                heart_item = next(
-                    (
-                        item
-                        for item in metrics
-                        if item["data_type"] == "daily-resting-heart-rate"
-                    ),
-                    None,
-                )
-                if heart_item is None:
-                    comparison = daily_progress(heart_points, "mean", heart_day)
-                    heart_item = {
-                        "data_type": "daily-resting-heart-rate",
-                        "label": _("Heart rate"),
-                        "metric": "Media giornaliera",
+                values = [value for _timestamp, value in today_points]
+                metrics.append(
+                    {
+                        "data_type": "heart-rate-today",
+                        "label": _("Today's heart rate"),
+                        "metric": _("Smoothed daily curve"),
                         "unit": heart_profile.unit,
                         "completion": False,
                         "value_date": heart_day.isoformat(),
-                        **comparison,
-                    }
-                    metrics.append(heart_item)
-                heart_item.update(
-                    {
-                        # Cardiac intraday data deliberately uses separate keys.
-                        # This prevents the generic seven-day sparkline path from
-                        # ever being selected by the overview card.
+                        "latest_available": False,
+                        "current": today_points[-1][1],
+                        "baseline": None,
+                        "percentage": None,
+                        "delta_percent": None,
+                        "days_used": 0,
+                        "window_days": 0,
                         "heart_day_points": today_points,
                         "heart_day_smoothed": smooth_heart_rate_points(today_points),
                         "heart_smoothing_minutes": 15,
                         "heart_day_date": heart_day.isoformat(),
                         "heart_day_min": min(value for _timestamp, value in today_points),
                         "heart_day_max": max(value for _timestamp, value in today_points),
-                        "heart_baseline_mean": (
-                            statistics.fmean(baseline_values) if baseline_values else None
-                        ),
-                        "heart_baseline_std": (
-                            statistics.pstdev(baseline_values)
-                            if len(baseline_values) > 1
-                            else 0.0 if baseline_values else None
-                        ),
-                        "heart_baseline_days": len(
-                            {
-                                datetime.fromtimestamp(timestamp).date()  # noqa: DTZ006
-                                for timestamp, value in heart_points
-                                if baseline_start
-                                <= datetime.fromtimestamp(timestamp).date()  # noqa: DTZ006
-                                < heart_day
-                                and 20 <= value <= 250
-                            }
-                        ),
+                        "heart_day_mean": statistics.fmean(values),
+                        "heart_day_sample_count": len(today_points),
                     }
                 )
     return {
