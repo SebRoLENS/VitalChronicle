@@ -19,6 +19,25 @@ def _daily_record(day: datetime, data_type: str, value: float) -> dict:
     }
 
 
+def _heart_rate_zone_threshold_record(day: datetime) -> dict:
+    return {
+        "record_kind": "data_point",
+        "start_time": day.isoformat(),
+        "end_time": day.isoformat(),
+        "payload": {
+            "dailyHeartRateZones": {
+                "heartRateZones": [
+                    {
+                        "heartRateZoneType": "MODERATE",
+                        "minBeatsPerMinute": 115,
+                        "maxBeatsPerMinute": 140,
+                    }
+                ]
+            }
+        },
+    }
+
+
 def test_ai_preprocessing_builds_matched_baselines_and_ranked_evidence():
     start = datetime(2026, 7, 1, 12, tzinfo=timezone.utc)
     records = []
@@ -74,6 +93,63 @@ def test_requested_month_reports_when_only_one_week_is_observed():
     assert "do not imply complete coverage" in coverage["coverage_notice"].lower()
     assert snapshot["candidate_insights"][0]["evidence_id"] == "quality:requested-interval"
     assert snapshot["analysis_brief"]["must_state_data_limitations_first"]
+
+
+def test_reference_heart_rate_zones_do_not_inflate_measurement_coverage():
+    interval_start = datetime(2026, 7, 31, 12, tzinfo=timezone.utc)
+    zone_thresholds = [
+        _heart_rate_zone_threshold_record(interval_start + timedelta(days=index))
+        for index in range(32)
+    ]
+    steps = [
+        _daily_record(
+            datetime(2026, 8, 26, 12, tzinfo=timezone.utc) + timedelta(days=index),
+            "steps",
+            6000 + index * 100,
+        )
+        for index in range(6)
+    ]
+
+    class FakeStore:
+        def list_records(self, data_type, *_args, **_kwargs):
+            return {
+                "daily-heart-rate-zones": zone_thresholds,
+                "steps": steps,
+            }.get(data_type, [])
+
+    snapshot = build_ai_ready_snapshot(
+        FakeStore(),
+        "2026-07-31",
+        "2026-09-01",
+        now=datetime(2026, 9, 1, 8, tzinfo=timezone.utc),
+    )
+    coverage = snapshot["requested_interval_coverage"]
+
+    assert coverage["requested_calendar_days"] == 32
+    assert coverage["calendar_days_with_measurements"] == 6
+    assert coverage["calendar_days_with_any_data"] == 6
+    assert coverage["first_measurement_date"] == "2026-08-26"
+    assert coverage["last_measurement_date"] == "2026-08-31"
+    assert coverage["scope_is_partially_observed"]
+    assert "actual health measurements occur on 6 calendar days" in coverage[
+        "coverage_notice"
+    ]
+    assert "reference/configuration records" in coverage["coverage_notice"].lower()
+
+    rows = {row["data_type"]: row for row in coverage["metrics"]}
+    assert rows["steps"]["observed_calendar_days"] == 6
+    assert rows["steps"]["coverage_percent"] == 18.8
+    assert rows["daily-heart-rate-zones"]["data_role"] == "reference_configuration"
+    assert rows["daily-heart-rate-zones"]["coverage_percent"] is None
+    assert rows["daily-heart-rate-zones"]["excluded_from_measurement_coverage"]
+
+    zones = next(
+        metric
+        for metric in snapshot["metrics"]
+        if metric["data_type"] == "daily-heart-rate-zones"
+    )
+    assert zones["data_role"] == "reference_configuration"
+    assert "derived_evidence" not in zones
 
 
 def test_ai_preprocessing_finds_repeated_cross_metric_associations():

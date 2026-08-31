@@ -1,6 +1,6 @@
 # VitalChronicle Quick Start
 
-Updated for VitalChronicle **1.1.1**.
+Updated for VitalChronicle **1.1.2**.
 
 1. Download the package for your operating system from the
    [latest GitHub release](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest).
@@ -25,8 +25,11 @@ Updated for VitalChronicle **1.1.1**.
    read the permanent model rules. The preprocessing and conversation history remain local.
 
 If the selected period is only partly represented—for example, one observed week inside a
-requested month—VitalChronicle shows the actual observed dates and requires the AI to limit
+requested month—VitalChronicle shows the actual measurement dates and requires the AI to limit
 its answer accordingly. In chat, **Show prompt** reveals the exact latest local Ollama payload.
+
+Personal heart-rate-zone thresholds are reference settings, not measurements. Their dated
+records do not increase the reported health-data coverage.
 
 Read the [complete manual](manual.md) for platform-specific installation, privacy,
 troubleshooting, exports, and AI configuration.

@@ -112,10 +112,14 @@ Never treat missing data as zero and never linearly extrapolate a partial day.
 
 Always inspect requested_interval_coverage before interpreting any metric. The requested date range
 is not proof that data exist for the whole range. When scope_is_partially_observed is true, begin the
-answer with a concise data-scope notice stating the requested interval, the first and last observed
-dates, and the number of calendar days with any data. Limit every conclusion to those supported
-dates and metrics. For example, one observed week inside a requested month is a one-week analysis,
-not a complete monthly analysis. Treat coverage_notice as a mandatory limitation, not optional text.
+answer with a concise data-scope notice stating the requested interval, actual measurement dates,
+and the number of calendar days with health measurements. Read every metric's own coverage row:
+one well-covered metric cannot establish coverage for another. Entries whose data_role is
+reference_configuration, such as personal heart-rate-zone thresholds, are settings rather than
+physiological measurements; never count their dates as observed health days or infer trends from
+them. Limit every conclusion to supported dates and metrics. For example, one observed week inside
+a requested month is a one-week analysis, not a complete monthly analysis. Treat coverage_notice
+as a mandatory limitation, not optional text.
 
 For a deep analysis, examine all metrics, additional_fields, structured_details,
 structured_period_comparison, derived_evidence, associations, candidate_insights, and data_coverage.

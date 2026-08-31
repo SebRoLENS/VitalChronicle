@@ -36,7 +36,7 @@ not a replacement for professional medical advice.
 
 ## Download
 
-**Current release: [VitalChronicle v1.1.1](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.1)**
+**Current release: [VitalChronicle v1.1.2](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.2)**
 
 **[Download the latest VitalChronicle release for Linux, Windows, or macOS](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest)**
 
@@ -105,12 +105,16 @@ Incomplete cumulative totals are compared only with previous days at the same lo
 
 ![VitalChronicle deterministic metrics inspector](docs/screenshots/ai-deterministic-metrics.png)
 
-The inspector shows exactly what Python calculated before Ollama is called: observation
+The inspector shows exactly what Python calculated before Ollama is called: measurement
 coverage, 7-day baselines, matched changes, trends, robust anomalies, associations, and
 ranked evidence. Selecting a row reveals the complete local JSON and interpretation limits.
 If a month was requested but only one week is observed, the interface reports both ranges
 and the AI must begin by limiting its conclusions to that week. Missing measurements are
 never silently treated as zero or as a complete requested interval.
+
+Dated reference settings are kept separate from measurements. In particular, Google's
+personal heart-rate-zone thresholds remain available as context, but their dates cannot
+increase health-data coverage or generate physiological trends.
 
 The evidence packet is placed in the latest model message so it cannot be discarded before
 the question when the context is crowded. VitalChronicle reads and remembers the physical

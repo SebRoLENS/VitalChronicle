@@ -1,7 +1,7 @@
 ---
 title: "VitalChronicle User Manual"
 author: "Sebastiano Romi"
-date: "Updated for VitalChronicle 1.1.1"
+date: "Updated for VitalChronicle 1.1.2"
 lang: en-US
 geometry: margin=2.2cm
 colorlinks: true
@@ -13,7 +13,7 @@ toc-depth: 3
 
 # About this manual
 
-This is the authoritative user manual for **VitalChronicle 1.1.1**. VitalChronicle is a
+This is the authoritative user manual for **VitalChronicle 1.1.2**. VitalChronicle is a
 local-first desktop dashboard for personal Google Health data and optional local AI
 analysis through Ollama.
 
@@ -112,26 +112,26 @@ slow or may require more memory than the computer can provide.
 2. Make it executable:
 
    ```bash
-   chmod +x VitalChronicle-1.1.1-linux-x86_64.AppImage
+   chmod +x VitalChronicle-1.1.2-linux-x86_64.AppImage
    ```
 
 3. Start it:
 
    ```bash
-   ./VitalChronicle-1.1.1-linux-x86_64.AppImage
+   ./VitalChronicle-1.1.2-linux-x86_64.AppImage
    ```
 
 If FUSE is unavailable, run it with:
 
 ```bash
-APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.1.1-linux-x86_64.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.1.2-linux-x86_64.AppImage
 ```
 
 The AppImage is accompanied by a Sigstore bundle and release checksums.
 
 ## 3.2 Windows
 
-1. Download `VitalChronicle-1.1.1-windows-x86_64.exe`.
+1. Download `VitalChronicle-1.1.2-windows-x86_64.exe`.
 2. Verify its SHA-256 checksum against `SHA256SUMS.txt`.
 3. Start the executable.
 
@@ -360,7 +360,7 @@ from blocking health-data updates.
 ## 5.4 Storage locations
 
 VitalChronicle keeps the historical internal `GoogleHealthViewer` directory identifier so
-existing 0.2.12 archives survive the 1.1.1 upgrade. Typical locations are:
+existing 0.2.12 archives survive the 1.1.2 upgrade. Typical locations are:
 
 - Linux data: `~/.local/share/GoogleHealthViewer/`;
 - Linux configuration: `~/.config/GoogleHealthViewer/`;
@@ -614,8 +614,8 @@ snapshot supplied to the local model. Choose either the currently selected quest
 or the complete local history, then select **Calculate / refresh**. The upper notice reports:
 
 - the requested start, end, and number of calendar days;
-- the first and last dates that actually contain any local record;
-- the number and percentage of requested days represented by at least one measurement;
+- the first and last dates that actually contain a health measurement;
+- the number and percentage of requested days represented by health measurements;
 - late starts, early endings, gaps, and per-metric expected-versus-observed coverage.
 
 The tree then exposes 7-day baselines, comparable recent/previous changes, trend direction,
@@ -626,6 +626,12 @@ partly observed interval is itself ranked evidence and is mandatory context for 
 This distinction is metric-specific: an irregular body-weight record is not expected every
 day, while daily totals such as steps can reveal missing calendar coverage. An interval is
 never considered complete merely because its requested dates span a month or year.
+
+Google's dated personal heart-rate-zone limits are classified as
+`reference_configuration`. They describe the thresholds used to interpret other data; they
+are not physiological measurements. VitalChronicle therefore retains their latest values
+for context but excludes their dates from measured-day counts and excludes the thresholds
+from baselines, trends, anomaly detection, and cross-metric associations.
 
 ## 9.9 Ranked evidence and deep synthesis
 
@@ -778,7 +784,7 @@ public issue containing credentials or health data.
 
 # 13. Android status
 
-VitalChronicle 1.1.1 does not ship an APK. The current application uses desktop Qt widgets,
+VitalChronicle 1.1.2 does not ship an APK. The current application uses desktop Qt widgets,
 a loopback-browser OAuth callback, desktop keyrings, and desktop chart interactions. A safe
 Android edition requires a dedicated mobile interface, Android OAuth credentials bound to
 a package name and signing certificate, mobile secure storage, lifecycle handling, and a
