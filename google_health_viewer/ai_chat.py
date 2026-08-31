@@ -97,6 +97,7 @@ class AIChatWindow(QMainWindow):
         self._live_answer = ""
         self._answer_received = False
         self._pending_mode = "question"
+        self._prompt_sections: list[str] = []
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
         self._render_timer.timeout.connect(self._render_transcript)
@@ -169,6 +170,12 @@ class AIChatWindow(QMainWindow):
         snapshot_row.addWidget(self.refresh_data_button)
         conversation_layout.addLayout(snapshot_row)
 
+        self.coverage_label = QLabel()
+        self.coverage_label.setObjectName("coverageWarning")
+        self.coverage_label.setWordWrap(True)
+        self.coverage_label.setVisible(False)
+        conversation_layout.addWidget(self.coverage_label)
+
         self.transcript = QTextBrowser()
         self.transcript.setObjectName("chatTranscript")
         self.transcript.setOpenExternalLinks(True)
@@ -186,6 +193,13 @@ class AIChatWindow(QMainWindow):
         self.evidence_tree.setVisible(False)
         self.evidence_tree.setMaximumHeight(230)
         conversation_layout.addWidget(self.evidence_tree)
+
+        self.prompt_view = QPlainTextEdit()
+        self.prompt_view.setObjectName("promptInspector")
+        self.prompt_view.setReadOnly(True)
+        self.prompt_view.setVisible(False)
+        self.prompt_view.setMaximumHeight(300)
+        conversation_layout.addWidget(self.prompt_view)
 
         composer = QFrame()
         composer.setObjectName("chatComposer")
@@ -213,6 +227,10 @@ class AIChatWindow(QMainWindow):
         self.evidence_button = QPushButton(_("Show evidence"))
         self.evidence_button.setCheckable(True)
         self.evidence_button.toggled.connect(self._toggle_evidence)
+        self.prompt_button = QPushButton(_("Show prompt"))
+        self.prompt_button.setCheckable(True)
+        self.prompt_button.setEnabled(False)
+        self.prompt_button.toggled.connect(self._toggle_prompt)
         action_row.addWidget(self.send_button)
         action_row.addWidget(self.stop_button)
         action_row.addWidget(regenerate)
@@ -220,6 +238,7 @@ class AIChatWindow(QMainWindow):
         action_row.addWidget(export_button)
         action_row.addStretch()
         action_row.addWidget(self.evidence_button)
+        action_row.addWidget(self.prompt_button)
         composer_layout.addLayout(action_row)
         conversation_layout.addWidget(composer)
 
@@ -274,12 +293,18 @@ class AIChatWindow(QMainWindow):
         self.threads_changed.emit()
 
     def _thread_selected(self, current: QListWidgetItem | None) -> None:
+        previous_thread_id = self.current_thread_id
         if current is None:
             self.current_thread_id = None
         else:
             self.current_thread_id = str(current.data(Qt.UserRole))
         self._live_thinking = ""
         self._live_answer = ""
+        if self.current_thread_id != previous_thread_id:
+            self._prompt_sections = []
+            self.prompt_view.clear()
+            self.prompt_button.setEnabled(False)
+            self.prompt_button.setChecked(False)
         self._load_current_thread()
 
     def _load_current_thread(self) -> None:
@@ -290,6 +315,7 @@ class AIChatWindow(QMainWindow):
             self.period_badge.setText("—")
             self.snapshot_label.setText(_("Choose or create a conversation."))
             self.refresh_data_button.setVisible(False)
+            self.coverage_label.setVisible(False)
             self.transcript.clear()
             self.evidence_tree.clear()
             return
@@ -309,6 +335,12 @@ class AIChatWindow(QMainWindow):
         )
         self.snapshot_label.setStyleSheet("color: #B06000; font-weight: 700" if new_data else "")
         self.refresh_data_button.setVisible(new_data)
+        coverage = thread.get("snapshot", {}).get("requested_interval_coverage") or {}
+        partial_coverage = bool(coverage.get("scope_is_partially_observed"))
+        self.coverage_label.setText(
+            _("Data coverage notice: {notice}", notice=coverage.get("coverage_notice", ""))
+        )
+        self.coverage_label.setVisible(partial_coverage)
         self._populate_evidence(thread)
         self._render_transcript()
 
@@ -436,6 +468,10 @@ class AIChatWindow(QMainWindow):
         self._live_thinking = _("Preparing the local model…\n")
         self._live_answer = ""
         self._answer_received = False
+        self._prompt_sections = []
+        self.prompt_view.clear()
+        self.prompt_button.setEnabled(False)
+        self.prompt_button.setChecked(False)
         self._set_running(True)
         self.refresh_threads(select_id=thread["id"])
         self._render_transcript()
@@ -450,6 +486,7 @@ class AIChatWindow(QMainWindow):
         )
         self.analysis_thread.thinking_chunk.connect(self._thinking_chunk)
         self.analysis_thread.answer_chunk.connect(self._answer_chunk)
+        self.analysis_thread.prompt_ready.connect(self._prompt_ready)
         self.analysis_thread.completed.connect(self._analysis_completed)
         self.analysis_thread.failed.connect(self._analysis_failed)
         self.analysis_thread.cancelled.connect(self._analysis_cancelled)
@@ -465,6 +502,11 @@ class AIChatWindow(QMainWindow):
             self._live_thinking = ""
         self._live_answer += text
         self._schedule_render()
+
+    def _prompt_ready(self, text: str) -> None:
+        self._prompt_sections.append(text)
+        self.prompt_view.setPlainText("\n\n" + ("\n\n" + "=" * 72 + "\n\n").join(self._prompt_sections))
+        self.prompt_button.setEnabled(True)
 
     def _analysis_completed(self, answer: str) -> None:
         thread = self._current_thread()
@@ -602,6 +644,14 @@ class AIChatWindow(QMainWindow):
                 "",
             ]
         )
+        coverage = thread.get("snapshot", {}).get("requested_interval_coverage") or {}
+        if coverage.get("scope_is_partially_observed"):
+            lines.extend(
+                [
+                    f"> Data scope: {coverage.get('coverage_notice', '')}",
+                    "",
+                ]
+            )
         for message in thread.get("messages", []):
             role = message.get("role")
             if role == "user":
@@ -656,6 +706,10 @@ class AIChatWindow(QMainWindow):
     def _toggle_evidence(self, visible: bool) -> None:
         self.evidence_tree.setVisible(visible)
         self.evidence_button.setText(_("Hide evidence") if visible else _("Show evidence"))
+
+    def _toggle_prompt(self, visible: bool) -> None:
+        self.prompt_view.setVisible(visible)
+        self.prompt_button.setText(_("Hide prompt") if visible else _("Show prompt"))
 
     def _set_running(self, running: bool) -> None:
         self.send_button.setVisible(not running)
