@@ -21,8 +21,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  release-guard:
+    runs-on: ubuntu-22.04
+    outputs:
+      should_run: ${{ steps.guard.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Ignore duplicate delivery of an already released commit
+        id: guard
+        run: |
+          LATEST_TAG="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)"
+          if [ -n "$LATEST_TAG" ] && git merge-base --is-ancestor "$GITHUB_SHA" "$LATEST_TAG"; then
+            echo "Commit $GITHUB_SHA is already included in $LATEST_TAG; skipping duplicate release."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   prepare-release:
-    if: github.actor != 'github-actions[bot]'
+    needs: release-guard
+    if: github.actor != 'github-actions[bot]' && needs.release-guard.outputs.should_run == 'true'
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.prepare.outputs.version }}
