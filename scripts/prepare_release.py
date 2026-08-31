@@ -64,6 +64,7 @@ def main() -> int:
     for relative in (
         "google_health_viewer/__init__.py",
         "pyproject.toml",
+        "README.md",
         "docs/manual.md",
         "docs/quick-start.md",
         "docs/releasing.md",
