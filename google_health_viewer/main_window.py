@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
-from .ai_chat import AIChatWindow
+from .ai_chat import AIChatWindow, SnapshotBuildThread
 from .ai_conversations import ConversationStore
 from .ai_insights import build_ai_ready_snapshot
 from .ai_setup import AISetupDialog
@@ -84,6 +84,7 @@ from .local_ai import (
     HARDWARE_PROFILE_LABELS,
     MODEL_DESCRIPTIONS,
     MODEL_OPTIONS,
+    SYSTEM_PROMPT,
     LocalAIError,
     OllamaClient,
     OllamaStatus,
@@ -145,6 +146,8 @@ class MainWindow(QMainWindow):
         self.ai_status_thread: AIStatusThread | None = None
         self.ai_pull_thread: AIPullThread | None = None
         self.ai_chat_window: AIChatWindow | None = None
+        self.ai_metrics_thread: SnapshotBuildThread | None = None
+        self._deterministic_snapshot: dict | None = None
         self.update_check_thread: UpdateCheckThread | None = None
         self.progress_dialog: QProgressDialog | None = None
         self._authorization_dialog: AuthorizationHelpDialog | None = None
@@ -259,7 +262,6 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.overview, _("Overview"))
         self.tabs.addTab(self._build_explorer_page(), _("Explore data"))
         self.tabs.addTab(self._build_ai_page(), _("Local AI analysis"))
-        self.tabs.addTab(self._build_ai_settings_page(), _("AI settings"))
         root_layout.addWidget(self.tabs, 1)
         self.setCentralWidget(root)
 
@@ -589,20 +591,25 @@ class MainWindow(QMainWindow):
 
     def _build_ai_page(self) -> QWidget:
         page = QWidget()
-        root = QVBoxLayout(page)
-        root.setContentsMargins(24, 22, 24, 22)
-        title = QLabel(_("Private analysis on your computer"))
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(24, 18, 24, 18)
+        title = QLabel(_("Local health intelligence"))
         title.setObjectName("pageTitle")
         subtitle = QLabel(
-            _("Statistics build your personal baseline; Qwen turns the results into a readable "
-              "explanation. Profiles are available for NVIDIA systems with 16 GB RAM and "
-              "CPU-only computers with 32 GB RAM.")
+            _("Prepare transparent statistics, inspect exactly what was calculated, and discuss "
+              "the results with a private Ollama model. Data and conversations remain local.")
         )
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
-        root.addWidget(title)
-        root.addWidget(subtitle)
-        root.addSpacing(12)
+        outer.addWidget(title)
+        outer.addWidget(subtitle)
+
+        self.ai_sections = QTabWidget()
+        self.ai_sections.setObjectName("aiWorkspaceTabs")
+        analysis_page = QWidget()
+        root = QVBoxLayout(analysis_page)
+        root.setContentsMargins(4, 14, 4, 4)
+        root.setSpacing(10)
 
         config = QFrame()
         config.setObjectName("aiCard")
@@ -637,6 +644,7 @@ class MainWindow(QMainWindow):
         self.ai_model_hint = QLabel()
         self.ai_model_hint.setObjectName("pageSubtitle")
         self.ai_model_hint.setWordWrap(True)
+        self.ai_model_hint.setMinimumHeight(38)
         config_layout.addWidget(self.ai_model_hint, 3, 1, 1, 2)
         self._update_ai_model_hint(saved_model)
         self.ai_profile_combo.currentIndexChanged.connect(self._ai_profile_changed)
@@ -656,7 +664,6 @@ class MainWindow(QMainWindow):
         self.model_update_button.setVisible(False)
         config_layout.addWidget(self.model_update_button, 5, 1, 1, 2)
         config_layout.setColumnStretch(1, 1)
-        root.addWidget(config)
 
         intelligence = QFrame()
         intelligence.setObjectName("aiLaunchCard")
@@ -672,6 +679,7 @@ class MainWindow(QMainWindow):
         )
         launch_description.setObjectName("pageSubtitle")
         launch_description.setWordWrap(True)
+        launch_description.setMinimumHeight(52)
         intelligence_layout.addWidget(launch_description, 1, 0, 1, 3)
 
         question_label = QLabel(_("Period used for questions and new chats"))
@@ -706,7 +714,12 @@ class MainWindow(QMainWindow):
         )
         intelligence_layout.addWidget(deep_analysis, 4, 2)
         intelligence_layout.setColumnStretch(1, 1)
-        root.addWidget(intelligence)
+
+        action_cards = QHBoxLayout()
+        action_cards.setSpacing(12)
+        action_cards.addWidget(config, 5)
+        action_cards.addWidget(intelligence, 6)
+        root.addLayout(action_cards)
 
         recent_card = QFrame()
         recent_card.setObjectName("answerCard")
@@ -734,13 +747,20 @@ class MainWindow(QMainWindow):
         disclaimer.setObjectName("disclaimer")
         disclaimer.setWordWrap(True)
         root.addWidget(disclaimer)
+
+        self.ai_sections.addTab(analysis_page, _("Analysis and chat"))
+        self.ai_sections.addTab(self._build_ai_metrics_page(), _("Deterministic metrics"))
+        self.ai_sections.addTab(self._build_ai_settings_page(), _("Model and tokens"))
+        self.ai_sections.addTab(self._build_ai_prompt_page(), _("Prompt and instructions"))
+        self.ai_sections.currentChanged.connect(self._ai_section_changed)
+        outer.addWidget(self.ai_sections, 1)
         return page
 
     def _build_ai_settings_page(self) -> QWidget:
         page = QWidget()
         root = QVBoxLayout(page)
-        root.setContentsMargins(24, 22, 24, 22)
-        title = QLabel(_("AI settings"))
+        root.setContentsMargins(8, 16, 8, 8)
+        title = QLabel(_("Model and output settings"))
         title.setObjectName("pageTitle")
         subtitle = QLabel(
             _("Enter the computer's RAM. The recommendation considers the selected model and "
@@ -797,6 +817,316 @@ class MainWindow(QMainWindow):
         root.addWidget(card)
         root.addStretch()
         return page
+
+    def _build_ai_metrics_page(self) -> QWidget:
+        page = QWidget()
+        root = QVBoxLayout(page)
+        root.setContentsMargins(8, 16, 8, 8)
+        root.setSpacing(10)
+
+        title = QLabel(_("Deterministic metrics inspector"))
+        title.setObjectName("pageTitle")
+        subtitle = QLabel(
+            _("Calculate and inspect the exact baselines, coverage, comparisons, trends, "
+              "anomalies, associations, and ranked evidence supplied to the local model.")
+        )
+        subtitle.setObjectName("pageSubtitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(title)
+        root.addWidget(subtitle)
+
+        controls = QFrame()
+        controls.setObjectName("aiCard")
+        controls_layout = QHBoxLayout(controls)
+        controls_layout.setContentsMargins(16, 12, 16, 12)
+        controls_layout.addWidget(QLabel(_("Data scope")))
+        self.ai_metrics_scope_combo = QComboBox()
+        self.ai_metrics_scope_combo.addItem(_("Selected question period"), "selected")
+        self.ai_metrics_scope_combo.addItem(_("Complete local history"), "all")
+        controls_layout.addWidget(self.ai_metrics_scope_combo)
+        self.ai_metrics_calculate_button = QPushButton(_("Calculate / refresh"))
+        self.ai_metrics_calculate_button.setObjectName("primaryButton")
+        self.ai_metrics_calculate_button.clicked.connect(self.calculate_deterministic_metrics)
+        controls_layout.addWidget(self.ai_metrics_calculate_button)
+        self.ai_metrics_status = QLabel(_("Not calculated yet"))
+        self.ai_metrics_status.setObjectName("pageSubtitle")
+        controls_layout.addWidget(self.ai_metrics_status, 1)
+        root.addWidget(controls)
+
+        self.ai_metrics_coverage = QLabel(
+            _("Choose a scope and calculate the deterministic snapshot to inspect data coverage.")
+        )
+        self.ai_metrics_coverage.setObjectName("coverageNeutral")
+        self.ai_metrics_coverage.setWordWrap(True)
+        root.addWidget(self.ai_metrics_coverage)
+
+        inspector = QSplitter(Qt.Horizontal)
+        self.ai_metrics_tree = QTreeWidget()
+        self.ai_metrics_tree.setObjectName("deterministicTree")
+        self.ai_metrics_tree.setHeaderLabels(
+            [
+                _("Metric or evidence"),
+                _("Observed data"),
+                _("7-day baseline"),
+                _("Matched change"),
+                _("Trend"),
+                _("Anomaly"),
+            ]
+        )
+        self.ai_metrics_tree.setAlternatingRowColors(True)
+        self.ai_metrics_tree.itemSelectionChanged.connect(
+            self._deterministic_metric_selected
+        )
+        inspector.addWidget(self.ai_metrics_tree)
+
+        details_card = QFrame()
+        details_card.setObjectName("aiCard")
+        details_layout = QVBoxLayout(details_card)
+        details_layout.setContentsMargins(12, 12, 12, 12)
+        details_title = QLabel(_("Calculation details"))
+        details_title.setObjectName("chatSectionTitle")
+        details_layout.addWidget(details_title)
+        details_hint = QLabel(
+            _("Select a row to see every value and interpretation limit as local JSON.")
+        )
+        details_hint.setObjectName("pageSubtitle")
+        details_hint.setWordWrap(True)
+        details_layout.addWidget(details_hint)
+        self.ai_metrics_details = QPlainTextEdit()
+        self.ai_metrics_details.setReadOnly(True)
+        self.ai_metrics_details.setPlaceholderText(
+            _("Calculated parameters will appear here.")
+        )
+        details_layout.addWidget(self.ai_metrics_details, 1)
+        inspector.addWidget(details_card)
+        inspector.setSizes([870, 480])
+        root.addWidget(inspector, 1)
+        return page
+
+    def _build_ai_prompt_page(self) -> QWidget:
+        page = QWidget()
+        root = QVBoxLayout(page)
+        root.setContentsMargins(8, 16, 8, 8)
+        root.setSpacing(10)
+
+        title = QLabel(_("Prompt and model instructions"))
+        title.setObjectName("pageTitle")
+        subtitle = QLabel(
+            _("This read-only system prompt is included with every request. In the chat window, "
+              "Show prompt reveals the exact messages, deterministic JSON, conversation history, "
+              "and current question sent for the latest query.")
+        )
+        subtitle.setObjectName("pageSubtitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(title)
+        root.addWidget(subtitle)
+
+        prompt_card = QFrame()
+        prompt_card.setObjectName("aiCard")
+        prompt_layout = QVBoxLayout(prompt_card)
+        prompt_layout.setContentsMargins(16, 14, 16, 14)
+        prompt_heading = QLabel(_("Active system prompt"))
+        prompt_heading.setObjectName("chatSectionTitle")
+        prompt_layout.addWidget(prompt_heading)
+        self.ai_system_prompt_view = QPlainTextEdit()
+        self.ai_system_prompt_view.setObjectName("promptInspector")
+        self.ai_system_prompt_view.setReadOnly(True)
+        self.ai_system_prompt_view.setPlainText(SYSTEM_PROMPT)
+        prompt_layout.addWidget(self.ai_system_prompt_view, 1)
+        root.addWidget(prompt_card, 1)
+
+        privacy = QLabel(
+            _("Prompt inspection is local. It may contain processed health evidence when opened "
+              "from a chat, so review it before copying or sharing it.")
+        )
+        privacy.setObjectName("disclaimer")
+        privacy.setWordWrap(True)
+        root.addWidget(privacy)
+        return page
+
+    def calculate_deterministic_metrics(self, _checked: bool = False) -> None:
+        if self.ai_metrics_thread and self.ai_metrics_thread.isRunning():
+            return
+        scope = str(self.ai_metrics_scope_combo.currentData())
+        period = None if scope == "all" else self._current_ai_period()
+        self.ai_metrics_status.setText(_("Calculating deterministic evidence…"))
+        self.ai_metrics_calculate_button.setEnabled(False)
+        self.ai_metrics_tree.clear()
+        self.ai_metrics_details.clear()
+        thread = SnapshotBuildThread(self._build_ai_snapshot_for_chat, scope, period)
+        thread.completed.connect(self._deterministic_snapshot_ready)
+        thread.failed.connect(self._deterministic_snapshot_failed)
+        thread.finished.connect(self._deterministic_snapshot_finished)
+        self.ai_metrics_thread = thread
+        thread.start()
+
+    def _ai_section_changed(self, index: int) -> None:
+        if index == 1 and self._deterministic_snapshot is None:
+            QTimer.singleShot(0, self.calculate_deterministic_metrics)
+
+    def _deterministic_snapshot_ready(self, snapshot: dict, period: dict) -> None:
+        self._deterministic_snapshot = snapshot
+        self._populate_deterministic_snapshot(snapshot, period)
+
+    def _populate_deterministic_snapshot(self, snapshot: dict, period: dict) -> None:
+        self.ai_metrics_tree.clear()
+        coverage = snapshot.get("requested_interval_coverage") or {}
+        requested_days = coverage.get("requested_calendar_days", 0)
+        observed_days = coverage.get("calendar_days_with_any_data", 0)
+        first_observed = coverage.get("first_observed_date") or _("none")
+        last_observed = coverage.get("last_observed_date") or _("none")
+        partial = bool(coverage.get("scope_is_partially_observed"))
+        self.ai_metrics_coverage.setObjectName(
+            "coverageWarning" if partial else "coverageComplete"
+        )
+        self.ai_metrics_coverage.setText(
+            _(
+                "Requested: {period} ({requested} days) · observed dates: {first} to {last} · "
+                "days with any data: {observed}. {notice}",
+                period=period.get("label", _("Selected period")),
+                requested=requested_days,
+                first=first_observed,
+                last=last_observed,
+                observed=observed_days,
+                notice=coverage.get("coverage_notice", ""),
+            )
+        )
+        self.ai_metrics_coverage.style().unpolish(self.ai_metrics_coverage)
+        self.ai_metrics_coverage.style().polish(self.ai_metrics_coverage)
+
+        coverage_item = QTreeWidgetItem(
+            [
+                _("Requested interval coverage"),
+                _("{observed}/{requested} days", observed=observed_days, requested=requested_days),
+                "—",
+                "—",
+                "—",
+                "—",
+            ]
+        )
+        coverage_item.setData(0, Qt.UserRole, coverage)
+        self.ai_metrics_tree.addTopLevelItem(coverage_item)
+
+        coverage_by_type = {
+            str(row.get("data_type")): row for row in coverage.get("metrics", [])
+        }
+        metrics_root = QTreeWidgetItem([_("Calculated metrics"), "", "", "", "", ""])
+        metrics_root.setData(0, Qt.UserRole, {"metrics": snapshot.get("metrics", [])})
+        for metric in sorted(snapshot.get("metrics", []), key=lambda row: str(row.get("label", ""))):
+            data_type = str(metric.get("data_type", ""))
+            quality = coverage_by_type.get(data_type, {})
+            derived = metric.get("derived_evidence") or {}
+            baseline = (derived.get("personal_baselines") or {}).get("7_days") or {}
+            matched = derived.get("matched_recent_comparison") or {}
+            trend = derived.get("trend") or {}
+            anomaly = derived.get("robust_anomaly_check") or {}
+            observed_text = _("{days} days", days=quality.get("observed_calendar_days", 0))
+            if quality.get("coverage_percent") is not None:
+                observed_text += f" · {quality['coverage_percent']}%"
+            baseline_text = (
+                f"{baseline.get('mean')} ± {baseline.get('standard_deviation')}"
+                if baseline
+                else "—"
+            )
+            matched_text = (
+                f"{matched.get('percent_change'):+g}%"
+                if isinstance(matched.get("percent_change"), (int, float))
+                else "—"
+            )
+            trend_text = str(trend.get("direction", "—"))
+            if isinstance(trend.get("percent_per_week"), (int, float)):
+                trend_text += f" · {trend['percent_per_week']:+g}%/week"
+            anomaly_text = (
+                f"z={anomaly.get('latest_robust_z'):g}"
+                if isinstance(anomaly.get("latest_robust_z"), (int, float))
+                else "—"
+            )
+            item = QTreeWidgetItem(
+                [
+                    str(metric.get("label", data_type)),
+                    observed_text,
+                    baseline_text,
+                    matched_text,
+                    trend_text,
+                    anomaly_text,
+                ]
+            )
+            item.setData(0, Qt.UserRole, metric)
+            metrics_root.addChild(item)
+        self.ai_metrics_tree.addTopLevelItem(metrics_root)
+
+        evidence_root = QTreeWidgetItem([_("Ranked evidence"), "", "", "", "", ""])
+        evidence_root.setData(
+            0, Qt.UserRole, {"candidate_insights": snapshot.get("candidate_insights", [])}
+        )
+        for insight in snapshot.get("candidate_insights", []):
+            evidence_item = QTreeWidgetItem(
+                [
+                    str(insight.get("headline", insight.get("evidence_id", ""))),
+                    str(insight.get("confidence", "")),
+                    "",
+                    str(insight.get("relevance_score", "")),
+                    "",
+                    "",
+                ]
+            )
+            evidence_item.setData(0, Qt.UserRole, insight)
+            evidence_root.addChild(evidence_item)
+        self.ai_metrics_tree.addTopLevelItem(evidence_root)
+
+        association_root = QTreeWidgetItem([_("Cross-metric associations"), "", "", "", "", ""])
+        association_root.setData(0, Qt.UserRole, {"associations": snapshot.get("associations", [])})
+        for association in snapshot.get("associations", []):
+            association_item = QTreeWidgetItem(
+                [
+                    _(
+                        "{left} ↔ {right}",
+                        left=association.get("left", ""),
+                        right=association.get("right", ""),
+                    ),
+                    _("{days} paired days", days=association.get("paired_days", 0)),
+                    "",
+                    f"r={association.get('r', '')}",
+                    str(association.get("timing", "")),
+                    "",
+                ]
+            )
+            association_item.setData(0, Qt.UserRole, association)
+            association_root.addChild(association_item)
+        self.ai_metrics_tree.addTopLevelItem(association_root)
+
+        self.ai_metrics_tree.expandToDepth(0)
+        for column in range(self.ai_metrics_tree.columnCount()):
+            self.ai_metrics_tree.resizeColumnToContents(column)
+        self.ai_metrics_tree.setCurrentItem(coverage_item)
+        self.ai_metrics_status.setText(
+            _(
+                "Calculated {metrics} metrics · {evidence} ranked evidence items",
+                metrics=len(snapshot.get("metrics", [])),
+                evidence=len(snapshot.get("candidate_insights", [])),
+            )
+        )
+
+    def _deterministic_metric_selected(self) -> None:
+        selected = self.ai_metrics_tree.selectedItems()
+        if not selected:
+            self.ai_metrics_details.clear()
+            return
+        payload = selected[0].data(0, Qt.UserRole)
+        self.ai_metrics_details.setPlainText(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+        )
+
+    def _deterministic_snapshot_failed(self, message: str) -> None:
+        self.ai_metrics_status.setText(_("Calculation failed"))
+        self.ai_metrics_details.setPlainText(message)
+
+    def _deterministic_snapshot_finished(self) -> None:
+        thread = self.ai_metrics_thread
+        self.ai_metrics_thread = None
+        self.ai_metrics_calculate_button.setEnabled(True)
+        if thread is not None:
+            thread.deleteLater()
 
     def _date_bounds(self) -> tuple[str, str]:
         start = self._qdate_to_date(self.start_date.date()).isoformat()
@@ -1196,6 +1526,11 @@ class MainWindow(QMainWindow):
         self.refresh_overview()
         if self.ai_chat_window is not None:
             self.ai_chat_window.notify_data_revision_changed()
+        self._deterministic_snapshot = None
+        if hasattr(self, "ai_metrics_status"):
+            self.ai_metrics_status.setText(
+                _("New local data is available · calculate again to refresh the inspector")
+            )
         if self.current_type:
             self._reload_current_type()
         prefix = _("Automatic update completed") if automatic else _("Update completed")
@@ -1875,6 +2210,15 @@ class MainWindow(QMainWindow):
         self.refresh_tree()
         self.refresh_overview()
         self.refresh_ai_recent_threads()
+        self._deterministic_snapshot = None
+        if hasattr(self, "ai_metrics_tree"):
+            self.ai_metrics_tree.clear()
+            self.ai_metrics_details.clear()
+            self.ai_metrics_status.setText(_("Not calculated yet"))
+            self.ai_metrics_coverage.setObjectName("coverageNeutral")
+            self.ai_metrics_coverage.setText(
+                _("Download data, then calculate a deterministic snapshot to inspect it.")
+            )
         if self.ai_chat_window is not None:
             self.ai_chat_window.current_thread_id = None
             self.ai_chat_window.refresh_threads()
