@@ -2,6 +2,17 @@
 
 All notable changes to VitalChronicle are documented here.
 
+## 1.1.4 — 2026-08-31
+
+- kept the local-AI system prompt invariantly in English in every interface language;
+- removed the technical system prompt from the Weblate source catalogue so community
+  translations cannot alter the instructions sent to Ollama;
+- added a short English runtime directive that makes the final answer follow the selected
+  interface language while preserving JSON field names and evidence identifiers;
+- changed application-update checks to run at every startup and once every hour while the
+  app remains open, without the previous persisted 24-hour suppression;
+- added regression tests and updated the English documentation.
+
 ## 1.1.3 — 2026-08-31
 
 - added exact compact missing-date ranges for the complete measurement scope and every

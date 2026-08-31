@@ -8,6 +8,7 @@ from google_health_viewer.local_ai import (
     detected_hardware_profile,
     newer_model_suggestion,
     recommended_model,
+    system_prompt,
 )
 
 
@@ -19,6 +20,16 @@ def test_local_ai_profile_is_current_and_medically_guarded():
     assert "incomplete day" in SYSTEM_PROMPT
     assert "requested_interval_coverage" in SYSTEM_PROMPT
     assert "one observed week" in SYSTEM_PROMPT
+
+
+def test_system_prompt_remains_english_and_only_response_language_changes():
+    italian = system_prompt("it")
+    french = system_prompt("fr")
+    assert SYSTEM_PROMPT in italian
+    assert SYSTEM_PROMPT in french
+    assert "Respond to the user in Italian" in italian
+    assert "Respond to the user in French" in french
+    assert "Rispondi" not in italian
 
 
 def test_hardware_profiles_offer_larger_models():

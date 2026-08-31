@@ -36,7 +36,7 @@ not a replacement for professional medical advice.
 
 ## Download
 
-**Current release: [VitalChronicle v1.1.3](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.3)**
+**Current release: [VitalChronicle v1.1.4](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.4)**
 
 **[Download the latest VitalChronicle release for Linux, Windows, or macOS](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest)**
 
@@ -128,7 +128,8 @@ metric, and reduces only the available response budget when necessary. A false ‚
 provided‚Äù response is automatically rejected and retried with an evidence-first request.
 
 The header always shows the installed version. Its badge turns amber and displays the newer
-version after the existing private update check discovers a more recent GitHub release.
+version after the private update check discovers a more recent GitHub release. This check runs
+at every application startup and once per hour while VitalChronicle remains open.
 Portable Linux AppImages and Windows executables can then install the matching package from
 inside the app: VitalChronicle verifies SHA-256, replaces the file in its current location,
 and keeps the previous build as a `.previous` backup. Source, virtual-environment, and macOS
@@ -145,7 +146,9 @@ value remains editable and is limited only by the physical context reported by O
 
 ![VitalChronicle system prompt inspector](docs/screenshots/ai-prompt.png)
 
-The permanent system prompt is readable inside the AI workspace. During a conversation,
+The permanent system prompt is readable inside the AI workspace. Its technical instructions
+always remain in English and are deliberately excluded from Weblate; a short English directive
+selects the language of the final answer from the interface language. During a conversation,
 **Show prompt** displays the exact messages sent for the latest request, including the
 processed evidence JSON, retained conversation context, and current question. This view
 remains local and may contain processed health information, so it should be reviewed before

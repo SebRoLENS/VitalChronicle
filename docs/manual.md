@@ -1,7 +1,7 @@
 ---
 title: "VitalChronicle User Manual"
 author: "Sebastiano Romi"
-date: "Updated for VitalChronicle 1.1.3"
+date: "Updated for VitalChronicle 1.1.4"
 lang: en-US
 geometry: margin=2.2cm
 colorlinks: true
@@ -13,7 +13,7 @@ toc-depth: 3
 
 # About this manual
 
-This is the authoritative user manual for **VitalChronicle 1.1.3**. VitalChronicle is a
+This is the authoritative user manual for **VitalChronicle 1.1.4**. VitalChronicle is a
 local-first desktop dashboard for personal Google Health data and optional local AI
 analysis through Ollama.
 
@@ -40,8 +40,9 @@ VITALCHRONICLE_LANGUAGE=it vitalchronicle
 ```
 
 VitalChronicle checks for a new public release shortly after startup without blocking the
-interface. The network check runs at most once per day; health data are never included in the
-request. To check immediately, choose **Help → Check for updates**. When a newer release is
+interface and repeats the check once every hour while the application remains open. Health data
+are never included in the request. To check immediately, choose **Help → Check for updates**.
+When a newer release is
 available, the dialog distinguishes maintenance, feature, and major updates and can open the
 official GitHub release page in the system browser. Portable AppImage and Windows builds also
 offer **Update now** when the release contains the exact matching package. VitalChronicle
@@ -122,26 +123,26 @@ slow or may require more memory than the computer can provide.
 2. Make it executable:
 
    ```bash
-   chmod +x VitalChronicle-1.1.3-linux-x86_64.AppImage
+   chmod +x VitalChronicle-1.1.4-linux-x86_64.AppImage
    ```
 
 3. Start it:
 
    ```bash
-   ./VitalChronicle-1.1.3-linux-x86_64.AppImage
+   ./VitalChronicle-1.1.4-linux-x86_64.AppImage
    ```
 
 If FUSE is unavailable, run it with:
 
 ```bash
-APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.1.3-linux-x86_64.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.1.4-linux-x86_64.AppImage
 ```
 
 The AppImage is accompanied by a Sigstore bundle and release checksums.
 
 ## 3.2 Windows
 
-1. Download `VitalChronicle-1.1.3-windows-x86_64.exe`.
+1. Download `VitalChronicle-1.1.4-windows-x86_64.exe`.
 2. Verify its SHA-256 checksum against `SHA256SUMS.txt`.
 3. Start the executable.
 
@@ -370,7 +371,7 @@ from blocking health-data updates.
 ## 5.4 Storage locations
 
 VitalChronicle keeps the historical internal `GoogleHealthViewer` directory identifier so
-existing 0.2.12 archives survive the 1.1.3 upgrade. Typical locations are:
+existing 0.2.12 archives survive the 1.1.4 upgrade. Typical locations are:
 
 - Linux data: `~/.local/share/GoogleHealthViewer/`;
 - Linux configuration: `~/.config/GoogleHealthViewer/`;
@@ -698,6 +699,10 @@ The permanent model instructions are visible under **Prompt and instructions**:
 ![VitalChronicle active system prompt](screenshots/ai-prompt.png)
 
 This page shows the stable safety, temporal-context, coverage, and synthesis rules. The
+technical system prompt always remains in English, independently of the interface language,
+and is not included in the Weblate translation catalogue. VitalChronicle appends an English
+directive naming the selected response language, so the user-facing answer still follows the
+interface. JSON field names and `evidence_id` values remain unchanged. The
 chat's **Show prompt** control is more specific: it displays the exact payload assembled for
 the latest evidence-selection, synthesis, or retry pass.
 
@@ -801,7 +806,7 @@ public issue containing credentials or health data.
 
 # 13. Android status
 
-VitalChronicle 1.1.3 does not ship an APK. The current application uses desktop Qt widgets,
+VitalChronicle 1.1.4 does not ship an APK. The current application uses desktop Qt widgets,
 a loopback-browser OAuth callback, desktop keyrings, and desktop chart interactions. A safe
 Android edition requires a dedicated mobile interface, Android OAuth credentials bound to
 a package name and signing certificate, mobile secure storage, lifecycle handling, and a
