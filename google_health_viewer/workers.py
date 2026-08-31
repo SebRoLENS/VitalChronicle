@@ -8,7 +8,7 @@ from PySide6.QtCore import QThread, Signal
 from .api import ApiError, GoogleHealthClient
 from .constants import DATA_TYPES
 from .i18n import _
-from .local_ai import LocalAIError, OllamaClient
+from .local_ai import AIAnalysisCancelled, LocalAIError, OllamaClient
 from .oauth import CredentialStore, OAuthError, authenticate
 from .storage import HealthStore
 from .updates import fetch_latest_release
@@ -224,6 +224,7 @@ class AIPullThread(QThread):
 class AIAnalysisThread(QThread):
     completed = Signal(str)
     failed = Signal(str)
+    cancelled = Signal()
     thinking_chunk = Signal(str)
     answer_chunk = Signal(str)
 
@@ -234,6 +235,8 @@ class AIAnalysisThread(QThread):
         question: str,
         max_tokens: int = 3200,
         model_context_limit: int | None = None,
+        history: list[dict[str, str]] | None = None,
+        analysis_mode: str = "question",
     ) -> None:
         super().__init__()
         self.model = model
@@ -241,6 +244,11 @@ class AIAnalysisThread(QThread):
         self.question = question
         self.max_tokens = max_tokens
         self.model_context_limit = model_context_limit
+        self.history = history or []
+        self.analysis_mode = analysis_mode
+
+    def cancel(self) -> None:
+        self.requestInterruption()
 
     def run(self) -> None:
         try:
@@ -251,8 +259,13 @@ class AIAnalysisThread(QThread):
                 self.answer_chunk.emit,
                 self.max_tokens,
                 self.model_context_limit,
+                history=self.history,
+                analysis_mode=self.analysis_mode,
+                cancel_callback=self.isInterruptionRequested,
             )
             self.completed.emit(answer)
+        except AIAnalysisCancelled:
+            self.cancelled.emit()
         except LocalAIError as exc:
             self.failed.emit(str(exc))
         except Exception:  # noqa: BLE001 - thread boundary reports unexpected failures.

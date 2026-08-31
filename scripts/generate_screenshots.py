@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render documentation screenshots from the real GUI and synthetic health data."""
+"""Render real-GUI documentation screenshots, including the separate AI chat."""
 
 from __future__ import annotations
 
@@ -122,15 +122,11 @@ def seed_demo_data(store: HealthStore) -> None:
                 {
                     "name": f"demo/temperature/{day.isoformat()}",
                     "startTime": _stamp(day),
-                    "dailySleepTemperatureDerivations": {
-                        "temperatureDelta": temperature[index]
-                    },
+                    "dailySleepTemperatureDerivations": {"temperatureDelta": temperature[index]},
                 }
             ],
         )
-        sleep_start = datetime.combine(
-            day - timedelta(days=1), time(23, 0), timezone.utc
-        )
+        sleep_start = datetime.combine(day - timedelta(days=1), time(23, 0), timezone.utc)
         sleep_end = sleep_start + timedelta(minutes=sleep_minutes[index] + 28)
         store.upsert_records(
             "sleep",
@@ -171,7 +167,9 @@ def seed_demo_data(store: HealthStore) -> None:
                 ],
             )
 
-    elapsed_minutes = max(45, int((now - datetime.combine(today, time(), timezone.utc)).total_seconds() / 60))
+    elapsed_minutes = max(
+        45, int((now - datetime.combine(today, time(), timezone.utc)).total_seconds() / 60)
+    )
     for minute in range(0, elapsed_minutes, 5):
         measured = datetime.combine(today, time(), timezone.utc) + timedelta(minutes=minute)
         bpm = 69 + 8 * math.sin(minute / 37) + 3 * math.sin(minute / 9)
@@ -260,18 +258,38 @@ def main() -> int:
         window.tabs.setCurrentIndex(2)
         window.ai_status_label.setText("● Ollama online · qwen3.5:9b disponibile")
         window.ai_status_label.setStyleSheet("font-weight: 700; color: #188038")
-        window.ai_question.setPlainText(
-            "Come si sono mossi sonno, attività e parametri cardiaci nell'ultimo mese?"
+        capture(window, args.output / "ai-control-center.png")
+
+        snapshot, period = window._build_ai_snapshot_for_chat(
+            "selected", window._current_ai_period()
         )
-        window.ai_output.setMarkdown(
-            "### Sintesi locale dimostrativa\n\n"
-            "- **Attività:** andamento regolare rispetto alla baseline personale.\n"
-            "- **Sonno:** durata abbastanza stabile, con normali variazioni tra le notti.\n"
-            "- **Parametri cardiaci:** nessuna conclusione clinica può essere ricavata "
-            "dai soli dati sintetici mostrati.\n\n"
-            "Questa schermata usa esclusivamente dati dimostrativi locali."
+        thread = window.conversation_store.create_thread(
+            title="Sleep, activity and cardiac trends",
+            model="qwen3.5:9b",
+            scope="selected",
+            period=period,
+            snapshot=snapshot,
+            snapshot_revision=store.data_revision(),
         )
-        capture(window, args.output / "local-ai.png")
+        window.conversation_store.add_message(
+            thread["id"],
+            "user",
+            "How have sleep, activity and cardiac metrics moved together this month?",
+        )
+        window.conversation_store.add_message(
+            thread["id"],
+            "assistant",
+            "### Local demonstration summary\n\n"
+            "- **Activity:** broadly stable against the personal baseline.\n"
+            "- **Sleep:** duration is fairly consistent, with normal night-to-night variation.\n"
+            "- **Cardiac metrics:** the synthetic wearable data alone cannot establish a "
+            "clinical conclusion.\n\n"
+            "This screen uses local demonstration data only.",
+        )
+        chat = window._ensure_ai_chat_window()
+        chat.open_thread(thread["id"])
+        capture(chat, args.output / "local-ai.png")
+        chat.hide()
 
         window.tabs.setCurrentIndex(3)
         window.ai_ram_edit.setText("16")

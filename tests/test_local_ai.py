@@ -49,9 +49,7 @@ def test_token_recommendation_uses_ram_model_size_and_physical_context(monkeypat
 
     monkeypatch.setattr(
         "google_health_viewer.local_ai.requests.post",
-        lambda *_args, **_kwargs: FakeResponse(
-            {"model_info": {"qwen35.context_length": 32768}}
-        ),
+        lambda *_args, **_kwargs: FakeResponse({"model_info": {"qwen35.context_length": 32768}}),
     )
     monkeypatch.setattr(
         "google_health_viewer.local_ai.requests.get",
@@ -60,9 +58,7 @@ def test_token_recommendation_uses_ram_model_size_and_physical_context(monkeypat
         ),
     )
 
-    result = OllamaClient(
-        model="qwen3.5:9b", hardware_profile="gpu16"
-    ).token_recommendation(16)
+    result = OllamaClient(model="qwen3.5:9b", hardware_profile="gpu16").token_recommendation(16)
 
     assert result.recommended_tokens == 8192
     assert result.recommended_context == 16384
@@ -84,9 +80,7 @@ def test_status_detects_new_weights_for_installed_model(monkeypatch):
 
     def fake_get(url, **_kwargs):
         if url.endswith("/api/tags"):
-            return FakeResponse(
-                {"models": [{"name": "qwen3.5:9b", "digest": "sha256:old"}]}
-            )
+            return FakeResponse({"models": [{"name": "qwen3.5:9b", "digest": "sha256:old"}]})
         return FakeResponse(digest="sha256:new")
 
     monkeypatch.setattr("google_health_viewer.local_ai.requests.get", fake_get)
@@ -267,3 +261,106 @@ def test_analysis_reports_ollama_error_body(monkeypatch):
         assert "llama-server non disponibile" in str(exc)
     else:
         raise AssertionError("Expected the Ollama error to be propagated")
+
+
+def test_deep_analysis_uses_evidence_selection_then_streams_final_answer(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+        reason = "OK"
+
+        def __init__(self, chunks):
+            self.chunks = chunks
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self, decode_unicode=False):
+            assert decode_unicode
+            return [json.dumps(chunk) for chunk in self.chunks]
+
+    responses = [
+        FakeResponse(
+            [
+                {"message": {"thinking": "Valuto la solidità."}},
+                {"message": {"content": "Use change:steps and association:1."}},
+            ]
+        ),
+        FakeResponse(
+            [
+                {"message": {"thinking": "Collego i domini."}},
+                {"message": {"content": "Sintesi profonda [change:steps]."}},
+            ]
+        ),
+    ]
+
+    def fake_post(_url, **kwargs):
+        calls.append(kwargs)
+        return responses.pop(0)
+
+    monkeypatch.setattr("google_health_viewer.local_ai.requests.post", fake_post)
+    thinking = []
+    answer_chunks = []
+    answer = OllamaClient(model="qwen3.5:9b").analyze_stream(
+        {
+            "metrics": [{"data_type": "steps"}],
+            "candidate_insights": [{"evidence_id": "change:steps"}],
+        },
+        analysis_mode="deep",
+        thinking_callback=thinking.append,
+        answer_callback=answer_chunks.append,
+    )
+
+    assert answer == "Sintesi profonda [change:steps]."
+    assert len(calls) == 2
+    assert "evidence plan" in calls[1]["json"]["messages"][-2]["content"].lower()
+    assert "Evidence pass" in "".join(thinking)
+    assert answer_chunks == ["Sintesi profonda [change:steps]."]
+
+
+def test_follow_up_history_is_sent_before_current_question(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        reason = "OK"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self, decode_unicode=False):
+            return [json.dumps({"message": {"content": "Follow-up answer"}})]
+
+    def fake_post(_url, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr("google_health_viewer.local_ai.requests.post", fake_post)
+    OllamaClient().analyze_stream(
+        {"metrics": [{"data_type": "sleep"}]},
+        "And what about HRV?",
+        history=[
+            {"role": "user", "content": "How is sleep?"},
+            {"role": "assistant", "content": "Sleep is stable."},
+        ],
+    )
+
+    messages = captured["json"]["messages"]
+    assert messages[-3:] == [
+        {"role": "user", "content": "How is sleep?"},
+        {"role": "assistant", "content": "Sleep is stable."},
+        {"role": "user", "content": "Current request: And what about HRV?"},
+    ]

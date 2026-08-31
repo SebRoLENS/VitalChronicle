@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pyqtgraph as pg
 from PySide6.QtCore import QDate, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIntValidator, QTextCursor
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIntValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
@@ -29,7 +31,6 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
-    QTextBrowser,
     QToolBar,
     QTreeWidget,
     QTreeWidgetItem,
@@ -38,6 +39,9 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
+from .ai_chat import AIChatWindow
+from .ai_conversations import ConversationStore
+from .ai_insights import build_ai_ready_snapshot
 from .ai_setup import AISetupDialog
 from .analysis import (
     available_metrics,
@@ -92,7 +96,6 @@ from .storage import HealthStore
 from .updates import ReleaseInfo, notification_due, semantic_version, update_kind
 from .utils import summarize
 from .workers import (
-    AIAnalysisThread,
     AIPullThread,
     AIStatusThread,
     AuthThread,
@@ -134,11 +137,14 @@ class MainWindow(QMainWindow):
         self.current_type: str | None = None
         self.current_records: list[dict] = []
         self.current_snapshot: dict = {"metrics": [], "correlations": []}
+        self.conversation_store = ConversationStore(
+            self.store.path.with_name("ai_conversations.json") if screenshot_mode else None
+        )
         self.auth_thread: AuthThread | None = None
         self.sync_thread: SyncThread | None = None
         self.ai_status_thread: AIStatusThread | None = None
         self.ai_pull_thread: AIPullThread | None = None
-        self.ai_analysis_thread: AIAnalysisThread | None = None
+        self.ai_chat_window: AIChatWindow | None = None
         self.update_check_thread: UpdateCheckThread | None = None
         self.progress_dialog: QProgressDialog | None = None
         self._authorization_dialog: AuthorizationHelpDialog | None = None
@@ -652,73 +658,78 @@ class MainWindow(QMainWindow):
         config_layout.setColumnStretch(1, 1)
         root.addWidget(config)
 
-        interval_row = QHBoxLayout()
-        question_label = QLabel(_("Period used for questions"))
+        intelligence = QFrame()
+        intelligence.setObjectName("aiLaunchCard")
+        intelligence_layout = QGridLayout(intelligence)
+        intelligence_layout.setContentsMargins(18, 16, 18, 16)
+        launch_title = QLabel(_("Your private health intelligence workspace"))
+        launch_title.setObjectName("chatSectionTitle")
+        intelligence_layout.addWidget(launch_title, 0, 0, 1, 3)
+        launch_description = QLabel(
+            _("VitalChronicle now prepares personal baselines, matched time periods, robust "
+              "anomalies, data quality, and cross-metric associations before the model reads "
+              "anything. Conversations open in a larger, persistent local window.")
+        )
+        launch_description.setObjectName("pageSubtitle")
+        launch_description.setWordWrap(True)
+        intelligence_layout.addWidget(launch_description, 1, 0, 1, 3)
+
+        question_label = QLabel(_("Period used for questions and new chats"))
         question_label.setStyleSheet("font-weight: 700;")
-        interval_row.addWidget(question_label)
+        intelligence_layout.addWidget(question_label, 2, 0)
         self.ai_range_combo = QComboBox()
-        self.ai_range_combo.setMinimumWidth(190)
+        self.ai_range_combo.setMinimumWidth(210)
         for index in range(self.range_combo.count()):
             self.ai_range_combo.addItem(
                 self.range_combo.itemText(index), self.range_combo.itemData(index)
             )
         self.ai_range_combo.setCurrentIndex(self.range_combo.currentIndex())
         self.ai_range_combo.currentIndexChanged.connect(self._ai_range_changed)
-        interval_row.addWidget(self.ai_range_combo)
-        interval_row.addStretch()
-        root.addLayout(interval_row)
+        intelligence_layout.addWidget(self.ai_range_combo, 2, 1)
         self.ai_interval_label = QLabel()
         self.ai_interval_label.setObjectName("aiInterval")
         self.ai_interval_label.setWordWrap(True)
-        root.addWidget(self.ai_interval_label)
+        intelligence_layout.addWidget(self.ai_interval_label, 3, 0, 1, 3)
         self._update_ai_interval_label()
-        self.ai_question = QPlainTextEdit()
-        self.ai_question.setMaximumHeight(72)
-        self.ai_question.setPlaceholderText(
-            _("Example: does my sleep appear associated with HRV and resting heart rate?")
-        )
-        root.addWidget(self.ai_question)
-        actions = QHBoxLayout()
-        self.auto_ai_button = QPushButton(_("Analyse complete history"))
-        self.auto_ai_button.setObjectName("primaryButton")
-        self.auto_ai_button.clicked.connect(
+
+        open_chat = QPushButton(_("Open AI chat"))
+        open_chat.setObjectName("primaryButton")
+        open_chat.clicked.connect(self.open_ai_chat)
+        intelligence_layout.addWidget(open_chat, 4, 0)
+        new_chat = QPushButton(_("New conversation"))
+        new_chat.clicked.connect(self.start_new_ai_chat)
+        intelligence_layout.addWidget(new_chat, 4, 1)
+        deep_analysis = QPushButton(_("Deep analysis of complete history"))
+        deep_analysis.setObjectName("primaryButton")
+        deep_analysis.clicked.connect(
             lambda: self.start_ai_analysis("", use_all_data=True)
         )
-        self.ask_ai_button = QPushButton(_("Answer the question"))
-        self.ask_ai_button.setObjectName("primaryButton")
-        self.ask_ai_button.clicked.connect(
-            lambda: self.start_ai_analysis(self.ai_question.toPlainText())
-        )
-        actions.addWidget(self.auto_ai_button)
-        actions.addWidget(self.ask_ai_button)
-        actions.addStretch()
-        root.addLayout(actions)
+        intelligence_layout.addWidget(deep_analysis, 4, 2)
+        intelligence_layout.setColumnStretch(1, 1)
+        root.addWidget(intelligence)
 
-        answer_card = QFrame()
-        answer_card.setObjectName("answerCard")
-        answer_layout = QVBoxLayout(answer_card)
-        answer_layout.setContentsMargins(14, 10, 14, 10)
-        answer_header = QHBoxLayout()
-        self.ai_result_title = QLabel(_("Local analysis"))
-        self.ai_result_title.setStyleSheet("font-weight: 700;")
-        self.ai_live_badge = QLabel("LIVE")
-        self.ai_live_badge.setObjectName("thinkingLive")
-        self.ai_live_badge.setVisible(False)
-        answer_header.addWidget(self.ai_result_title)
-        answer_header.addStretch()
-        answer_header.addWidget(self.ai_live_badge)
-        answer_layout.addLayout(answer_header)
-        self.ai_output = QTextBrowser()
-        self.ai_output.setOpenExternalLinks(True)
-        self.ai_output.setPlaceholderText(
-            _("Thinking appears here during processing and is then replaced by the final "
-              "answer. No data is sent to an online AI service.")
+        recent_card = QFrame()
+        recent_card.setObjectName("answerCard")
+        recent_layout = QVBoxLayout(recent_card)
+        recent_layout.setContentsMargins(16, 12, 16, 12)
+        recent_title = QLabel(_("Recent local conversations"))
+        recent_title.setObjectName("chatSectionTitle")
+        recent_layout.addWidget(recent_title)
+        self.ai_recent_list = QListWidget()
+        self.ai_recent_list.setObjectName("recentConversationList")
+        self.ai_recent_list.itemDoubleClicked.connect(self._open_recent_ai_thread)
+        recent_layout.addWidget(self.ai_recent_list)
+        self.ai_recent_empty = QLabel(
+            _("No conversations yet. Start a chat or request a complete-history analysis.")
         )
-        answer_layout.addWidget(self.ai_output, 1)
-        root.addWidget(answer_card, 1)
+        self.ai_recent_empty.setObjectName("pageSubtitle")
+        self.ai_recent_empty.setWordWrap(True)
+        recent_layout.addWidget(self.ai_recent_empty)
+        root.addWidget(recent_card, 1)
+        self.refresh_ai_recent_threads()
         disclaimer = QLabel(
-            _("Exploratory tool: correlations and anomalies do not establish causes or diagnoses. "
-              "Use validated measurements and professional advice for health decisions.")
+            _("All preparation, conversation history, and inference remain on this computer. "
+              "Exploratory associations and anomalies do not establish causes or diagnoses.")
         )
         disclaimer.setObjectName("disclaimer")
         disclaimer.setWordWrap(True)
@@ -833,8 +844,9 @@ class MainWindow(QMainWindow):
         start = self.start_date.date().toString("dd/MM/yyyy")
         end = self.end_date.date().toString("dd/MM/yyyy")
         self.ai_interval_label.setText(
-            _("Questions use: {period} · {start}–{end}. Analyse complete history ignores this "
-              "time filter.", period=label, start=start, end=end)
+            _("New chats and questions use: {period} · {start}–{end}. The separate deep-analysis "
+              "action always uses the complete local history.", period=label,
+              start=start, end=end)
         )
 
     def _sync_ai_range_combo(self) -> None:
@@ -915,6 +927,98 @@ class MainWindow(QMainWindow):
         if self._model_token_limit is not None:
             tokens = min(tokens, self._model_token_limit)
         return tokens
+
+    def _current_ai_period(self) -> dict[str, str]:
+        start, end = self._date_bounds()
+        return {
+            "preset": str(self.range_combo.currentData()),
+            "label": self.range_combo.currentText(),
+            "start": start,
+            "end": end,
+            "display_start": self.start_date.date().toString("dd/MM/yyyy"),
+            "display_end": self.end_date.date().toString("dd/MM/yyyy"),
+        }
+
+    def _build_ai_snapshot_for_chat(
+        self, scope: str, period: dict | None
+    ) -> tuple[dict, dict]:
+        if scope == "all":
+            bounds = self.store.data_date_bounds()
+            if not bounds:
+                return {"metrics": []}, {
+                    "label": _("Complete history"), "start": "", "end": ""
+                }
+            start = bounds[0].isoformat()
+            end = (bounds[1] + timedelta(days=1)).isoformat()
+            resolved_period = {
+                "preset": "all",
+                "label": _("Complete history"),
+                "start": start,
+                "end": end,
+                "display_start": bounds[0].strftime("%d/%m/%Y"),
+                "display_end": bounds[1].strftime("%d/%m/%Y"),
+            }
+            snapshot = build_ai_ready_snapshot(
+                self.store, start, end, record_limit=2_000_000
+            )
+            snapshot["analysis_scope"] = "all_local_history"
+            return snapshot, resolved_period
+
+        resolved_period = dict(period or self._current_ai_period())
+        start = str(resolved_period["start"])
+        end = str(resolved_period["end"])
+        snapshot = build_ai_ready_snapshot(self.store, start, end)
+        snapshot["analysis_scope"] = "selected_interval"
+        return snapshot, resolved_period
+
+    def _ensure_ai_chat_window(self) -> AIChatWindow:
+        if self.ai_chat_window is None:
+            self.ai_chat_window = AIChatWindow(
+                conversations=self.conversation_store,
+                snapshot_builder=self._build_ai_snapshot_for_chat,
+                period_provider=self._current_ai_period,
+                revision_provider=self.store.data_revision,
+                model_provider=lambda: self.ai_model_combo.currentText(),
+                tokens_provider=self._selected_ai_tokens,
+                context_limit_provider=lambda: self._model_token_limit,
+                parent=self,
+            )
+            self.ai_chat_window.threads_changed.connect(self.refresh_ai_recent_threads)
+        return self.ai_chat_window
+
+    def open_ai_chat(self, _checked: bool = False, thread_id: str | None = None) -> None:
+        window = self._ensure_ai_chat_window()
+        threads = self.conversation_store.list_threads()
+        if thread_id or threads:
+            window.open_thread(thread_id or str(threads[0]["id"]))
+        else:
+            window.open_thread()
+            window.new_conversation("selected")
+
+    def start_new_ai_chat(self, _checked: bool = False) -> None:
+        window = self._ensure_ai_chat_window()
+        window.open_thread()
+        window.new_conversation("selected")
+
+    def refresh_ai_recent_threads(self) -> None:
+        if not hasattr(self, "ai_recent_list"):
+            return
+        self.ai_recent_list.clear()
+        for thread in self.conversation_store.list_threads()[:6]:
+            scope = (
+                _("Complete history") if thread.get("scope") == "all"
+                else str(thread.get("period", {}).get("label", _("Selected period")))
+            )
+            updated = str(thread.get("updated_at", "")).replace("T", " ")[:16]
+            item = QListWidgetItem(
+                f"{thread.get('title', _('Conversation'))}\n{scope} · {updated}"
+            )
+            item.setData(Qt.UserRole, thread["id"])
+            self.ai_recent_list.addItem(item)
+        self.ai_recent_empty.setVisible(self.ai_recent_list.count() == 0)
+
+    def _open_recent_ai_thread(self, item: QListWidgetItem) -> None:
+        self.open_ai_chat(thread_id=str(item.data(Qt.UserRole)))
 
     def _date_range_changed(self) -> None:
         if self._applying_range_preset:
@@ -1090,6 +1194,8 @@ class MainWindow(QMainWindow):
         self.sync_action.setEnabled(True)
         self.refresh_tree()
         self.refresh_overview()
+        if self.ai_chat_window is not None:
+            self.ai_chat_window.notify_data_revision_changed()
         if self.current_type:
             self._reload_current_type()
         prefix = _("Automatic update completed") if automatic else _("Update completed")
@@ -1699,93 +1805,12 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, _("Model download"), message)
 
     def start_ai_analysis(self, question: str, *, use_all_data: bool = False) -> None:
-        if self.ai_analysis_thread and self.ai_analysis_thread.isRunning():
-            return
-        if use_all_data:
-            bounds = self.store.data_date_bounds()
-            if bounds:
-                all_start = bounds[0].isoformat()
-                all_end = (bounds[1] + timedelta(days=1)).isoformat()
-                snapshot = build_health_snapshot(
-                    self.store,
-                    all_start,
-                    all_end,
-                    record_limit=2_000_000,
-                )
-                snapshot["analysis_scope"] = "all_local_history"
-            else:
-                snapshot = {"metrics": []}
-        else:
-            self.refresh_overview()
-            snapshot = self.current_snapshot
-            snapshot["analysis_scope"] = "selected_interval"
-        if not snapshot.get("metrics"):
-            QMessageBox.information(
-                self,
-                _("Insufficient data"),
-                (
-                    _("Download Google Health data first.")
-                    if use_all_data
-                    else _("Download Google Health data or widen the selected period.")
-                ),
-            )
-            return
-        self.ask_ai_button.setEnabled(False)
-        self.auto_ai_button.setEnabled(False)
-        self._ai_answer_received = False
-        self.ai_output.clear()
-        self.ai_output.setPlaceholderText(_("The model is starting to think…"))
-        self.ai_result_title.setText(_("Model thinking"))
-        self.ai_live_badge.setVisible(True)
-        self.ai_analysis_thread = AIAnalysisThread(
-            self.ai_model_combo.currentText(),
-            snapshot,
-            question,
-            self._selected_ai_tokens(),
-            self._model_token_limit,
-        )
-        self.ai_analysis_thread.thinking_chunk.connect(self._ai_thinking_chunk)
-        self.ai_analysis_thread.answer_chunk.connect(self._ai_answer_chunk)
-        self.ai_analysis_thread.completed.connect(self._ai_analysis_completed)
-        self.ai_analysis_thread.failed.connect(self._ai_analysis_failed)
-        self.ai_analysis_thread.start()
-
-    @staticmethod
-    def _append_stream_text(widget, text: str) -> None:
-        cursor = widget.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        cursor.insertText(text)
-        widget.setTextCursor(cursor)
-        widget.ensureCursorVisible()
-
-    def _ai_thinking_chunk(self, text: str) -> None:
-        self._append_stream_text(self.ai_output, text)
-
-    def _ai_answer_chunk(self, text: str) -> None:
-        if not self._ai_answer_received:
-            self._ai_answer_received = True
-            self.ai_output.clear()
-            self.ai_result_title.setText(_("Final answer"))
-            self.ai_live_badge.setVisible(False)
-        self._append_stream_text(self.ai_output, text)
-
-    def _ai_analysis_completed(self, answer: str) -> None:
-        self.ask_ai_button.setEnabled(True)
-        self.auto_ai_button.setEnabled(True)
-        self.ai_result_title.setText(_("Final answer"))
-        self.ai_live_badge.setVisible(False)
-        self.ai_output.setMarkdown(answer)
-
-    def _ai_analysis_failed(self, message: str) -> None:
-        self.ask_ai_button.setEnabled(True)
-        self.auto_ai_button.setEnabled(True)
-        self.ai_result_title.setText(_("Analysis error"))
-        self.ai_live_badge.setVisible(False)
-        self.ai_output.setPlainText(message)
-        QMessageBox.warning(
-            self,
-            _("Local analysis unavailable"),
-            _("{message}\n\nCheck Ollama from the Local AI tab.", message=message),
+        window = self._ensure_ai_chat_window()
+        window.open_thread()
+        window.new_conversation(
+            "all" if use_all_data else "selected",
+            auto_start=True,
+            question=question,
         )
 
     def export_current_csv(self) -> None:
@@ -1831,14 +1856,15 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.warning(
             self,
             _("Delete local data"),
-            _("The local database and access token will be deleted. Data in your Google "
-              "Health account will not be changed. Continue?"),
+            _("The local database, AI conversations, and access token will be deleted. "
+              "Data in your Google Health account will not be changed. Continue?"),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
         if answer != QMessageBox.Yes:
             return
         self.store.clear()
+        self.conversation_store.clear()
         self.credential_store.clear_credentials()
         self.credentials = None
         self.current_records = []
@@ -1848,6 +1874,11 @@ class MainWindow(QMainWindow):
         self.details.clear()
         self.refresh_tree()
         self.refresh_overview()
+        self.refresh_ai_recent_threads()
+        if self.ai_chat_window is not None:
+            self.ai_chat_window.current_thread_id = None
+            self.ai_chat_window.refresh_threads()
+            self.ai_chat_window._load_current_thread()
         self._update_connection_status()
 
     def _reload_current_type(self) -> None:
