@@ -69,5 +69,8 @@ jobs:
           python scripts/generate_screenshots.py --output "${{ runner.temp }}/screenshots"
           test -s "${{ runner.temp }}/screenshots/overview.png"
           test -s "${{ runner.temp }}/screenshots/data-explorer.png"
+          test -s "${{ runner.temp }}/screenshots/ai-control-center.png"
+          test -s "${{ runner.temp }}/screenshots/ai-deterministic-metrics.png"
           test -s "${{ runner.temp }}/screenshots/local-ai.png"
           test -s "${{ runner.temp }}/screenshots/ai-settings.png"
+          test -s "${{ runner.temp }}/screenshots/ai-prompt.png"

@@ -2,6 +2,19 @@
 
 All notable changes to VitalChronicle are documented here.
 
+## 1.1.0 — 2026-08-31
+
+- reorganized local AI into one coherent workspace with dedicated **Analysis and chat**,
+  **Deterministic metrics**, **Model and tokens**, and **Prompt and instructions** sections;
+- added a transparent deterministic-metrics inspector for baselines, matched changes,
+  trends, anomalies, cross-metric associations, ranked evidence, and their raw local JSON;
+- added requested-versus-observed interval coverage, per-metric completeness, and a
+  mandatory AI limitation notice when the selected period is only partly represented;
+- exposed the permanent system prompt in the AI workspace and the exact latest Ollama
+  messages—including evidence JSON, conversation context, and the question—inside chat;
+- improved AI-page spacing, coverage warnings, prompt inspection, English/Italian text,
+  screenshots, tests, and user documentation.
+
 ## 1.0.10 — 2026-08-31
 
 - automated maintenance release with validated application and packaging updates.

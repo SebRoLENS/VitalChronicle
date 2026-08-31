@@ -256,13 +256,19 @@ def main() -> int:
         capture(window, args.output / "data-explorer.png")
 
         window.tabs.setCurrentIndex(2)
-        window.ai_status_label.setText("● Ollama online · qwen3.5:9b disponibile")
+        window.ai_sections.setCurrentIndex(0)
+        window.ai_status_label.setText("● Ollama online · qwen3.5:9b available")
         window.ai_status_label.setStyleSheet("font-weight: 700; color: #188038")
         capture(window, args.output / "ai-control-center.png")
 
         snapshot, period = window._build_ai_snapshot_for_chat(
             "selected", window._current_ai_period()
         )
+        window._deterministic_snapshot = snapshot
+        window._populate_deterministic_snapshot(snapshot, period)
+        window.ai_sections.setCurrentIndex(1)
+        capture(window, args.output / "ai-deterministic-metrics.png")
+
         thread = window.conversation_store.create_thread(
             title="Sleep, activity and cardiac trends",
             model="qwen3.5:9b",
@@ -291,14 +297,17 @@ def main() -> int:
         capture(chat, args.output / "local-ai.png")
         chat.hide()
 
-        window.tabs.setCurrentIndex(3)
+        window.ai_sections.setCurrentIndex(2)
         window.ai_ram_edit.setText("16")
         window.ai_token_edit.setText("8192")
         window.ai_token_recommendation.setText(
-            "Consiglio dimostrativo: 8.192 token · modello 6,6 GB · "
-            "limite fisico dichiarato dal modello 32.768 token."
+            "Demonstration recommendation: 8,192 tokens · 6.6 GB model · "
+            "32,768-token physical model limit."
         )
         capture(window, args.output / "ai-settings.png")
+
+        window.ai_sections.setCurrentIndex(3)
+        capture(window, args.output / "ai-prompt.png")
         window.close()
 
     app.quit()

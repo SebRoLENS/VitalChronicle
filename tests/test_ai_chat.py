@@ -23,6 +23,10 @@ def _window(tmp_path: Path):
     conversations = ConversationStore(tmp_path / "chats.json")
     snapshot = {
         "observation_context": {"observed_at": "2026-08-31T10:00:00+00:00"},
+        "requested_interval_coverage": {
+            "scope_is_partially_observed": True,
+            "coverage_notice": "Only seven of the requested thirty-one days are observed.",
+        },
         "metrics": [{"data_type": "steps"}],
         "candidate_insights": [
             {
@@ -61,6 +65,8 @@ def test_chat_window_lists_threads_evidence_and_new_data_badge(tmp_path: Path):
     assert window.thread_list.count() == 1
     assert window.period_badge.text() == "Last month"
     assert window.evidence_tree.topLevelItemCount() == 1
+    assert window.coverage_label.isVisible()
+    assert "seven" in window.coverage_label.text()
     assert not window.refresh_data_button.isVisible()
 
     revision["value"] = "2026-08-31T12:00:00+00:00"
@@ -85,4 +91,17 @@ def test_thinking_and_answer_use_the_same_live_assistant_area(tmp_path: Path):
     rendered = window.transcript.toPlainText()
     assert "Checking longitudinal evidence" not in rendered
     assert "Final synthesis" in rendered
+    window.close()
+
+
+def test_exact_prompt_can_be_opened_in_the_chat_window(tmp_path: Path):
+    window, thread, _revision = _window(tmp_path)
+    window.open_thread(thread["id"])
+
+    window._prompt_ready("# Final synthesis request\n\n## 1. SYSTEM\n\nVisible instructions")
+    assert window.prompt_button.isEnabled()
+
+    window.prompt_button.setChecked(True)
+    assert window.prompt_view.isVisible()
+    assert "Visible instructions" in window.prompt_view.toPlainText()
     window.close()

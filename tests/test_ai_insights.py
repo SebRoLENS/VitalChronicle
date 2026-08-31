@@ -44,7 +44,36 @@ def test_ai_preprocessing_builds_matched_baselines_and_ranked_evidence():
     assert evidence["matched_recent_comparison"]["previous_mean"] == 5000.0
     assert evidence["matched_recent_comparison"]["percent_change"] == 60.0
     assert any(item["evidence_id"] == "change:steps" for item in snapshot["candidate_insights"])
-    assert snapshot["preprocessing"]["version"] == "health-evidence-v2"
+    assert snapshot["preprocessing"]["version"] == "health-evidence-v3"
+
+
+def test_requested_month_reports_when_only_one_week_is_observed():
+    start = datetime(2026, 8, 25, 12, tzinfo=timezone.utc)
+    records = [
+        _daily_record(start + timedelta(days=index), "steps", 6000 + index * 100)
+        for index in range(7)
+    ]
+
+    class FakeStore:
+        def list_records(self, data_type, *_args, **_kwargs):
+            return records if data_type == "steps" else []
+
+    snapshot = build_ai_ready_snapshot(
+        FakeStore(),
+        "2026-08-01",
+        "2026-09-01",
+        now=datetime(2026, 9, 1, 8, tzinfo=timezone.utc),
+    )
+    coverage = snapshot["requested_interval_coverage"]
+
+    assert coverage["requested_calendar_days"] == 31
+    assert coverage["calendar_days_with_any_data"] == 7
+    assert coverage["first_observed_date"] == "2026-08-25"
+    assert coverage["last_observed_date"] == "2026-08-31"
+    assert coverage["scope_is_partially_observed"]
+    assert "do not imply complete coverage" in coverage["coverage_notice"].lower()
+    assert snapshot["candidate_insights"][0]["evidence_id"] == "quality:requested-interval"
+    assert snapshot["analysis_brief"]["must_state_data_limitations_first"]
 
 
 def test_ai_preprocessing_finds_repeated_cross_metric_associations():

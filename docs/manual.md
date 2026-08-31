@@ -1,7 +1,7 @@
 ---
 title: "VitalChronicle User Manual"
 author: "Sebastiano Romi"
-date: "Updated for VitalChronicle 1.0.10"
+date: "Updated for VitalChronicle 1.1.0"
 lang: en-US
 geometry: margin=2.2cm
 colorlinks: true
@@ -13,7 +13,7 @@ toc-depth: 3
 
 # About this manual
 
-This is the authoritative user manual for **VitalChronicle 1.0.10**. VitalChronicle is a
+This is the authoritative user manual for **VitalChronicle 1.1.0**. VitalChronicle is a
 local-first desktop dashboard for personal Google Health data and optional local AI
 analysis through Ollama.
 
@@ -112,26 +112,26 @@ slow or may require more memory than the computer can provide.
 2. Make it executable:
 
    ```bash
-   chmod +x VitalChronicle-1.0.10-linux-x86_64.AppImage
+   chmod +x VitalChronicle-1.1.0-linux-x86_64.AppImage
    ```
 
 3. Start it:
 
    ```bash
-   ./VitalChronicle-1.0.10-linux-x86_64.AppImage
+   ./VitalChronicle-1.1.0-linux-x86_64.AppImage
    ```
 
 If FUSE is unavailable, run it with:
 
 ```bash
-APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.0.10-linux-x86_64.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.1.0-linux-x86_64.AppImage
 ```
 
 The AppImage is accompanied by a Sigstore bundle and release checksums.
 
 ## 3.2 Windows
 
-1. Download `VitalChronicle-1.0.10-windows-x86_64.exe`.
+1. Download `VitalChronicle-1.1.0-windows-x86_64.exe`.
 2. Verify its SHA-256 checksum against `SHA256SUMS.txt`.
 3. Start the executable.
 
@@ -360,7 +360,7 @@ from blocking health-data updates.
 ## 5.4 Storage locations
 
 VitalChronicle keeps the historical internal `GoogleHealthViewer` directory identifier so
-existing 0.2.12 archives survive the 1.0.10 rebrand. Typical locations are:
+existing 0.2.12 archives survive the 1.1.0 upgrade. Typical locations are:
 
 - Linux data: `~/.local/share/GoogleHealthViewer/`;
 - Linux configuration: `~/.config/GoogleHealthViewer/`;
@@ -460,17 +460,26 @@ registry. Only model metadata are used for that update check; health data are no
 
 ## 9.3 RAM and token recommendation
 
-Open **AI settings**, enter installed RAM in GB, and request a recommendation. The
-estimate considers model size, CPU/GPU profile, and the context length reported by
-Ollama. The token value remains manually editable and is capped only when the model
-declares a physical context limit.
+Open **Local AI analysis → Model and tokens**, enter installed RAM in GB, and request a
+recommendation. The estimate considers model size, CPU/GPU profile, and the context length
+reported by Ollama. The token value remains manually editable and is capped only when the
+model declares a physical context limit. AI settings are intentionally part of the AI
+workspace rather than a separate application tab.
 
 ## 9.4 AI control centre and conversation window
 
 ![VitalChronicle AI control centre](screenshots/ai-control-center.png)
 
-The **Local AI analysis** tab is a control centre for Ollama status, hardware/model
-selection, the question-period selector, recent conversations, and two main actions:
+The **Local AI analysis** tab is one coherent workspace with four internal sections:
+
+| Section | Purpose |
+|---|---|
+| **Analysis and chat** | Ollama status, hardware/model choice, question period, recent conversations, and analysis actions |
+| **Deterministic metrics** | Requested-versus-observed coverage and every statistic prepared before the model is called |
+| **Model and tokens** | RAM-aware output-token recommendation and editable local model settings |
+| **Prompt and instructions** | The read-only system prompt included with every local-model request |
+
+The **Analysis and chat** section provides two main actions:
 
 - **Open AI chat** continues the most recent thread or creates one for the selected period;
 - **Deep analysis of complete history** creates a new thread using every locally available
@@ -480,13 +489,14 @@ For a first analysis:
 
 1. confirm that the status indicator reports Ollama as available;
 2. choose the hardware profile and an installed model;
-3. open **AI settings** if the output-token recommendation needs to be recalculated;
+3. open **Model and tokens** if the output-token recommendation needs to be recalculated;
 4. choose the period immediately above the question actions when asking a focused question;
 5. select **Open AI chat** for that period, or **Deep analysis of complete history** to
    inspect every locally stored category;
 6. enter a question and select **Send**;
 7. continue with follow-up questions in the same thread so recent dialogue is retained;
-8. inspect **Evidence** when an answer needs to be checked against the prepared statistics.
+8. inspect **Evidence** when an answer needs to be checked against the prepared statistics;
+9. select **Show prompt** in chat when the exact messages sent to Ollama need to be audited.
 
 The period selector applies to a new selected-period chat. It does not limit **Deep analysis
 of complete history**. The latter includes secondary numeric fields, sleep stages, workout
@@ -510,6 +520,7 @@ area contains the complete dialogue and one composer for continuing the conversa
 | **Copy answer** | Copies the latest completed answer |
 | **Export Markdown** | Saves a readable local copy of the dialogue |
 | **Evidence** | Shows the ranked deterministic evidence available to the model |
+| **Show prompt** | Reveals the exact latest system/user messages, processed JSON, conversation context, and question sent to Ollama |
 | **Rename / Delete** | Manages only the selected local thread |
 
 Each conversation pins a compact processed snapshot, its selected period, model, and data
@@ -521,6 +532,14 @@ snapshot and records the event in the dialogue.
 Recent user and assistant messages are supplied to the model for follow-up continuity.
 Older turns are compacted into short excerpts so they do not consume the entire model
 context. Thinking text is transient and is not stored as a second answer.
+
+Above the conversation, a coverage notice distinguishes the requested date interval from
+the portion actually represented by local records. If the requested month contains only
+one observed week, the model is required to state that it is analysing that week rather
+than claiming to analyse a complete month.
+
+The exact-prompt view is read-only and stays on the computer. Because it contains processed
+health evidence and conversation text, inspect it before copying or sharing it.
 
 Threads and their snapshots are stored locally in `ai_conversations.json`, next to the
 historical VitalChronicle data archive, with restrictive file permissions where supported.
@@ -586,7 +605,29 @@ This preparation is descriptive, not diagnostic. A higher or lower value is not 
 as better or worse, associations never imply causality, and missing measurements are never
 converted to zero.
 
-## 9.8 Ranked evidence and deep synthesis
+## 9.8 Deterministic metrics inspector and interval completeness
+
+![VitalChronicle deterministic metrics inspector](screenshots/ai-deterministic-metrics.png)
+
+Open **Local AI analysis → Deterministic metrics** to calculate and inspect the same
+snapshot supplied to the local model. Choose either the currently selected question period
+or the complete local history, then select **Calculate / refresh**. The upper notice reports:
+
+- the requested start, end, and number of calendar days;
+- the first and last dates that actually contain any local record;
+- the number and percentage of requested days represented by at least one measurement;
+- late starts, early endings, gaps, and per-metric expected-versus-observed coverage.
+
+The tree then exposes 7-day baselines, comparable recent/previous changes, trend direction,
+robust anomaly scores, cross-metric associations, and ranked evidence. Select any row to see
+its complete JSON, including sample counts and interpretation caveats. A warning about a
+partly observed interval is itself ranked evidence and is mandatory context for the answer.
+
+This distinction is metric-specific: an irregular body-weight record is not expected every
+day, while daily totals such as steps can reveal missing calendar coverage. An interval is
+never considered complete merely because its requested dates span a month or year.
+
+## 9.9 Ranked evidence and deep synthesis
 
 Potential observations are scored by magnitude, repeated support, coverage, and statistical
 reliability. At most 20 candidate insights are included, with the strongest evidence IDs
@@ -602,7 +643,7 @@ for this process. It is a verification aid: confidence describes support in the 
 personal history, not medical certainty. Increasing the output-token setting can allow a
 longer explanation, but it cannot create evidence that is absent from the archive.
 
-## 9.9 Thinking, stopping, and regeneration
+## 9.10 Thinking, prompt inspection, stopping, and regeneration
 
 During a request, the current assistant area streams the model's thinking. When final
 answer text begins, that same area changes to the answer; no second thinking panel is
@@ -611,7 +652,15 @@ created. **Stop** requests cancellation; already completed messages remain avail
 the same pinned snapshot. If a thinking-capable model ends without a final answer,
 VitalChronicle automatically retries with thinking disabled.
 
-## 9.10 Interpretation limits
+The permanent model instructions are visible under **Prompt and instructions**:
+
+![VitalChronicle active system prompt](screenshots/ai-prompt.png)
+
+This page shows the stable safety, temporal-context, coverage, and synthesis rules. The
+chat's **Show prompt** control is more specific: it displays the exact payload assembled for
+the latest evidence-selection, synthesis, or retry pass.
+
+## 9.11 Interpretation limits
 
 Local language models can misunderstand data, omit important context, or produce
 incorrect statements. Wearable measurements also contain artefacts. Review the underlying
@@ -711,7 +760,7 @@ public issue containing credentials or health data.
 
 # 13. Android status
 
-VitalChronicle 1.0.10 does not ship an APK. The current application uses desktop Qt widgets,
+VitalChronicle 1.1.0 does not ship an APK. The current application uses desktop Qt widgets,
 a loopback-browser OAuth callback, desktop keyrings, and desktop chart interactions. A safe
 Android edition requires a dedicated mobile interface, Android OAuth credentials bound to
 a package name and signing certificate, mobile secure storage, lifecycle handling, and a
