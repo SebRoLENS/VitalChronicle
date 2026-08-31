@@ -2,6 +2,10 @@
 
 All notable changes to VitalChronicle are documented here.
 
+## 1.1.5 — 2026-08-31
+
+- automated maintenance release with validated application and packaging updates.
+
 ## 1.1.4 — 2026-08-31
 
 - kept the local-AI system prompt invariantly in English in every interface language;

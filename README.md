@@ -36,7 +36,7 @@ not a replacement for professional medical advice.
 
 ## Download
 
-**Current release: [VitalChronicle v1.1.4](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.4)**
+**Current release: [VitalChronicle v1.1.5](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/tag/v1.1.5)**
 
 **[Download the latest VitalChronicle release for Linux, Windows, or macOS](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest)**
 
