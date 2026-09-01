@@ -39,7 +39,7 @@ def _integer(value: Any) -> int:
 
 
 def _domain_text(packet: dict[str, Any]) -> str:
-    domains = [str(value) for value in (packet.get("domains") or {}).keys()]
+    domains = [str(value) for value in (packet.get("domains") or {})]
     labels = [
         _(_DOMAIN_LABELS.get(domain, domain.replace("_", " ").title()))
         for domain in domains
