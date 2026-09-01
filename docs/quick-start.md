@@ -1,6 +1,6 @@
 # VitalChronicle Quick Start
 
-Updated for VitalChronicle **1.1.15**.
+Updated for VitalChronicle **1.1.16**.
 
 1. Download the package for your operating system from the
    [latest GitHub release](https://github.com/SebRoLENS/google-health-dashboard-ai/releases/latest).
