@@ -40,12 +40,21 @@ def _initialize_hardware_aware_ai(settings) -> None:
         return
 
 
-def _should_show_hardware_ai_intro(settings, *, smoke_test: bool) -> bool:
+def _should_show_hardware_ai_intro(
+    settings,
+    *,
+    smoke_test: bool,
+    had_ai_configuration: bool,
+) -> bool:
     """Show the redesigned local-AI controls once to existing AI users."""
 
-    if smoke_test or settings.value(HARDWARE_AI_INTRO_KEY, False, type=bool):
+    if (
+        smoke_test
+        or not had_ai_configuration
+        or settings.value(HARDWARE_AI_INTRO_KEY, False, type=bool)
+    ):
         return False
-    return settings.contains("ai/model") or settings.contains("ai/hardware_profile")
+    return True
 
 
 def _show_hardware_ai_intro(window, settings) -> None:
@@ -72,6 +81,9 @@ def main() -> int:
     set_language(startup_language(preference))
 
     smoke_test = os.environ.get("VITALCHRONICLE_SMOKE_TEST") == "1"
+    had_ai_configuration = settings.contains("ai/model") or settings.contains(
+        "ai/hardware_profile"
+    )
     if not smoke_test:
         _initialize_hardware_aware_ai(settings)
 
@@ -86,7 +98,11 @@ def main() -> int:
         return 78
     window = MainWindow(screenshot_mode=smoke_test)
     window.show()
-    if _should_show_hardware_ai_intro(settings, smoke_test=smoke_test):
+    if _should_show_hardware_ai_intro(
+        settings,
+        smoke_test=smoke_test,
+        had_ai_configuration=had_ai_configuration,
+    ):
         QTimer.singleShot(900, lambda: _show_hardware_ai_intro(window, settings))
     if smoke_test:
         QTimer.singleShot(1200, app.quit)
