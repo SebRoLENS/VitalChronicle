@@ -91,6 +91,14 @@ def _install_health_benchmark() -> None:
     ai_hardware.benchmark_model = benchmark_model
 
 
+def _install_ai_response_hygiene() -> None:
+    """Keep AI diagnostics precise while the visible answer stays human-readable."""
+
+    from .ai_response_hygiene import install_ai_response_hygiene
+
+    install_ai_response_hygiene()
+
+
 def main() -> int:
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
     QCoreApplication.setOrganizationName("SebastianoRomi")
@@ -114,6 +122,8 @@ def main() -> int:
     if not smoke_test:
         _initialize_hardware_aware_ai(settings)
 
+    # Install AI hooks before MainWindow imports workers and snapshot builders.
+    _install_ai_response_hygiene()
     _install_health_benchmark()
     from .main_window import MainWindow
 
