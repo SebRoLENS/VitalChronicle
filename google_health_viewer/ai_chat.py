@@ -613,7 +613,7 @@ class AIChatWindow(QMainWindow):
             f"{speed_text} | {status}"
         )
         self.activity_progress.setRange(0, 1000)
-        self.activity_progress.setValue(int(round(usage_percent * 10)))
+        self.activity_progress.setValue(round(usage_percent * 10))
         self.activity_progress.setTextVisible(False)
         self._render_activity_log()
 
