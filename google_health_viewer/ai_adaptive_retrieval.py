@@ -1,14 +1,14 @@
 """Question-aware deterministic evidence retrieval for local AI models.
 
 VitalChronicle keeps the rich deterministic snapshot intact, but a local language
-model rarely needs every metric for every question.  This module selects the most
-relevant part of the already compact evidence packet before inference.  It never
-re-reads health records or recalculates statistics.
+model rarely needs every metric for every question. This module selects the most
+relevant part of the already compact evidence packet immediately before inference.
+It never re-reads health records or recalculates statistics.
 
-Desktop profiles deliberately use different evidence budgets:
-- Fast: up to about 1,200 JSON tokens
-- Standard: up to about 2,500 JSON tokens
-- Maximum: up to the existing 4,000-token compact packet
+Desktop evidence targets are intentionally profile-dependent:
+- Fast: about 1,200 compact JSON tokens.
+- Standard: about 2,500 compact JSON tokens.
+- Maximum: up to the existing approximately 4,000-token compact packet.
 
 Maximum deep analysis preserves the complete compact packet, so the adaptive layer
 cannot make the most capable desktop mode less informative than before.
@@ -31,8 +31,8 @@ PROFILE_EVIDENCE_TARGETS = {
     "max": 4000,
 }
 
-_PROFILE_EVIDENCE_LIMITS = {
-    "fast": (5, 2, 2),
+_PROFILE_LIST_LIMITS = {
+    "fast": (4, 2, 2),
     "standard": (10, 4, 4),
     "max": (14, 6, 6),
 }
@@ -51,32 +51,32 @@ _ORIGINAL_ENSURE: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 _ORIGINAL_ANALYZE: Callable[..., str] | None = None
 _INSTALLED = False
 
-_GENERAL_HINTS = (
+# These phrases imply a truly broad request only after explicit metric/domain
+# mentions have been considered. This prevents e.g. "analisi generale della mia
+# attività fisica" from being mistaken for a request about every health domain.
+_GLOBAL_HINTS = (
     "all data",
+    "all my data",
     "all history",
     "complete history",
     "entire history",
-    "overall",
-    "general analysis",
-    "deep analysis",
     "analyse everything",
     "analyze everything",
     "anything interesting",
     "interesting patterns",
     "tutti i dati",
+    "tutti i miei dati",
     "tutta la storia",
     "intera storia",
-    "analisi generale",
     "analizza tutto",
     "analizzare tutto",
     "pattern interessanti",
-    "panoramica generale",
     "toutes les donnees",
-    "analyse generale",
+    "tous mes donnees",
     "todos los datos",
-    "analisis general",
+    "todos mis datos",
     "alle daten",
-    "gesamtanalyse",
+    "alle meine daten",
 )
 
 _ASSOCIATION_HINTS = (
@@ -92,7 +92,9 @@ _ASSOCIATION_HINTS = (
 _DOMAIN_ALIASES: dict[str, tuple[str, ...]] = {
     "activity": (
         "activity",
+        "physical activity",
         "attivita",
+        "attivita fisica",
         "active minutes",
         "minuti attivi",
         "steps",
@@ -199,11 +201,7 @@ _METRIC_ALIASES: dict[str, tuple[str, ...]] = {
         "saturazione ossigeno",
         "saturazione di ossigeno",
     ),
-    "oxygen-saturation": (
-        "spo2",
-        "oxygen saturation",
-        "saturazione ossigeno",
-    ),
+    "oxygen-saturation": ("spo2", "oxygen saturation", "saturazione ossigeno"),
     "daily-respiratory-rate": (
         "respiratory rate",
         "breathing rate",
@@ -267,18 +265,17 @@ def _packet_metric_index(packet: dict[str, Any]) -> dict[str, dict[str, str]]:
             if not isinstance(metric, dict):
                 continue
             data_type = str(metric.get("data_type") or "")
-            if not data_type:
-                continue
-            result[data_type] = {
-                "label": str(metric.get("label") or data_type),
-                "domain": str(domain),
-            }
+            if data_type:
+                result[data_type] = {
+                    "label": str(metric.get("label") or data_type),
+                    "domain": str(domain),
+                }
     return result
 
 
 def _matched_data_types(packet: dict[str, Any], question: str) -> list[str]:
     query = _normalize(question)
-    scored = []
+    scored: list[tuple[int, str]] = []
     for data_type, info in _packet_metric_index(packet).items():
         score = _metric_score(query, data_type, info["label"])
         if score:
@@ -287,44 +284,44 @@ def _matched_data_types(packet: dict[str, Any], question: str) -> list[str]:
         return []
     scored.sort(key=lambda row: (-row[0], row[1]))
     best = scored[0][0]
-    # Strong explicit matches can coexist (e.g. HRV + active calories).  Weak
-    # word-overlap matches are retained only when they are close to the best hit.
     return [data_type for score, data_type in scored if score >= 6 or score >= best - 1]
 
 
 def _matched_domains(question: str) -> list[str]:
     query = _normalize(question)
-    result = []
-    for domain, aliases in _DOMAIN_ALIASES.items():
-        if any(_contains_phrase(query, alias) for alias in aliases):
-            result.append(domain)
-    return result
+    return [
+        domain
+        for domain, aliases in _DOMAIN_ALIASES.items()
+        if any(_contains_phrase(query, alias) for alias in aliases)
+    ]
 
 
-def _is_global_request(question: str, analysis_mode: str) -> bool:
-    if analysis_mode == "deep" or not question.strip():
-        return True
+def _has_global_hint(question: str) -> bool:
     query = _normalize(question)
-    return any(_contains_phrase(query, hint) for hint in _GENERAL_HINTS)
+    return any(_contains_phrase(query, hint) for hint in _GLOBAL_HINTS)
 
 
 def classify_retrieval_request(
     packet: dict[str, Any], question: str, analysis_mode: str = "question"
 ) -> dict[str, Any]:
-    """Classify a request without using an LLM or reading health records."""
+    """Classify the request deterministically without another model call."""
 
-    if _is_global_request(question, analysis_mode):
+    if analysis_mode == "deep" or not question.strip():
         return {"mode": "global", "data_types": [], "domains": []}
+
+    # Explicit metrics and domains take priority over generic wording such as
+    # "general analysis". This makes "general analysis of my activity" a domain query.
     data_types = _matched_data_types(packet, question)
     if data_types:
-        return {
-            "mode": "specific_metrics",
-            "data_types": data_types,
-            "domains": [],
-        }
+        return {"mode": "specific_metrics", "data_types": data_types, "domains": []}
+
     domains = _matched_domains(question)
     if domains:
         return {"mode": "domain", "data_types": [], "domains": domains}
+
+    if _has_global_hint(question):
+        return {"mode": "global", "data_types": [], "domains": []}
+
     return {"mode": "general_question", "data_types": [], "domains": []}
 
 
@@ -332,10 +329,9 @@ def _selected_type_set(
     packet: dict[str, Any], data_types: list[str], domains: list[str]
 ) -> set[str]:
     selected = set(data_types)
-    if domains:
-        for data_type, info in _packet_metric_index(packet).items():
-            if info["domain"] in domains:
-                selected.add(data_type)
+    for data_type, info in _packet_metric_index(packet).items():
+        if info["domain"] in domains:
+            selected.add(data_type)
     return selected
 
 
@@ -360,6 +356,18 @@ def _filter_domains(
     return result
 
 
+def _compact_coverage_row(item: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "data_type",
+        "label",
+        "observed_calendar_days",
+        "coverage_percent",
+        "missing_calendar_days",
+        "longest_missing_run_days",
+    )
+    return {key: item[key] for key in keys if key in item and item[key] is not None}
+
+
 def _filter_coverage(coverage: Any, selected_types: set[str]) -> Any:
     if not isinstance(coverage, dict):
         return copy.deepcopy(coverage)
@@ -367,7 +375,7 @@ def _filter_coverage(coverage: Any, selected_types: set[str]) -> Any:
     limited = result.get("limited_daily_metrics")
     if isinstance(limited, list) and selected_types:
         result["limited_daily_metrics"] = [
-            item
+            copy.deepcopy(item)
             for item in limited
             if isinstance(item, dict)
             and str(item.get("data_type") or "") in selected_types
@@ -402,9 +410,10 @@ def _filter_associations(
     for item in associations:
         if not isinstance(item, dict):
             continue
-        left = str(item.get("left_data_type") or "")
-        right = str(item.get("right_data_type") or "")
-        endpoints = {left, right}
+        endpoints = {
+            str(item.get("left_data_type") or ""),
+            str(item.get("right_data_type") or ""),
+        }
         if len(selected_types) >= 2 and association_question:
             keep = endpoints <= selected_types
         else:
@@ -437,13 +446,13 @@ def _filter_for_scope(
         truncated = archive.get("truncated_data_types")
         if isinstance(truncated, list):
             archive["truncated_data_types"] = [
-                data_type for data_type in truncated if str(data_type) in selected_types
+                value for value in truncated if str(value) in selected_types
             ]
     return result
 
 
 def _cap_lists(packet: dict[str, Any], profile: str) -> None:
-    evidence_limit, association_limit, diagnostic_limit = _PROFILE_EVIDENCE_LIMITS[profile]
+    evidence_limit, association_limit, diagnostic_limit = _PROFILE_LIST_LIMITS[profile]
     evidence = packet.get("strongest_evidence")
     if isinstance(evidence, list):
         packet["strongest_evidence"] = evidence[:evidence_limit]
@@ -453,17 +462,6 @@ def _cap_lists(packet: dict[str, Any], profile: str) -> None:
     diagnostics = packet.get("association_diagnostics_for_request")
     if isinstance(diagnostics, list):
         packet["association_diagnostics_for_request"] = diagnostics[:diagnostic_limit]
-
-    if profile == "fast":
-        domain_limit = 3
-    elif profile == "standard":
-        domain_limit = 5
-    else:
-        domain_limit = None
-    if domain_limit is not None:
-        for domain, metrics in list((packet.get("domains") or {}).items()):
-            if isinstance(metrics, list):
-                packet["domains"][domain] = metrics[:domain_limit]
 
 
 def _drop_optional_metric_details(packet: dict[str, Any]) -> None:
@@ -478,53 +476,158 @@ def _drop_optional_metric_details(packet: dict[str, Any]) -> None:
             metric.pop("period_comparison", None)
 
 
+def _lean_metric(metric: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        key: copy.deepcopy(metric[key])
+        for key in ("data_type", "label", "metric", "unit", "summary_scope", "data_role")
+        if key in metric and metric[key] is not None
+    }
+    summary = metric.get("summary")
+    if isinstance(summary, dict):
+        result["summary"] = {
+            key: copy.deepcopy(summary[key])
+            for key in ("count", "latest", "mean", "median", "trend_percent", "anomaly_count")
+            if key in summary and summary[key] is not None
+        }
+    coverage = metric.get("coverage")
+    if isinstance(coverage, dict):
+        result["coverage"] = {
+            key: copy.deepcopy(coverage[key])
+            for key in ("observed_calendar_days", "coverage_percent", "longest_missing_run_days")
+            if key in coverage and coverage[key] is not None
+        }
+    evidence = metric.get("evidence")
+    if isinstance(evidence, dict):
+        lean_evidence: dict[str, Any] = {}
+        matched = evidence.get("matched_change")
+        if isinstance(matched, dict):
+            lean_evidence["matched_change"] = {
+                key: copy.deepcopy(matched[key])
+                for key in ("window_days", "recent_days", "recent_mean", "previous_days", "previous_mean", "percent_change")
+                if key in matched and matched[key] is not None
+            }
+        trend = evidence.get("trend")
+        if isinstance(trend, dict):
+            lean_evidence["trend"] = {
+                key: copy.deepcopy(trend[key])
+                for key in ("window_days", "observed_days", "direction", "percent_per_week", "r_squared")
+                if key in trend and trend[key] is not None
+            }
+        anomaly = evidence.get("anomaly")
+        if isinstance(anomaly, dict) and anomaly.get("latest_robust_z") is not None:
+            lean_evidence["anomaly"] = {
+                key: copy.deepcopy(anomaly[key])
+                for key in ("baseline_samples", "baseline_median", "latest_date", "latest_robust_z")
+                if key in anomaly and anomaly[key] is not None
+            }
+        if lean_evidence:
+            result["evidence"] = lean_evidence
+    today = metric.get("today")
+    if isinstance(today, dict):
+        result["today"] = {
+            key: copy.deepcopy(today[key])
+            for key in ("status", "today_so_far", "same_time_mean", "same_time_days", "same_time_percent")
+            if key in today and today[key] is not None
+        }
+    if "domain" in metric:
+        result["domain"] = metric["domain"]
+    return result
+
+
+def _make_metrics_lean(packet: dict[str, Any]) -> None:
+    for domain, metrics in list((packet.get("domains") or {}).items()):
+        if isinstance(metrics, list):
+            packet["domains"][domain] = [
+                _lean_metric(metric) for metric in metrics if isinstance(metric, dict)
+            ]
+
+
+def _lean_global_coverage(packet: dict[str, Any]) -> None:
+    coverage = packet.get("coverage")
+    if not isinstance(coverage, dict):
+        return
+    limited = coverage.get("limited_daily_metrics")
+    if isinstance(limited, list):
+        retained_types = {
+            str(metric.get("data_type") or "")
+            for metrics in (packet.get("domains") or {}).values()
+            if isinstance(metrics, list)
+            for metric in metrics
+            if isinstance(metric, dict)
+        }
+        coverage["limited_daily_metrics"] = [
+            _compact_coverage_row(item)
+            for item in limited
+            if isinstance(item, dict)
+            and str(item.get("data_type") or "") in retained_types
+        ]
+
+
+def _compact_insight_for_budget(item: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        key: copy.deepcopy(item[key])
+        for key in ("kind", "data_types", "headline", "relevance_score", "confidence", "caveat")
+        if key in item and item[key] is not None
+    }
+    evidence = item.get("evidence")
+    if isinstance(evidence, dict):
+        useful_keys = (
+            "percent_change",
+            "standardized_change",
+            "observed_days",
+            "direction",
+            "percent_per_week",
+            "r_squared",
+            "latest_robust_z",
+            "coverage_percent",
+        )
+        compact = {
+            key: copy.deepcopy(evidence[key])
+            for key in useful_keys
+            if key in evidence and evidence[key] is not None
+        }
+        if compact:
+            result["evidence"] = compact
+    return result
+
+
+def _make_evidence_lean(packet: dict[str, Any]) -> None:
+    evidence = packet.get("strongest_evidence")
+    if isinstance(evidence, list):
+        packet["strongest_evidence"] = [
+            _compact_insight_for_budget(item)
+            for item in evidence
+            if isinstance(item, dict)
+        ]
+
+
 def _trim_to_target(packet: dict[str, Any], target: int) -> None:
     if estimate_json_tokens(packet) <= target:
         return
     _drop_optional_metric_details(packet)
 
-    # Remove lower-priority evidence before removing the metric summaries themselves.
     evidence = packet.get("strongest_evidence")
-    while isinstance(evidence, list) and len(evidence) > 2 and estimate_json_tokens(packet) > target:
+    while isinstance(evidence, list) and len(evidence) > 3 and estimate_json_tokens(packet) > target:
         evidence.pop()
 
     associations = packet.get("associations")
-    while (
-        isinstance(associations, list)
-        and len(associations) > 1
-        and estimate_json_tokens(packet) > target
-    ):
+    while isinstance(associations, list) and len(associations) > 1 and estimate_json_tokens(packet) > target:
         associations.pop()
 
     diagnostics = packet.get("association_diagnostics_for_request")
-    while (
-        isinstance(diagnostics, list)
-        and len(diagnostics) > 1
-        and estimate_json_tokens(packet) > target
-    ):
+    while isinstance(diagnostics, list) and len(diagnostics) > 1 and estimate_json_tokens(packet) > target:
         diagnostics.pop()
 
-    # Personal baselines are useful but repetitive when a request must fit a small model.
     if estimate_json_tokens(packet) > target:
-        for metrics in (packet.get("domains") or {}).values():
-            if not isinstance(metrics, list):
-                continue
-            for metric in metrics:
-                evidence_block = metric.get("evidence") if isinstance(metric, dict) else None
-                baselines = (
-                    evidence_block.get("personal_baselines")
-                    if isinstance(evidence_block, dict)
-                    else None
-                )
-                if isinstance(baselines, dict) and len(baselines) > 2:
-                    keep = {
-                        key: value
-                        for key, value in baselines.items()
-                        if key in {"7_days", "28_days"}
-                    }
-                    evidence_block["personal_baselines"] = keep
+        _make_metrics_lean(packet)
+        _make_evidence_lean(packet)
+        _lean_global_coverage(packet)
 
-    # Last resort for broad Fast/Standard requests: retain at least one metric per domain.
+    if estimate_json_tokens(packet) > target:
+        packet.pop("archive_quality", None)
+
+    # Preserve cross-domain breadth as long as possible. Only remove extra metrics
+    # from a domain; a broad Fast request keeps at least one metric per domain.
     while estimate_json_tokens(packet) > target:
         candidates = [
             (domain, metrics)
@@ -535,22 +638,30 @@ def _trim_to_target(packet: dict[str, Any], target: int) -> None:
             break
         domain, metrics = max(candidates, key=lambda item: len(item[1]))
         packet["domains"][domain] = metrics[:-1]
+        _lean_global_coverage(packet)
 
+    # Last non-destructive budget reduction: the global coverage scalars and each
+    # metric's own coverage already communicate data quality, so the repeated list
+    # can be dropped without losing which selected metrics are sparse.
     if estimate_json_tokens(packet) > target:
-        packet.pop("archive_quality", None)
+        coverage = packet.get("coverage")
+        if isinstance(coverage, dict):
+            coverage.pop("limited_daily_metrics", None)
 
 
 def _global_profile_packet(packet: dict[str, Any], profile: str) -> dict[str, Any]:
     result = copy.deepcopy(packet)
-    if profile == "fast":
+    domain_limit = 1 if profile == "fast" else 2 if profile == "standard" else None
+    if domain_limit is not None:
         for domain, metrics in list((result.get("domains") or {}).items()):
             if isinstance(metrics, list):
-                result["domains"][domain] = metrics[:1]
-    elif profile == "standard":
-        for domain, metrics in list((result.get("domains") or {}).items()):
-            if isinstance(metrics, list):
-                result["domains"][domain] = metrics[:2]
+                result["domains"][domain] = metrics[:domain_limit]
     _cap_lists(result, profile)
+    if profile == "fast":
+        _make_metrics_lean(result)
+        _make_evidence_lean(result)
+        _lean_global_coverage(result)
+        result.pop("archive_quality", None)
     return result
 
 
@@ -561,29 +672,28 @@ def select_evidence_for_request(
     performance_profile: str = "standard",
     analysis_mode: str = "question",
 ) -> dict[str, Any]:
-    """Return a question-relevant packet while preserving deterministic evidence.
+    """Return request-relevant deterministic evidence without mutating the input."""
 
-    The input packet is never mutated.  Maximum deep analysis intentionally keeps the
-    complete compact packet.  Unknown questions fall back to a broad profile-sized
-    summary instead of risking an over-aggressive relevance guess.
-    """
-
-    profile = performance_profile if performance_profile in PROFILE_EVIDENCE_TARGETS else "standard"
+    profile = (
+        performance_profile
+        if performance_profile in PROFILE_EVIDENCE_TARGETS
+        else "standard"
+    )
     target = PROFILE_EVIDENCE_TARGETS[profile]
     intent = classify_retrieval_request(packet, question, analysis_mode)
     query = _normalize(question)
     association_question = any(hint in query for hint in _ASSOCIATION_HINTS)
+    preserve_full = (
+        intent["mode"] == "global"
+        and profile == "max"
+        and analysis_mode == "deep"
+    )
 
     if intent["mode"] == "global":
-        if profile == "max":
-            result = copy.deepcopy(packet)
-        else:
-            result = _global_profile_packet(packet, profile)
+        result = copy.deepcopy(packet) if profile == "max" else _global_profile_packet(packet, profile)
     elif intent["mode"] in {"specific_metrics", "domain"}:
         selected_domains = set(intent["domains"])
-        selected_types = _selected_type_set(
-            packet, intent["data_types"], intent["domains"]
-        )
+        selected_types = _selected_type_set(packet, intent["data_types"], intent["domains"])
         result = _filter_for_scope(
             packet,
             selected_types=selected_types,
@@ -592,13 +702,12 @@ def select_evidence_for_request(
         )
         _cap_lists(result, profile)
     else:
-        # The request is not obviously tied to a known metric. Preserve broad context,
-        # but respect the selected performance profile's evidence budget.
         result = _global_profile_packet(packet, profile)
-        selected_types = set()
-        selected_domains = set()
 
-    _trim_to_target(result, target)
+    # This is the critical guarantee for desktop Maximum/deep: it gets exactly the
+    # complete compact evidence produced by the existing pipeline, not a trimmed variant.
+    if not preserve_full:
+        _trim_to_target(result, target)
 
     metadata = result.setdefault("packet", {})
     if not isinstance(metadata, dict):
@@ -613,6 +722,7 @@ def select_evidence_for_request(
     metadata["retrieval_profile"] = profile
     metadata["retrieval_target_tokens"] = target
     metadata["retrieval_metric_count"] = metric_count
+    metadata["retrieval_preserved_full_packet"] = preserve_full
     if intent["data_types"]:
         metadata["retrieval_selected_data_types"] = list(intent["data_types"])
     if intent["domains"]:
@@ -650,10 +760,9 @@ def _analyze_stream_adaptive(
     if _ORIGINAL_ANALYZE is None:
         raise RuntimeError("Adaptive AI retrieval was not initialized")
     question_token = _CURRENT_QUESTION.set(question)
+    profile = getattr(self, "performance_profile", "standard")
     profile_token = _CURRENT_PROFILE.set(
-        self.performance_profile
-        if getattr(self, "performance_profile", "standard") in PROFILE_EVIDENCE_TARGETS
-        else "standard"
+        profile if profile in PROFILE_EVIDENCE_TARGETS else "standard"
     )
     mode_token = _CURRENT_ANALYSIS_MODE.set(analysis_mode)
     try:
