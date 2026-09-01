@@ -48,13 +48,11 @@ def _should_show_hardware_ai_intro(
 ) -> bool:
     """Show the redesigned local-AI controls once to existing AI users."""
 
-    if (
+    return not (
         smoke_test
         or not had_ai_configuration
         or settings.value(HARDWARE_AI_INTRO_KEY, False, type=bool)
-    ):
-        return False
-    return True
+    )
 
 
 def _show_hardware_ai_intro(window, settings) -> None:
