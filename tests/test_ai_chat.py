@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from google_health_viewer.ai_chat import AIChatWindow
 from google_health_viewer.ai_conversations import ConversationStore
+from google_health_viewer.ai_engine import TOKEN_USAGE_PREFIX
 from google_health_viewer.i18n import set_language
 
 
@@ -110,6 +112,58 @@ def test_running_indicator_is_animated_and_reports_real_stages(tmp_path: Path):
     assert "Ollama is processing" in window.activity_log.text()
     window._finish_activity()
     assert not window.activity_panel.isVisible()
+    assert not window._activity_timer.isActive()
+    window.close()
+
+
+def test_live_token_meter_tracks_context_and_remains_after_completion(tmp_path: Path):
+    window, thread, _revision = _window(tmp_path)
+    window.open_thread(thread["id"])
+    window._begin_activity("Question received")
+
+    estimated = {
+        "phase": "final synthesis",
+        "exact": False,
+        "input_tokens": 1280,
+        "generated_tokens": 320,
+        "output_budget": 1600,
+        "output_remaining": 1280,
+        "context": 4096,
+        "context_used": 1600,
+        "context_remaining": 2496,
+        "usage_percent": 39.1,
+        "tokens_per_second": 18.4,
+    }
+    window._prompt_ready(TOKEN_USAGE_PREFIX + json.dumps(estimated))
+
+    assert window.activity_progress.maximum() == 1000
+    assert window.activity_progress.value() == 391
+    assert "Ctx ~1,600/4,096 (39%)" in window.activity_log.text()
+    assert "In ~1,280" in window.activity_log.text()
+    assert "Out ~320/1,600" in window.activity_log.text()
+    assert "~18.4 tok/s" in window.activity_log.text()
+    assert "OK" in window.activity_log.text()
+    assert not window.prompt_button.isEnabled()
+
+    exact = {
+        **estimated,
+        "exact": True,
+        "input_tokens": 1312,
+        "generated_tokens": 400,
+        "output_remaining": 1200,
+        "context_used": 1712,
+        "context_remaining": 2384,
+        "usage_percent": 41.8,
+        "tokens_per_second": 20.0,
+    }
+    window._prompt_ready(TOKEN_USAGE_PREFIX + json.dumps(exact))
+    assert "Ctx 1,712/4,096 (42%)" in window.activity_log.text()
+    assert "Out 400/1,600" in window.activity_log.text()
+    assert "20.0 tok/s" in window.activity_log.text()
+
+    window._finish_activity()
+    assert window.activity_panel.isVisible()
+    assert window.activity_title.text() == "AI · token usage"
     assert not window._activity_timer.isActive()
     window.close()
 
