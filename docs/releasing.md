@@ -1,6 +1,6 @@
 # VitalChronicle Release Guide
 
-Updated for VitalChronicle **1.1.9**.
+Updated for VitalChronicle **1.1.10**.
 
 ## Automated path
 
@@ -8,7 +8,7 @@ A non-bot push to `main` that changes application or packaging files starts
 `automatic-release.yml`.
 
 1. The release-preparation script keeps a manually advanced semantic version such as
-   `1.1.9`, or advances the patch version when the source still matches the latest tag.
+   `1.1.10`, or advances the patch version when the source still matches the latest tag.
 2. Lint, tests, compilation, metadata validation, screenshot generation, and the PDF
    manual build must succeed.
 3. Generated metadata and documentation are committed by `github-actions[bot]`.
@@ -23,7 +23,7 @@ The bot commit does not recursively start another release.
 ## Manual rebuild
 
 Use **Actions → Build desktop packages → Run workflow** and provide an existing tag such
-as `v1.1.9`. Existing release assets are replaced by filename.
+as `v1.1.10`. Existing release assets are replaced by filename.
 
 ## Version consistency
 
