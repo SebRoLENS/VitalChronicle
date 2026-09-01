@@ -505,19 +505,13 @@ class OptimizedOllamaClient(OllamaClient):
                 estimated_input,
             )
             answer_chunks: list[str] = []
-
-            def stream_answer(chunk: str) -> None:
-                answer_chunks.append(chunk)
-                if answer_callback:
-                    answer_callback(chunk)
-
             answer = self._chat_stream(
                 messages,
                 think=True,
                 num_predict=num_predict,
                 num_ctx=num_ctx,
                 thinking_callback=thinking_callback,
-                answer_callback=stream_answer,
+                answer_callback=answer_chunks.append,
                 cancel_callback=cancel_callback,
             )
 
@@ -545,19 +539,13 @@ class OptimizedOllamaClient(OllamaClient):
                     recovery_input,
                 )
                 answer_chunks = []
-
-                def stream_recovery_answer(chunk: str) -> None:
-                    answer_chunks.append(chunk)
-                    if answer_callback:
-                        answer_callback(chunk)
-
                 answer = self._chat_stream(
                     recovery_messages,
                     think=False,
                     num_predict=recovery_predict,
                     num_ctx=recovery_ctx,
                     thinking_callback=None,
-                    answer_callback=stream_recovery_answer,
+                    answer_callback=answer_chunks.append,
                     cancel_callback=cancel_callback,
                 )
 
@@ -565,8 +553,9 @@ class OptimizedOllamaClient(OllamaClient):
                 raise LocalAIError(
                     "Ollama did not produce an evidence-grounded final answer from the compact packet."
                 )
-            if answer_callback and not answer_chunks:
-                answer_callback(answer)
+            if answer_callback:
+                for chunk in answer_chunks or [answer]:
+                    answer_callback(chunk)
             if prompt_callback:
                 prompt_callback(
                     self._diagnostics_text(
