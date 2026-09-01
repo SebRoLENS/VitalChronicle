@@ -100,3 +100,41 @@ def test_hardware_intro_is_disabled_for_smoke_tests(tmp_path):
         )
         is False
     )
+
+
+def test_hardware_ai_button_is_renamed_in_italian(monkeypatch):
+    class Button:
+        def __init__(self):
+            self.label = "Guida installazione locale"
+            self.tooltip = ""
+
+        def text(self):
+            return self.label
+
+        def setText(self, value):
+            self.label = value
+
+        def setToolTip(self, value):
+            self.tooltip = value
+
+    class Window:
+        def __init__(self):
+            self.button = Button()
+
+        def findChildren(self, _widget_type):
+            return [self.button]
+
+    monkeypatch.setattr(app_module, "current_language", lambda: "it")
+    monkeypatch.setattr(
+        app_module,
+        "_",
+        lambda message: "Guida installazione locale"
+        if message == "Local installation guide"
+        else message,
+    )
+    window = Window()
+
+    app_module._expose_hardware_ai_entry(window)
+
+    assert window.button.label == "Hardware e prestazioni AI…"
+    assert "Veloce/Standard/Max" in window.button.tooltip
