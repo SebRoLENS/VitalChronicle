@@ -19,18 +19,6 @@ CATALOGUE_DIR = Path(__file__).with_name("locales")
 DEFAULT_LANGUAGE = "en"
 SYSTEM_LANGUAGE = "system"
 
-# Transitional UI rename: the source string still exists in the Weblate
-# catalogues, but it now opens hardware detection, model recommendations,
-# performance profiles, reasoning controls, and benchmarking—not just an
-# installation guide. Keep the visible label accurate until the source key is
-# migrated in the translation catalogues.
-_UI_TEXT_OVERRIDES = {
-    "Local installation guide": {
-        "en": "Hardware & AI performance…",
-        "it": "Hardware e prestazioni AI…",
-    }
-}
-
 
 def _normalise_language(value: str | None) -> str:
     if not value:
@@ -170,8 +158,7 @@ def current_language() -> str:
 def tr(message: str, /, **values: Any) -> str:
     """Translate *message* and safely apply named format values."""
 
-    override = _UI_TEXT_OVERRIDES.get(message, {}).get(_language)
-    translated = override or _catalogue(_language).get(message) or message
+    translated = _catalogue(_language).get(message) or message
     return translated.format(**values) if values else translated
 
 
