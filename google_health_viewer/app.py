@@ -6,10 +6,10 @@ from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, Qt, QTimer
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from .branding import APP_NAME
-from .i18n import set_language, startup_language, supported_languages
+from .i18n import _, current_language, set_language, startup_language, supported_languages
 from .theme import APP_STYLESHEET
 
 HARDWARE_AI_INTRO_KEY = "ai/hardware_ai_intro_1_1_9_seen"
@@ -62,6 +62,26 @@ def _show_hardware_ai_intro(window, settings) -> None:
     window.show_ai_setup()
 
 
+def _expose_hardware_ai_entry(window) -> None:
+    """Rename the legacy setup button without changing Weblate source keys."""
+
+    current_label = _("Local installation guide")
+    visible_label = (
+        "Hardware e prestazioni AI…"
+        if current_language() == "it"
+        else "Hardware & AI performance…"
+    )
+    for button in window.findChildren(QPushButton):
+        if button.text() == current_label:
+            button.setText(visible_label)
+            button.setToolTip(
+                "Rilevamento hardware, profili Veloce/Standard/Max, modello consigliato e benchmark."
+                if current_language() == "it"
+                else "Hardware detection, Fast/Standard/Max profiles, model recommendation and benchmark."
+            )
+            break
+
+
 def main() -> int:
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
     QCoreApplication.setOrganizationName("SebastianoRomi")
@@ -95,6 +115,7 @@ def main() -> int:
         print("Frozen build is missing the bundled translation catalogues.", file=sys.stderr)
         return 78
     window = MainWindow(screenshot_mode=smoke_test)
+    _expose_hardware_ai_entry(window)
     window.show()
     if _should_show_hardware_ai_intro(
         settings,
