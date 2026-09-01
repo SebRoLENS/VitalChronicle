@@ -1,9 +1,9 @@
 """Expose the actual adaptive-evidence scope in the live AI status.
 
 The adaptive router already stores its decision inside the compact packet that is
-sent to Ollama.  This small UI-facing hook reads that *actual outgoing packet*
-and adds an explicit scope summary to the token-usage phase.  It therefore does
-not guess from the user's question: what the user sees is what the model really
+sent to Ollama. This small UI-facing hook reads that *actual outgoing packet* and
+adds an explicit scope summary to the token-usage phase. It therefore does not
+guess from the user's question: what the user sees is what the model really
 received.
 """
 
@@ -40,7 +40,10 @@ def _integer(value: Any) -> int:
 
 def _domain_text(packet: dict[str, Any]) -> str:
     domains = [str(value) for value in (packet.get("domains") or {}).keys()]
-    labels = [_( _DOMAIN_LABELS.get(domain, domain.replace("_", " ").title()) ) for domain in domains]
+    labels = [
+        _(_DOMAIN_LABELS.get(domain, domain.replace("_", " ").title()))
+        for domain in domains
+    ]
     if not labels:
         return "—"
     if len(labels) <= 3:
@@ -49,10 +52,13 @@ def _domain_text(packet: dict[str, Any]) -> str:
 
 
 def evidence_scope_status(packet: dict[str, Any]) -> str:
-    """Describe how much of the compact deterministic evidence will reach Ollama."""
+    """Describe how much compact deterministic evidence will reach Ollama."""
 
     metadata = packet.get("packet") or {}
-    if not isinstance(metadata, dict) or metadata.get("retrieval_version") != RETRIEVAL_VERSION:
+    if (
+        not isinstance(metadata, dict)
+        or metadata.get("retrieval_version") != RETRIEVAL_VERSION
+    ):
         return ""
 
     original_metrics = _integer(metadata.get("retrieval_original_metric_count"))
@@ -64,7 +70,11 @@ def evidence_scope_status(packet: dict[str, Any]) -> str:
 
     if current_language() == "it":
         scope = "DATI PARZIALI" if filtered else "TUTTE LE METRICHE"
-        metric_text = f"metriche {selected_metrics}/{original_metrics}" if original_metrics else "metriche n/d"
+        metric_text = (
+            f"metriche {selected_metrics}/{original_metrics}"
+            if original_metrics
+            else "metriche n/d"
+        )
         token_text = (
             f"evidenze ~{selected_tokens}/{original_tokens} token"
             if original_tokens
@@ -72,7 +82,11 @@ def evidence_scope_status(packet: dict[str, Any]) -> str:
         )
     else:
         scope = "PARTIAL DATA" if filtered else "ALL METRICS"
-        metric_text = f"metrics {selected_metrics}/{original_metrics}" if original_metrics else "metrics n/a"
+        metric_text = (
+            f"metrics {selected_metrics}/{original_metrics}"
+            if original_metrics
+            else "metrics n/a"
+        )
         token_text = (
             f"evidence ~{selected_tokens}/{original_tokens} tokens"
             if original_tokens
