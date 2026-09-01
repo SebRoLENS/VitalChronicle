@@ -3,8 +3,9 @@ from __future__ import annotations
 import traceback
 from datetime import date, datetime, timedelta
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QSettings, QThread, Signal
 
+from .ai_hardware import reasoning_value
 from .api import ApiError, GoogleHealthClient
 from .constants import DATA_TYPES
 from .i18n import _
@@ -142,10 +143,16 @@ class SyncThread(QThread):
                         self.store.set_app_marker(repair_key)
                     message = (
                         (
-                            _("{count} records received · compatibility recovery completed", count=count)
+                            _(
+                                "{count} records received · compatibility recovery completed",
+                                count=count,
+                            )
                             if needs_filter_repair
-                            else _("{count} records received in {ranges} missing ranges",
-                                   count=count, ranges=len(ranges))
+                            else _(
+                                "{count} records received in {ranges} missing ranges",
+                                count=count,
+                                ranges=len(ranges),
+                            )
                         )
                         if ranges
                         else _("Already up to date: no historical ranges are missing")
@@ -273,7 +280,27 @@ class AIAnalysisThread(QThread):
 
     def run(self) -> None:
         try:
-            answer = OllamaClient(model=self.model).analyze_stream(
+            profile = str(QSettings().value("ai/performance_profile", "standard") or "standard")
+            configured_reasoning = reasoning_value(self.model, profile)
+            client = OllamaClient(model=self.model)
+            original_chat_stream = client._chat_stream
+
+            def profile_chat_stream(messages, *, think, **kwargs):
+                # GPT-OSS requires an explicit low/medium/high value even in the
+                # evidence-preserving retry. Boolean-thinking models keep the
+                # retry's deliberate think=False behaviour.
+                if isinstance(configured_reasoning, str):
+                    resolved_think = configured_reasoning
+                else:
+                    resolved_think = configured_reasoning if think else False
+                return original_chat_stream(
+                    messages,
+                    think=resolved_think,
+                    **kwargs,
+                )
+
+            client._chat_stream = profile_chat_stream
+            answer = client.analyze_stream(
                 self.snapshot,
                 self.question,
                 self.thinking_chunk.emit,
