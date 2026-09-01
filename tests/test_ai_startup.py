@@ -55,14 +55,48 @@ def test_existing_ai_user_sees_hardware_intro_once(tmp_path):
     settings = _settings(tmp_path)
     settings.setValue("ai/model", "qwen3.5:9b")
 
-    assert app_module._should_show_hardware_ai_intro(settings, smoke_test=False) is True
+    assert (
+        app_module._should_show_hardware_ai_intro(
+            settings,
+            smoke_test=False,
+            had_ai_configuration=True,
+        )
+        is True
+    )
 
     settings.setValue(app_module.HARDWARE_AI_INTRO_KEY, True)
-    assert app_module._should_show_hardware_ai_intro(settings, smoke_test=False) is False
+    assert (
+        app_module._should_show_hardware_ai_intro(
+            settings,
+            smoke_test=False,
+            had_ai_configuration=True,
+        )
+        is False
+    )
+
+
+def test_new_user_does_not_get_interrupting_ai_intro(tmp_path):
+    settings = _settings(tmp_path)
+
+    assert (
+        app_module._should_show_hardware_ai_intro(
+            settings,
+            smoke_test=False,
+            had_ai_configuration=False,
+        )
+        is False
+    )
 
 
 def test_hardware_intro_is_disabled_for_smoke_tests(tmp_path):
     settings = _settings(tmp_path)
     settings.setValue("ai/model", "qwen3.5:9b")
 
-    assert app_module._should_show_hardware_ai_intro(settings, smoke_test=True) is False
+    assert (
+        app_module._should_show_hardware_ai_intro(
+            settings,
+            smoke_test=True,
+            had_ai_configuration=True,
+        )
+        is False
+    )
