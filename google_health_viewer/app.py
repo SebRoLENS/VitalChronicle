@@ -100,11 +100,11 @@ def _install_ai_response_hygiene() -> None:
 
 
 def _install_ai_adaptive_retrieval() -> None:
-    """Select only question-relevant deterministic evidence before local inference."""
+    """Install deterministic multilingual retrieval plus an outgoing-request guard."""
 
-    from .ai_adaptive_retrieval import install_ai_adaptive_retrieval
+    from .ai_adaptive_retrieval_v2 import install_ai_adaptive_retrieval_v2
 
-    install_ai_adaptive_retrieval()
+    install_ai_adaptive_retrieval_v2()
 
 
 def _install_one_minute_heart_rate_rendering() -> None:
@@ -139,7 +139,7 @@ def main() -> int:
         _initialize_hardware_aware_ai(settings)
 
     # Install hooks before MainWindow imports workers and snapshot builders.
-    # AI hygiene runs first so adaptive retrieval wraps the final user-facing pipeline.
+    # Response hygiene runs first; guarded retrieval then wraps that final pipeline.
     _install_ai_response_hygiene()
     _install_ai_adaptive_retrieval()
     _install_one_minute_heart_rate_rendering()
