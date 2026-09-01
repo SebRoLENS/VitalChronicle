@@ -3,6 +3,7 @@ import json
 import pytest
 
 from google_health_viewer.ai_engine import (
+    TOKEN_USAGE_PREFIX,
     OptimizedOllamaClient,
     model_suitable_for_deep_analysis,
     recommended_generation_budget,
@@ -149,6 +150,49 @@ def test_standard_deep_analysis_uses_one_compact_call_and_small_context(monkeypa
     diagnostics = prompts[-1]
     assert "Model calls: 1" in diagnostics
     assert "tok/s" in diagnostics
+
+
+def test_live_token_telemetry_moves_from_estimate_to_exact_counts(monkeypatch):
+    def fake_post(_url, **_kwargs):
+        return FakeResponse("Streaming answer [change:steps].")
+
+    monkeypatch.setattr("google_health_viewer.ai_engine.requests.post", fake_post)
+    events = []
+    answer_chunks = []
+    answer = OptimizedOllamaClient(
+        model="qwen3:8b", performance_profile="standard"
+    ).analyze_stream(
+        _snapshot(),
+        analysis_mode="deep",
+        max_tokens=1600,
+        model_context_limit=32768,
+        prompt_callback=events.append,
+        answer_callback=answer_chunks.append,
+    )
+
+    telemetry = [
+        json.loads(item[len(TOKEN_USAGE_PREFIX) :])
+        for item in events
+        if item.startswith(TOKEN_USAGE_PREFIX)
+    ]
+    assert answer == "Streaming answer [change:steps]."
+    assert answer_chunks == ["Streaming answer [change:steps]."]
+    assert len(telemetry) >= 2
+    first = telemetry[0]
+    assert first["exact"] is False
+    assert first["input_tokens"] > 0
+    assert first["generated_tokens"] == 0
+    assert first["context_remaining"] == first["context"] - first["input_tokens"]
+
+    final = telemetry[-1]
+    assert final["exact"] is True
+    assert final["input_tokens"] == 1800
+    assert final["generated_tokens"] == 120
+    assert final["output_budget"] == 1600
+    assert final["output_remaining"] == 1480
+    assert final["context_used"] == 1920
+    assert final["context_remaining"] == final["context"] - 1920
+    assert final["tokens_per_second"] == 60.0
 
 
 def test_max_deep_analysis_uses_two_compact_calls(monkeypatch):
