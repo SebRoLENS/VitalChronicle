@@ -99,6 +99,22 @@ def _install_ai_response_hygiene() -> None:
     install_ai_response_hygiene()
 
 
+def _install_ai_adaptive_retrieval() -> None:
+    """Select only question-relevant deterministic evidence before local inference."""
+
+    from .ai_adaptive_retrieval import install_ai_adaptive_retrieval
+
+    install_ai_adaptive_retrieval()
+
+
+def _install_one_minute_heart_rate_rendering() -> None:
+    """Use one-minute smoothing for the Overview heart-rate curve only."""
+
+    from .heart_rate_rendering import install_one_minute_heart_rate_rendering
+
+    install_one_minute_heart_rate_rendering()
+
+
 def main() -> int:
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
     QCoreApplication.setOrganizationName("SebastianoRomi")
@@ -122,8 +138,11 @@ def main() -> int:
     if not smoke_test:
         _initialize_hardware_aware_ai(settings)
 
-    # Install AI hooks before MainWindow imports workers and snapshot builders.
+    # Install hooks before MainWindow imports workers and snapshot builders.
+    # AI hygiene runs first so adaptive retrieval wraps the final user-facing pipeline.
     _install_ai_response_hygiene()
+    _install_ai_adaptive_retrieval()
+    _install_one_minute_heart_rate_rendering()
     _install_health_benchmark()
     from .main_window import MainWindow
 
