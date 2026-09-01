@@ -125,6 +125,20 @@ def _download(
     return digest.hexdigest()
 
 
+def _release_destination(target: UpdateTarget) -> Path:
+    """Return the canonical versioned filename shipped by the GitHub release."""
+    asset_name = target.asset.name.strip()
+    if (
+        not asset_name
+        or asset_name in {".", ".."}
+        or "/" in asset_name
+        or "\\" in asset_name
+        or Path(asset_name).name != asset_name
+    ):
+        raise SelfUpdateError("The release package has an unsafe filename.")
+    return target.destination.with_name(asset_name)
+
+
 def install_update(
     release: ReleaseInfo,
     target: UpdateTarget,
@@ -137,7 +151,8 @@ def install_update(
     if not os.access(destination.parent, os.W_OK):
         raise SelfUpdateError("The application folder is not writable.")
 
-    staged = destination.with_name(f".{destination.name}.update")
+    installed_destination = _release_destination(target)
+    staged = destination.with_name(f".{target.asset.name}.update")
     try:
         actual = _download(target.asset, staged, progress)
         expected = _expected_digest(release, target.asset)
@@ -147,22 +162,40 @@ def install_update(
         if target.kind == "appimage":
             mode = stat.S_IMODE(destination.stat().st_mode)
             staged.chmod(mode | stat.S_IXUSR)
-            # os.replace() atomically replaces the old AppImage at the same path.
-            # No .previous copy is kept after a successful update.
-            os.replace(staged, destination)
-            return UpdateResult(destination)
+            if installed_destination == destination:
+                os.replace(staged, destination)
+                return UpdateResult(destination)
+
+            rollback = destination.with_name(f".{destination.name}.rollback")
+            rollback.unlink(missing_ok=True)
+            os.replace(destination, rollback)
+            try:
+                # Install with the exact versioned filename published by the release,
+                # then remove the temporary rollback copy. Linux permits renaming the
+                # currently executing AppImage, so the running process can finish safely.
+                os.replace(staged, installed_destination)
+            except Exception:
+                os.replace(rollback, destination)
+                raise
+            rollback.unlink(missing_ok=True)
+            return UpdateResult(installed_destination)
 
         if target.kind == "windows-exe":
             helper = destination.with_name(f".{destination.stem}-update.cmd")
             rollback = destination.with_name(f".{destination.name}.rollback")
-            if any(character in str(destination) for character in ("%", "\r", "\n")):
+            unsafe_paths = (destination, installed_destination, staged, rollback, helper)
+            if any(
+                character in str(path)
+                for path in unsafe_paths
+                for character in ("%", "\r", "\n")
+            ):
                 raise SelfUpdateError(
                     "The application path contains characters that the Windows updater "
                     "cannot handle safely."
                 )
             # The helper runs only after the GUI exits. It keeps a temporary rollback
-            # copy, deletes the old executable, installs the new one, then removes the
-            # rollback copy immediately after success.
+            # copy, deletes the old executable, installs the verified package under the
+            # new release filename, then removes the rollback copy after success.
             helper.write_text(
                 "@echo off\r\n"
                 "setlocal\r\n"
@@ -176,17 +209,17 @@ def install_update(
                 f'del /f /q "{rollback}" >nul 2>&1\r\n'
                 "exit /b 1\r\n"
                 ":replace\r\n"
-                f'move /y "{staged}" "{destination}" >nul 2>&1\r\n'
+                f'move /y "{staged}" "{installed_destination}" >nul 2>&1\r\n'
                 "if errorlevel 1 (\r\n"
                 f'  move /y "{rollback}" "{destination}" >nul 2>&1\r\n'
                 "  exit /b 1\r\n"
                 ")\r\n"
                 f'del /f /q "{rollback}" >nul 2>&1\r\n'
-                f'start "" "{destination}"\r\n'
+                f'start "" "{installed_destination}"\r\n'
                 'del "%~f0"\r\n',
                 encoding="utf-8",
             )
-            return UpdateResult(destination, helper=helper)
+            return UpdateResult(installed_destination, helper=helper)
         raise SelfUpdateError("This package type cannot be updated automatically.")
     except Exception:
         staged.unlink(missing_ok=True)
