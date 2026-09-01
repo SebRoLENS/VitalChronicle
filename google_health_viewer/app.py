@@ -12,6 +12,8 @@ from .branding import APP_NAME
 from .i18n import set_language, startup_language, supported_languages
 from .theme import APP_STYLESHEET
 
+HARDWARE_AI_INTRO_KEY = "ai/hardware_ai_intro_1_1_9_seen"
+
 
 def _initialize_hardware_aware_ai(settings) -> None:
     """Choose a sensible first local model without overriding an existing choice."""
@@ -36,6 +38,21 @@ def _initialize_hardware_aware_ai(settings) -> None:
             settings.setValue("ai/ram_gb", max(1, round(hardware.ram_gb)))
     except Exception:  # noqa: BLE001 - startup must survive incomplete hardware detection.
         return
+
+
+def _should_show_hardware_ai_intro(settings, *, smoke_test: bool) -> bool:
+    """Show the redesigned local-AI controls once to existing AI users."""
+
+    if smoke_test or settings.value(HARDWARE_AI_INTRO_KEY, False, type=bool):
+        return False
+    return settings.contains("ai/model") or settings.contains("ai/hardware_profile")
+
+
+def _show_hardware_ai_intro(window, settings) -> None:
+    """Expose the hardware-aware controls once, then leave them user-invoked."""
+
+    settings.setValue(HARDWARE_AI_INTRO_KEY, True)
+    window.show_ai_setup()
 
 
 def main() -> int:
@@ -69,6 +86,8 @@ def main() -> int:
         return 78
     window = MainWindow(screenshot_mode=smoke_test)
     window.show()
+    if _should_show_hardware_ai_intro(settings, smoke_test=smoke_test):
+        QTimer.singleShot(900, lambda: _show_hardware_ai_intro(window, settings))
     if smoke_test:
         QTimer.singleShot(1200, app.quit)
     return app.exec()
