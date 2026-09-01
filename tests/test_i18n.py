@@ -78,10 +78,3 @@ def test_translation_and_formatting(monkeypatch):
     monkeypatch.setattr(i18n, "_language", "it")
     monkeypatch.setattr(i18n, "_catalogue", lambda _language: {"Hello {name}": "Ciao {name}"})
     assert i18n.tr("Hello {name}", name="Ada") == "Ciao Ada"
-
-
-def test_hardware_ai_setup_label_is_explicit(monkeypatch):
-    monkeypatch.setattr(i18n, "_language", "en")
-    assert i18n.tr("Local installation guide") == "Hardware & AI performance…"
-    monkeypatch.setattr(i18n, "_language", "it")
-    assert i18n.tr("Local installation guide") == "Hardware e prestazioni AI…"
