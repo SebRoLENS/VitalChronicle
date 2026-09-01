@@ -31,8 +31,8 @@ from .ai_hardware import (
     detect_hardware,
     legacy_hardware_profile,
     override_hardware,
-    recommend_model as hardware_recommendation,
 )
+from .ai_hardware import recommend_model as hardware_recommendation
 from .external_links import open_external_url
 from .i18n import _
 from .local_ai import DEFAULT_MODEL, recommended_model
@@ -417,8 +417,10 @@ class AISetupDialog(QDialog):
         self._sync_parent(self._recommendation.model, hardware)
         self._refresh_commands()
         self.benchmark_label.setText(
-            _("Selected {model}. Use Check in the main AI panel to verify installation.",
-              model=self._recommendation.model)
+            _(
+                "Selected {model}. Use Check in the main AI panel to verify installation.",
+                model=self._recommendation.model,
+            )
         )
 
     def _download_recommended_model(self) -> None:
@@ -440,7 +442,11 @@ class AISetupDialog(QDialog):
     def _refresh_commands(self) -> None:
         if not hasattr(self, "command_boxes"):
             return
-        linux = [] if legacy_hardware_profile(self._hardware_from_fields()) == "cpu32" else ["nvidia-smi"]
+        linux = (
+            []
+            if legacy_hardware_profile(self._hardware_from_fields()) == "cpu32"
+            else ["nvidia-smi"]
+        )
         linux.extend(
             [
                 "curl -fsSL https://ollama.com/install.sh | sh",
@@ -449,7 +455,11 @@ class AISetupDialog(QDialog):
                 "ollama list",
             ]
         )
-        windows = [] if legacy_hardware_profile(self._hardware_from_fields()) == "cpu32" else ["nvidia-smi"]
+        windows = (
+            []
+            if legacy_hardware_profile(self._hardware_from_fields()) == "cpu32"
+            else ["nvidia-smi"]
+        )
         windows.extend(
             ["ollama --version", f"ollama pull {self._command_model}", "ollama list"]
         )
@@ -497,9 +507,7 @@ class AISetupDialog(QDialog):
         if not model:
             return
         self.benchmark_button.setEnabled(False)
-        self.benchmark_label.setText(
-            _("Benchmarking {model} locally…", model=model)
-        )
+        self.benchmark_label.setText(_("Benchmarking {model} locally…", model=model))
         thread = BenchmarkThread(model, self)
         thread.completed.connect(self._benchmark_completed)
         thread.failed.connect(self._benchmark_failed)
