@@ -23,8 +23,8 @@ from difflib import SequenceMatcher
 from functools import cache
 from typing import Any
 
-from . import ai_engine, i18n
 from . import ai_adaptive_retrieval as legacy
+from . import ai_engine, i18n
 from .ai_pipeline import estimate_json_tokens
 from .local_ai import LocalAIError
 
