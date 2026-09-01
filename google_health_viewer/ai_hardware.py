@@ -9,6 +9,7 @@ import platform
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -79,6 +80,7 @@ def _run(command: list[str], timeout: float = 4.0) -> str:
 
 def _ram_gb() -> float:
     if os.name == "nt":
+
         class MemoryStatus(ctypes.Structure):
             _fields_ = [
                 ("dwLength", ctypes.c_ulong),
@@ -111,9 +113,10 @@ def _cpu_name() -> str:
     if sys_name := platform.system():
         if sys_name == "Linux":
             try:
-                for line in open("/proc/cpuinfo", encoding="utf-8", errors="ignore"):
-                    if line.lower().startswith("model name"):
-                        return line.split(":", 1)[1].strip()
+                with open("/proc/cpuinfo", encoding="utf-8", errors="ignore") as cpuinfo:
+                    for line in cpuinfo:
+                        if line.lower().startswith("model name"):
+                            return line.split(":", 1)[1].strip()
             except OSError:
                 pass
         elif sys_name == "Darwin":
@@ -179,7 +182,9 @@ def _detect_macos_gpu() -> tuple[str, str, float | None] | None:
             return None
         item = items[0]
         name = str(item.get("sppci_model") or item.get("_name") or "Apple GPU")
-        memory = str(item.get("spdisplays_vram") or item.get("spdisplays_vram_shared") or "")
+        memory = str(
+            item.get("spdisplays_vram") or item.get("spdisplays_vram_shared") or ""
+        )
         return name, _vendor_from_name(name) or "Apple", _parse_memory_gb(memory)
     except (TypeError, ValueError, KeyError):
         return None
@@ -192,7 +197,10 @@ def _detect_windows_gpu() -> tuple[str, str, float | None] | None:
         "powershell",
         "-NoProfile",
         "-Command",
-        "Get-CimInstance Win32_VideoController | Select-Object -First 1 Name,AdapterRAM | ConvertTo-Json -Compress",
+        (
+            "Get-CimInstance Win32_VideoController | Select-Object -First 1 "
+            "Name,AdapterRAM | ConvertTo-Json -Compress"
+        ),
     ]
     output = _run(command, timeout=6.0)
     if not output:
@@ -201,7 +209,11 @@ def _detect_windows_gpu() -> tuple[str, str, float | None] | None:
         payload = json.loads(output)
         name = str(payload.get("Name") or "")
         memory = payload.get("AdapterRAM")
-        vram = float(memory) / 1024**3 if isinstance(memory, (int, float)) and memory > 0 else None
+        vram = (
+            float(memory) / 1024**3
+            if isinstance(memory, (int, float)) and memory > 0
+            else None
+        )
         return name, _vendor_from_name(name), round(vram, 1) if vram is not None else None
     except (TypeError, ValueError):
         return None
@@ -324,26 +336,54 @@ def _gpu_models(hardware: HardwareInfo) -> dict[str, str]:
 
 def _expected_time(hardware: HardwareInfo, profile: str) -> str:
     if hardware.vram_gb and hardware.vram_gb >= 12:
-        return {"fast": "usually <1 min", "standard": "about 1–3 min", "max": "about 3–8 min"}[profile]
+        values = {
+            "fast": "usually <1 min",
+            "standard": "about 1–3 min",
+            "max": "about 3–8 min",
+        }
+        return values[profile]
     if hardware.vram_gb and hardware.vram_gb >= 6:
-        return {"fast": "usually <2 min", "standard": "about 2–5 min", "max": "about 5–15+ min"}[profile]
+        values = {
+            "fast": "usually <2 min",
+            "standard": "about 2–5 min",
+            "max": "about 5–15+ min",
+        }
+        return values[profile]
     if hardware.ram_gb >= 32:
-        return {"fast": "about 1–4 min", "standard": "about 5–15 min", "max": "15 min or more"}[profile]
-    return {"fast": "about 2–6 min", "standard": "about 5–15+ min", "max": "15 min or more"}[profile]
+        values = {
+            "fast": "about 1–4 min",
+            "standard": "about 5–15 min",
+            "max": "15 min or more",
+        }
+        return values[profile]
+    values = {
+        "fast": "about 2–6 min",
+        "standard": "about 5–15+ min",
+        "max": "15 min or more",
+    }
+    return values[profile]
 
 
-def recommend_model(hardware: HardwareInfo, profile: str = "standard") -> ModelRecommendation:
+def recommend_model(
+    hardware: HardwareInfo, profile: str = "standard"
+) -> ModelRecommendation:
     profile = profile if profile in PERFORMANCE_PROFILES else "standard"
     models = _gpu_models(hardware) if hardware.has_gpu else _cpu_models(hardware.ram_gb)
     model = models[profile]
     if hardware.has_gpu:
         accelerator = hardware.gpu_name
         memory_text = (
-            f"{hardware.vram_gb:.1f} GB VRAM" if hardware.vram_gb is not None else "VRAM not reported"
+            f"{hardware.vram_gb:.1f} GB VRAM"
+            if hardware.vram_gb is not None
+            else "VRAM not reported"
         )
-        rationale = f"Sized for {accelerator} ({memory_text}) and {hardware.ram_gb:.0f} GB RAM."
+        rationale = (
+            f"Sized for {accelerator} ({memory_text}) and {hardware.ram_gb:.0f} GB RAM."
+        )
     else:
-        rationale = f"Sized conservatively for CPU inference and {hardware.ram_gb:.0f} GB RAM."
+        rationale = (
+            f"Sized conservatively for CPU inference and {hardware.ram_gb:.0f} GB RAM."
+        )
     return ModelRecommendation(
         profile=profile,
         model=model,
@@ -366,7 +406,7 @@ def reasoning_value(model: str, profile: str) -> bool | str:
     normalized = model.strip().lower()
     if normalized.startswith("gpt-oss") or "/gpt-oss" in normalized:
         return {"fast": "low", "standard": "medium", "max": "high"}[profile]
-    return False if profile == "fast" else True
+    return profile != "fast"
 
 
 def benchmark_model(
@@ -377,12 +417,14 @@ def benchmark_model(
 ) -> BenchmarkResult:
     """Run a short local generation and return Ollama's measured decode speed."""
 
-    started = __import__("time").monotonic()
+    started = time.monotonic()
     response = requests.post(
         f"{base_url.rstrip('/')}/api/generate",
         json={
             "model": model,
-            "prompt": "In one short paragraph, explain why local data processing protects privacy.",
+            "prompt": (
+                "In one short paragraph, explain why local data processing protects privacy."
+            ),
             "stream": False,
             "think": reasoning_value(model, "fast"),
             "options": {"temperature": 0.0, "num_ctx": 2048, "num_predict": 96},
@@ -392,7 +434,7 @@ def benchmark_model(
     )
     response.raise_for_status()
     payload: dict[str, Any] = response.json()
-    elapsed = max(0.001, __import__("time").monotonic() - started)
+    elapsed = max(0.001, time.monotonic() - started)
     count = int(payload.get("eval_count") or 0)
     duration_ns = int(payload.get("eval_duration") or 0)
     decode_seconds = duration_ns / 1_000_000_000 if duration_ns > 0 else elapsed
