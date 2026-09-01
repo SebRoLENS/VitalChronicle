@@ -13,6 +13,8 @@ from typing import Any
 
 from platformdirs import user_data_dir
 
+from .ai_pipeline import ensure_compact_evidence
+
 SCHEMA_VERSION = 1
 MODEL_ROLES = {"user", "assistant"}
 
@@ -25,6 +27,18 @@ def _default_path() -> Path:
     directory = Path(user_data_dir("GoogleHealthViewer", "SebastianoRomi"))
     directory.mkdir(parents=True, exist_ok=True)
     return directory / "ai_conversations.json"
+
+
+def _snapshot_with_ai_cache(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Persist the compact model packet with the deterministic snapshot.
+
+    The snapshot is rebuilt only when the user refreshes the conversation data,
+    so this small packet is naturally reused until the local health-data revision changes.
+    """
+
+    cached = copy.deepcopy(snapshot)
+    cached["ai_compact_evidence"] = ensure_compact_evidence(cached)
+    return cached
 
 
 class ConversationStore:
@@ -84,6 +98,7 @@ class ConversationStore:
         snapshot_revision: str | None,
     ) -> dict[str, Any]:
         created = _now()
+        cached_snapshot = _snapshot_with_ai_cache(snapshot)
         thread = {
             "id": uuid.uuid4().hex,
             "title": title.strip() or "New health conversation",
@@ -92,7 +107,7 @@ class ConversationStore:
             "model": model,
             "scope": scope,
             "period": copy.deepcopy(period),
-            "snapshot": copy.deepcopy(snapshot),
+            "snapshot": cached_snapshot,
             "snapshot_revision": snapshot_revision,
             "snapshot_observed_at": snapshot.get("observation_context", {}).get("observed_at"),
             "messages": [],
@@ -177,7 +192,7 @@ class ConversationStore:
         thread = self._mutable_thread(thread_id)
         if thread is None:
             return None
-        thread["snapshot"] = copy.deepcopy(snapshot)
+        thread["snapshot"] = _snapshot_with_ai_cache(snapshot)
         thread["snapshot_revision"] = snapshot_revision
         thread["snapshot_observed_at"] = snapshot.get("observation_context", {}).get("observed_at")
         if period is not None:
