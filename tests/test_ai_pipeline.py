@@ -158,8 +158,9 @@ def test_compact_packet_is_domain_based_bounded_and_omits_long_gap_lists():
     )
     assert "missing_date_ranges" not in serialized
     assert "measurement_missing_date_ranges" not in serialized
-    assert "very_large_unused_list" in serialized
-    assert len(packet["domains"]["activity"][0].get("structured", {}).get("very_large_unused_list", [])) <= 6
+    # Oversized optional structured payloads are discarded before evidence or coverage.
+    assert "very_large_unused_list" not in serialized
+    assert "detail-999" not in serialized
     assert estimate_json_tokens(packet) <= 4200
     assert packet["packet"]["estimated_tokens"] <= 4200
 
