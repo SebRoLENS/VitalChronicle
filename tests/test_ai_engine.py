@@ -148,7 +148,7 @@ def test_standard_deep_analysis_uses_one_compact_call_and_small_context(monkeypa
     assert any("# Pipeline diagnostics" in prompt for prompt in prompts)
     diagnostics = prompts[-1]
     assert "Model calls: 1" in diagnostics
-    assert "tokens/s" in diagnostics
+    assert "tok/s" in diagnostics
 
 
 def test_max_deep_analysis_uses_two_compact_calls(monkeypatch):
