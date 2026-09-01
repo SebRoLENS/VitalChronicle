@@ -25,6 +25,7 @@ RECOMMENDED_OUTPUT_TOKENS = {
     "standard": 1600,
     "max": 3000,
 }
+TOKEN_USAGE_PREFIX = "__VC_TOKEN_USAGE__:"
 
 RESPONSE_LANGUAGE_NAMES = {
     "de": "German",
@@ -122,6 +123,75 @@ class OptimizedOllamaClient(OllamaClient):
         )
         self._call_stats: list[dict[str, Any]] = []
         self._current_phase = "model"
+        self._telemetry_callback: Callable[[str], None] | None = None
+        self._telemetry_started_at = 0.0
+        self._telemetry_characters = 0
+        self._telemetry_input_tokens = 0
+        self._telemetry_context = 0
+        self._telemetry_output_budget = 0
+        self._telemetry_last_emit = 0.0
+
+    def _emit_token_usage(
+        self,
+        *,
+        exact: bool = False,
+        prompt_tokens: int | None = None,
+        generated_tokens: int | None = None,
+        tokens_per_second: float | None = None,
+        force: bool = False,
+    ) -> None:
+        callback = self._telemetry_callback
+        if callback is None or self._telemetry_context <= 0:
+            return
+        now = time.monotonic()
+        if not force and now - self._telemetry_last_emit < 0.12:
+            return
+        self._telemetry_last_emit = now
+        input_tokens = max(
+            0,
+            int(
+                self._telemetry_input_tokens
+                if prompt_tokens is None
+                else prompt_tokens
+            ),
+        )
+        if generated_tokens is None:
+            generated = max(0, math.ceil(self._telemetry_characters / 3.0))
+            generated = min(self._telemetry_output_budget, generated)
+        else:
+            generated = max(0, int(generated_tokens))
+        elapsed = max(0.001, now - self._telemetry_started_at)
+        speed = tokens_per_second
+        if speed is None and generated:
+            speed = generated / elapsed
+        context_used = min(self._telemetry_context, input_tokens + generated)
+        callback(
+            TOKEN_USAGE_PREFIX
+            + json.dumps(
+                {
+                    "phase": self._current_phase,
+                    "exact": bool(exact),
+                    "input_tokens": input_tokens,
+                    "generated_tokens": generated,
+                    "output_budget": self._telemetry_output_budget,
+                    "output_remaining": max(
+                        0, self._telemetry_output_budget - generated
+                    ),
+                    "context": self._telemetry_context,
+                    "context_used": context_used,
+                    "context_remaining": max(
+                        0, self._telemetry_context - context_used
+                    ),
+                    "usage_percent": round(
+                        100.0 * context_used / self._telemetry_context, 1
+                    ),
+                    "tokens_per_second": (
+                        round(float(speed), 2) if speed is not None else None
+                    ),
+                },
+                separators=(",", ":"),
+            )
+        )
 
     def _chat_stream(
         self,
@@ -135,6 +205,13 @@ class OptimizedOllamaClient(OllamaClient):
         cancel_callback: Callable[[], bool] | None = None,
     ) -> str:
         started = time.monotonic()
+        self._telemetry_started_at = started
+        self._telemetry_characters = 0
+        self._telemetry_input_tokens = _estimate_message_tokens(messages)
+        self._telemetry_context = max(1, int(num_ctx))
+        self._telemetry_output_budget = max(1, int(num_predict))
+        self._telemetry_last_emit = 0.0
+        self._emit_token_usage(force=True)
         final_payload: dict[str, Any] = {}
         with requests.post(
             f"{self.base_url}/api/chat",
@@ -177,18 +254,32 @@ class OptimizedOllamaClient(OllamaClient):
                 message = payload.get("message") or {}
                 thinking = message.get("thinking")
                 content = message.get("content")
-                if isinstance(thinking, str) and thinking and thinking_callback:
-                    thinking_callback(thinking)
+                if isinstance(thinking, str) and thinking:
+                    self._telemetry_characters += len(thinking)
+                    if thinking_callback:
+                        thinking_callback(thinking)
                 if isinstance(content, str) and content:
+                    self._telemetry_characters += len(content)
                     answer_parts.append(content)
                     if answer_callback:
                         answer_callback(content)
+                self._emit_token_usage()
 
         elapsed = max(0.001, time.monotonic() - started)
         eval_count = int(final_payload.get("eval_count") or 0)
         eval_duration = int(final_payload.get("eval_duration") or 0)
         decode_seconds = eval_duration / 1_000_000_000 if eval_duration > 0 else elapsed
         prompt_eval_count = int(final_payload.get("prompt_eval_count") or 0)
+        tokens_per_second = (
+            round(eval_count / max(0.001, decode_seconds), 2) if eval_count else None
+        )
+        self._emit_token_usage(
+            exact=bool(prompt_eval_count and eval_count),
+            prompt_tokens=prompt_eval_count or None,
+            generated_tokens=eval_count or None,
+            tokens_per_second=tokens_per_second,
+            force=True,
+        )
         self._call_stats.append(
             {
                 "call": len(self._call_stats) + 1,
@@ -196,9 +287,7 @@ class OptimizedOllamaClient(OllamaClient):
                 "elapsed_seconds": round(elapsed, 3),
                 "prompt_tokens_reported": prompt_eval_count or None,
                 "generated_tokens": eval_count or None,
-                "tokens_per_second": (
-                    round(eval_count / max(0.001, decode_seconds), 2) if eval_count else None
-                ),
+                "tokens_per_second": tokens_per_second,
                 "context": num_ctx,
                 "output_budget": num_predict,
             }
@@ -271,6 +360,7 @@ class OptimizedOllamaClient(OllamaClient):
             )
 
         self._call_stats = []
+        self._telemetry_callback = prompt_callback
         compact_started = time.monotonic()
         packet = ensure_compact_evidence(snapshot)
         compact_seconds = max(0.0, time.monotonic() - compact_started)
@@ -356,6 +446,7 @@ class OptimizedOllamaClient(OllamaClient):
                 planning_ctx, planning_predict, planning_input = _request_budget(
                     planning_messages, planning_budget, physical_limit
                 )
+                self._current_phase = "evidence selection"
                 emit_prompt(
                     "Maximum-quality evidence pass",
                     planning_messages,
@@ -363,7 +454,6 @@ class OptimizedOllamaClient(OllamaClient):
                     planning_predict,
                     planning_input,
                 )
-                self._current_phase = "evidence selection"
                 if thinking_callback:
                     thinking_callback(
                         "Maximum-quality evidence pass: selecting the strongest patterns…\n"
@@ -406,6 +496,7 @@ class OptimizedOllamaClient(OllamaClient):
                         context=num_ctx,
                     )
                 )
+            self._current_phase = "final synthesis"
             emit_prompt(
                 "Compact health synthesis",
                 messages,
@@ -413,7 +504,6 @@ class OptimizedOllamaClient(OllamaClient):
                 num_predict,
                 estimated_input,
             )
-            self._current_phase = "final synthesis"
             answer_chunks: list[str] = []
             answer = self._chat_stream(
                 messages,
@@ -440,6 +530,7 @@ class OptimizedOllamaClient(OllamaClient):
                 recovery_ctx, recovery_predict, recovery_input = _request_budget(
                     recovery_messages, max_tokens, physical_limit
                 )
+                self._current_phase = "recovery"
                 emit_prompt(
                     "Exceptional recovery",
                     recovery_messages,
@@ -447,7 +538,6 @@ class OptimizedOllamaClient(OllamaClient):
                     recovery_predict,
                     recovery_input,
                 )
-                self._current_phase = "recovery"
                 answer_chunks = []
                 answer = self._chat_stream(
                     recovery_messages,

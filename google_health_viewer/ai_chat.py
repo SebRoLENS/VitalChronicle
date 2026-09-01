@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 import re
 import time
 import traceback
@@ -35,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from .ai_conversations import ConversationStore
+from .ai_engine import TOKEN_USAGE_PREFIX
 from .branding import APP_NAME
 from .i18n import _
 from .workers import AIAnalysisThread
@@ -104,6 +106,7 @@ class AIChatWindow(QMainWindow):
         self._activity_started_at = 0.0
         self._activity_events: list[str] = []
         self._activity_phase = ""
+        self._token_usage_text = ""
         self._activity_timer = QTimer(self)
         self._activity_timer.setInterval(1000)
         self._activity_timer.timeout.connect(self._update_activity_elapsed)
@@ -346,6 +349,9 @@ class AIChatWindow(QMainWindow):
             self.prompt_view.clear()
             self.prompt_button.setEnabled(False)
             self.prompt_button.setChecked(False)
+            if not self._activity_active:
+                self._token_usage_text = ""
+                self.activity_panel.setVisible(False)
         self._load_current_thread()
 
     def _load_current_thread(self) -> None:
@@ -560,6 +566,14 @@ class AIChatWindow(QMainWindow):
         self._schedule_render()
 
     def _prompt_ready(self, text: str) -> None:
+        if text.startswith(TOKEN_USAGE_PREFIX):
+            try:
+                payload = json.loads(text[len(TOKEN_USAGE_PREFIX) :])
+            except (TypeError, ValueError):
+                return
+            if isinstance(payload, dict):
+                self._update_token_usage(payload)
+            return
         self._prompt_sections.append(text)
         prompt_number = len(self._prompt_sections)
         if self._pending_mode == "deep" and prompt_number == 1:
@@ -570,6 +584,38 @@ class AIChatWindow(QMainWindow):
             self._activity_event(_("The model is retrying with a compact evidence packet…"))
         self.prompt_view.setPlainText("\n\n" + ("\n\n" + "=" * 72 + "\n\n").join(self._prompt_sections))
         self.prompt_button.setEnabled(True)
+
+    def _update_token_usage(self, payload: dict[str, Any]) -> None:
+        try:
+            context = max(1, int(payload.get("context") or 0))
+            context_used = max(0, int(payload.get("context_used") or 0))
+            context_remaining = max(0, int(payload.get("context_remaining") or 0))
+            input_tokens = max(0, int(payload.get("input_tokens") or 0))
+            generated = max(0, int(payload.get("generated_tokens") or 0))
+            output_budget = max(1, int(payload.get("output_budget") or 0))
+            output_remaining = max(0, int(payload.get("output_remaining") or 0))
+            usage_percent = max(0.0, min(100.0, float(payload.get("usage_percent") or 0.0)))
+        except (TypeError, ValueError):
+            return
+        exact = bool(payload.get("exact"))
+        marker = "" if exact else "~"
+        phase = str(payload.get("phase") or "model").replace("_", " ")
+        speed = payload.get("tokens_per_second")
+        try:
+            speed_text = f" · {marker}{float(speed):.1f} tok/s" if speed is not None else ""
+        except (TypeError, ValueError):
+            speed_text = ""
+        status = "NEAR LIMIT" if usage_percent >= 85 else "HIGH" if usage_percent >= 70 else "OK"
+        self._token_usage_text = (
+            f"{phase} · Ctx {marker}{context_used:,}/{context:,} ({usage_percent:.0f}%) "
+            f"· free {marker}{context_remaining:,} | In {marker}{input_tokens:,} | "
+            f"Out {marker}{generated:,}/{output_budget:,} · free {marker}{output_remaining:,}"
+            f"{speed_text} | {status}"
+        )
+        self.activity_progress.setRange(0, 1000)
+        self.activity_progress.setValue(round(usage_percent * 10))
+        self.activity_progress.setTextVisible(False)
+        self._render_activity_log()
 
     def _analysis_completed(self, answer: str) -> None:
         thread = self._current_thread()
@@ -789,10 +835,21 @@ class AIChatWindow(QMainWindow):
         self._activity_started_at = time.monotonic()
         self._activity_events = []
         self._activity_phase = ""
+        self._token_usage_text = ""
+        self.activity_title.setText(_("VitalChronicle AI is working"))
+        self.activity_elapsed.clear()
+        self.activity_progress.setRange(0, 0)
+        self.activity_progress.setTextVisible(False)
         self.activity_panel.setVisible(True)
         self._activity_timer.start()
         self._activity_event(stage)
         self._update_activity_elapsed()
+
+    def _render_activity_log(self) -> None:
+        lines = [f"• {message}" for message in self._activity_events[-4:]]
+        if self._token_usage_text:
+            lines.append(self._token_usage_text)
+        self.activity_log.setText("\n".join(lines))
 
     def _activity_event(self, stage: str) -> None:
         if not self._activity_active:
@@ -800,9 +857,7 @@ class AIChatWindow(QMainWindow):
         if self._activity_events and self._activity_events[-1] == stage:
             return
         self._activity_events.append(stage)
-        self.activity_log.setText(
-            "\n".join(f"• {message}" for message in self._activity_events[-4:])
-        )
+        self._render_activity_log()
 
     def _update_activity_elapsed(self) -> None:
         if not self._activity_active:
@@ -816,9 +871,15 @@ class AIChatWindow(QMainWindow):
     def _finish_activity(self) -> None:
         self._activity_active = False
         self._activity_timer.stop()
-        self.activity_panel.setVisible(False)
         self._activity_events = []
         self._activity_phase = ""
+        if self._token_usage_text:
+            self.activity_title.setText("AI · token usage")
+            self.activity_elapsed.clear()
+            self._render_activity_log()
+            self.activity_panel.setVisible(True)
+        else:
+            self.activity_panel.setVisible(False)
 
     def _current_thread(self) -> dict[str, Any] | None:
         return (
