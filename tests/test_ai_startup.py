@@ -49,3 +49,92 @@ def test_startup_preserves_existing_manual_model(monkeypatch, tmp_path):
 
     assert settings.value("ai/model") == "custom-local-model:latest"
     assert not settings.contains("ai/hardware_ram_gb")
+
+
+def test_existing_ai_user_sees_hardware_intro_once(tmp_path):
+    settings = _settings(tmp_path)
+    settings.setValue("ai/model", "qwen3.5:9b")
+
+    assert (
+        app_module._should_show_hardware_ai_intro(
+            settings,
+            smoke_test=False,
+            had_ai_configuration=True,
+        )
+        is True
+    )
+
+    settings.setValue(app_module.HARDWARE_AI_INTRO_KEY, True)
+    assert (
+        app_module._should_show_hardware_ai_intro(
+            settings,
+            smoke_test=False,
+            had_ai_configuration=True,
+        )
+        is False
+    )
+
+
+def test_new_user_does_not_get_interrupting_ai_intro(tmp_path):
+    settings = _settings(tmp_path)
+
+    assert (
+        app_module._should_show_hardware_ai_intro(
+            settings,
+            smoke_test=False,
+            had_ai_configuration=False,
+        )
+        is False
+    )
+
+
+def test_hardware_intro_is_disabled_for_smoke_tests(tmp_path):
+    settings = _settings(tmp_path)
+    settings.setValue("ai/model", "qwen3.5:9b")
+
+    assert (
+        app_module._should_show_hardware_ai_intro(
+            settings,
+            smoke_test=True,
+            had_ai_configuration=True,
+        )
+        is False
+    )
+
+
+def test_hardware_ai_button_is_renamed_in_italian(monkeypatch):
+    class Button:
+        def __init__(self):
+            self.label = "Guida installazione locale"
+            self.tooltip = ""
+
+        def text(self):
+            return self.label
+
+        def setText(self, value):
+            self.label = value
+
+        def setToolTip(self, value):
+            self.tooltip = value
+
+    class Window:
+        def __init__(self):
+            self.button = Button()
+
+        def findChildren(self, _widget_type):
+            return [self.button]
+
+    monkeypatch.setattr(app_module, "current_language", lambda: "it")
+    monkeypatch.setattr(
+        app_module,
+        "_",
+        lambda message: "Guida installazione locale"
+        if message == "Local installation guide"
+        else message,
+    )
+    window = Window()
+
+    app_module._expose_hardware_ai_entry(window)
+
+    assert window.button.label == "Hardware e prestazioni AI…"
+    assert "Veloce/Standard/Max" in window.button.tooltip

@@ -6,11 +6,13 @@ from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, Qt, QTimer
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from .branding import APP_NAME
-from .i18n import set_language, startup_language, supported_languages
+from .i18n import _, current_language, set_language, startup_language, supported_languages
 from .theme import APP_STYLESHEET
+
+HARDWARE_AI_INTRO_KEY = "ai/hardware_ai_intro_1_1_9_seen"
 
 
 def _initialize_hardware_aware_ai(settings) -> None:
@@ -38,6 +40,48 @@ def _initialize_hardware_aware_ai(settings) -> None:
         return
 
 
+def _should_show_hardware_ai_intro(
+    settings,
+    *,
+    smoke_test: bool,
+    had_ai_configuration: bool,
+) -> bool:
+    """Show the redesigned local-AI controls once to existing AI users."""
+
+    return not (
+        smoke_test
+        or not had_ai_configuration
+        or settings.value(HARDWARE_AI_INTRO_KEY, False, type=bool)
+    )
+
+
+def _show_hardware_ai_intro(window, settings) -> None:
+    """Expose the hardware-aware controls once, then leave them user-invoked."""
+
+    settings.setValue(HARDWARE_AI_INTRO_KEY, True)
+    window.show_ai_setup()
+
+
+def _expose_hardware_ai_entry(window) -> None:
+    """Rename the legacy setup button without changing Weblate source keys."""
+
+    current_label = _("Local installation guide")
+    visible_label = (
+        "Hardware e prestazioni AI…"
+        if current_language() == "it"
+        else "Hardware & AI performance…"
+    )
+    for button in window.findChildren(QPushButton):
+        if button.text() == current_label:
+            button.setText(visible_label)
+            button.setToolTip(
+                "Rilevamento hardware, profili Veloce/Standard/Max, modello consigliato e benchmark."
+                if current_language() == "it"
+                else "Hardware detection, Fast/Standard/Max profiles, model recommendation and benchmark."
+            )
+            break
+
+
 def main() -> int:
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
     QCoreApplication.setOrganizationName("SebastianoRomi")
@@ -55,6 +99,9 @@ def main() -> int:
     set_language(startup_language(preference))
 
     smoke_test = os.environ.get("VITALCHRONICLE_SMOKE_TEST") == "1"
+    had_ai_configuration = settings.contains("ai/model") or settings.contains(
+        "ai/hardware_profile"
+    )
     if not smoke_test:
         _initialize_hardware_aware_ai(settings)
 
@@ -68,7 +115,14 @@ def main() -> int:
         print("Frozen build is missing the bundled translation catalogues.", file=sys.stderr)
         return 78
     window = MainWindow(screenshot_mode=smoke_test)
+    _expose_hardware_ai_entry(window)
     window.show()
+    if _should_show_hardware_ai_intro(
+        settings,
+        smoke_test=smoke_test,
+        had_ai_configuration=had_ai_configuration,
+    ):
+        QTimer.singleShot(900, lambda: _show_hardware_ai_intro(window, settings))
     if smoke_test:
         QTimer.singleShot(1200, app.quit)
     return app.exec()
