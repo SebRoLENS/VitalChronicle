@@ -107,6 +107,14 @@ def _install_ai_adaptive_retrieval() -> None:
     install_ai_adaptive_retrieval_v2()
 
 
+def _install_ai_retrieval_scope_status() -> None:
+    """Show whether Ollama receives filtered or broad deterministic evidence."""
+
+    from .ai_retrieval_scope_status import install_ai_retrieval_scope_status
+
+    install_ai_retrieval_scope_status()
+
+
 def _install_one_minute_heart_rate_rendering() -> None:
     """Use one-minute smoothing for the Overview heart-rate curve only."""
 
@@ -142,6 +150,7 @@ def main() -> int:
     # Response hygiene runs first; guarded retrieval then wraps that final pipeline.
     _install_ai_response_hygiene()
     _install_ai_adaptive_retrieval()
+    _install_ai_retrieval_scope_status()
     _install_one_minute_heart_rate_rendering()
     _install_health_benchmark()
     from .main_window import MainWindow
