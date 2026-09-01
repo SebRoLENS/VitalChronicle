@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import QSettings, QThread, Signal
 
+from .ai_engine import OptimizedOllamaClient
 from .ai_hardware import reasoning_value
 from .api import ApiError, GoogleHealthClient
 from .constants import DATA_TYPES
@@ -282,7 +283,10 @@ class AIAnalysisThread(QThread):
         try:
             profile = str(QSettings().value("ai/performance_profile", "standard") or "standard")
             configured_reasoning = reasoning_value(self.model, profile)
-            client = OllamaClient(model=self.model)
+            client = OptimizedOllamaClient(
+                model=self.model,
+                performance_profile=profile,
+            )
             original_chat_stream = client._chat_stream
 
             def profile_chat_stream(messages, *, think, **kwargs):
