@@ -82,6 +82,15 @@ def _expose_hardware_ai_entry(window) -> None:
             break
 
 
+def _install_health_benchmark() -> None:
+    """Route the setup benchmark through representative synthetic health evidence."""
+
+    from . import ai_hardware
+    from .ai_benchmark import benchmark_model
+
+    ai_hardware.benchmark_model = benchmark_model
+
+
 def main() -> int:
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
     QCoreApplication.setOrganizationName("SebastianoRomi")
@@ -105,6 +114,7 @@ def main() -> int:
     if not smoke_test:
         _initialize_hardware_aware_ai(settings)
 
+    _install_health_benchmark()
     from .main_window import MainWindow
 
     app.setApplicationDisplayName(APP_NAME)
