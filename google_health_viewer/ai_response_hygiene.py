@@ -26,8 +26,8 @@ SAME_DAY_THRESHOLD = 0.40
 LAGGED_THRESHOLD = 0.45
 
 _CURRENT_QUESTION: ContextVar[str] = ContextVar("vitalchronicle_ai_question", default="")
-_ASSOCIATION_DIAGNOSTICS: ContextVar[list[dict[str, Any]]] = ContextVar(
-    "vitalchronicle_association_diagnostics", default=[]
+_ASSOCIATION_DIAGNOSTICS: ContextVar[list[dict[str, Any]] | None] = ContextVar(
+    "vitalchronicle_association_diagnostics", default=None
 )
 
 _ORIGINAL_ASSOCIATIONS = ai_insights._associations
@@ -172,7 +172,9 @@ def _build_ai_ready_snapshot_with_diagnostics(*args, **kwargs) -> dict[str, Any]
     token = _ASSOCIATION_DIAGNOSTICS.set([])
     try:
         snapshot = _ORIGINAL_BUILD_AI_READY_SNAPSHOT(*args, **kwargs)
-        snapshot["association_diagnostics"] = copy.deepcopy(_ASSOCIATION_DIAGNOSTICS.get())
+        snapshot["association_diagnostics"] = copy.deepcopy(
+            _ASSOCIATION_DIAGNOSTICS.get() or []
+        )
         preprocessing = snapshot.get("preprocessing")
         if isinstance(preprocessing, dict):
             preprocessing["association_reporting"] = {
@@ -395,7 +397,9 @@ def sanitize_user_answer(answer: str, snapshot: dict[str, Any]) -> str:
         flags=re.IGNORECASE,
     )
     # Replace any leaked raw data-type key with the localized/human label already in the snapshot.
-    for data_type, label in sorted(_label_map(snapshot).items(), key=lambda item: len(item[0]), reverse=True):
+    for data_type, label in sorted(
+        _label_map(snapshot).items(), key=lambda item: len(item[0]), reverse=True
+    ):
         cleaned = re.sub(
             rf"`?{re.escape(data_type)}`?",
             lambda _match, replacement=label: replacement,
