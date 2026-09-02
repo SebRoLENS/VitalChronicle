@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Prepare the first declared version or the next automatic patch release."""
+"""Prepare the first declared version or the next requested semantic release."""
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+VALID_BUMPS = {"patch", "minor", "major"}
 
 
 def parse_version(value: str) -> tuple[int, int, int]:
@@ -42,6 +44,20 @@ def released_versions() -> list[tuple[int, int, int]]:
     return sorted(versions)
 
 
+def bump_version(version: tuple[int, int, int], bump: str) -> tuple[int, int, int]:
+    major, minor, patch = version
+    if bump == "major":
+        return major + 1, 0, 0
+    if bump == "minor":
+        return major, minor + 1, 0
+    return major, minor, patch + 1
+
+
+def requested_bump() -> str:
+    bump = str(os.environ.get("VITAL_RELEASE_BUMP", "patch") or "patch").lower()
+    return bump if bump in VALID_BUMPS else "patch"
+
+
 def replace(path: Path, old: str, new: str) -> None:
     text = path.read_text(encoding="utf-8")
     updated = text.replace(old, new)
@@ -57,8 +73,7 @@ def main() -> int:
     if not releases or current_tuple > releases[-1]:
         target_tuple = current_tuple
     else:
-        major, minor, patch = releases[-1]
-        target_tuple = (major, minor, patch + 1)
+        target_tuple = bump_version(releases[-1], requested_bump())
     target = ".".join(str(part) for part in target_tuple)
 
     for relative in (
