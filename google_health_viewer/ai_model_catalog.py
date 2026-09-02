@@ -440,7 +440,7 @@ def _newest_compatible_family(
         parsed = _family_version(candidate)
         if parsed is None or parsed[0] != root or parsed[1] <= current_version:
             continue
-        newer.append((parsed[1], candidate.split(":", 1)[0]))
+        newer.append((parsed[1], candidate.strip()))
     for _version, candidate in sorted(newer, reverse=True):
         size = model_memory_gb(candidate)
         if size is None and allow_unknown_size:
