@@ -33,7 +33,7 @@ def test_system_prompt_remains_english_and_only_response_language_changes():
 
 
 def test_hardware_profiles_offer_larger_models():
-    assert recommended_model("cpu32") == "qwen3:30b-a3b"
+    assert recommended_model("cpu32") == "qwen3.8"
     assert recommended_model("gpu16") == "qwen3.5:9b"
     assert "qwen3:14b" in MODEL_OPTIONS
     assert "qwen3.5:27b" in MODEL_OPTIONS
@@ -44,7 +44,7 @@ def test_hardware_profiles_offer_larger_models():
 
 def test_newer_generation_suggestion_respects_hardware_profile():
     assert newer_model_suggestion("qwen3:8b", "gpu16") == "qwen3.5:9b"
-    assert newer_model_suggestion("qwen3:30b-a3b", "cpu32") == "qwen3.6:35b-a3b"
+    assert newer_model_suggestion("qwen3:30b-a3b", "cpu32") == "qwen3.8"
     assert newer_model_suggestion("qwen3.5:9b", "gpu16") is None
 
 

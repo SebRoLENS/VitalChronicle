@@ -494,7 +494,7 @@ def newer_model_suggestion(
     GPU16 profile; exact hardware-aware recommendations remain stricter.
     """
 
-    candidates = tuple(catalog_models) or discover_model_families()
+    candidates = tuple(catalog_models) or CURATED_MODEL_OPTIONS
     capacity = 25.0 if profile == "cpu32" else 10.5
     return _newest_compatible_family(
         model,
