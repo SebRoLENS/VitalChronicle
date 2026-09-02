@@ -2238,6 +2238,34 @@ class MainWindow(QMainWindow):
     def _update_ai_model_hint(self, model: str) -> None:
         self.ai_model_hint.setText(model_description(model))
 
+    def _ai_model_is_installed(self, model: str) -> bool:
+        value = model.strip().lower()
+        if not value:
+            return False
+        installed = {item.strip().lower() for item in self._known_ai_models}
+        if value in installed:
+            return True
+        if value.endswith(":latest"):
+            return value.removesuffix(":latest") in installed
+        if ":" not in value:
+            return f"{value}:latest" in installed
+        return False
+
+    def _refresh_ai_model_styles(self) -> None:
+        for index in range(self.ai_model_combo.count()):
+            model = self.ai_model_combo.itemText(index)
+            installed = self._ai_model_is_installed(model)
+            self.ai_model_combo.setItemData(
+                index,
+                QColor("#188038") if installed else None,
+                Qt.ItemDataRole.ForegroundRole,
+            )
+            self.ai_model_combo.setItemData(
+                index,
+                _("Installed locally") if installed else None,
+                Qt.ItemDataRole.ToolTipRole,
+            )
+
     def check_ai_status(self) -> None:
         if self.ai_status_thread and self.ai_status_thread.isRunning():
             return
@@ -2261,8 +2289,9 @@ class MainWindow(QMainWindow):
                     self.ai_model_combo.addItem(candidate)
             self.ai_model_combo.setCurrentText(selected_model)
             self.ai_model_combo.blockSignals(False)
+            self._refresh_ai_model_styles()
             self._update_ai_model_hint(selected_model)
-            installed = selected_model in status.models
+            installed = self._ai_model_is_installed(selected_model)
             self.ai_status_label.setText(("● " if installed else "◐ ") + status.message)
             self.ai_status_label.setStyleSheet(
                 "font-weight: 700; color: #B06000"
@@ -2296,6 +2325,8 @@ class MainWindow(QMainWindow):
                 )
                 self.model_update_button.setText(f"{action} · {target}")
         else:
+            self._known_ai_models = set()
+            self._refresh_ai_model_styles()
             self.ai_status_label.setText(
                 _("○ Ollama is not running · open the installation guide")
             )
