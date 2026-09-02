@@ -1,0 +1,28 @@
+name: Heart-rate core
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Lint changed heart-rate core
+        run: ruff check google_health_viewer/__init__.py google_health_viewer/heart_rate_core.py tests/test_heart_rate_five_minute_core.py
+      - name: Test five-minute heart-rate semantics
+        run: pytest -q tests/test_heart_rate_five_minute_core.py
