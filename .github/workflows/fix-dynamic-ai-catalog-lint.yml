@@ -1,0 +1,60 @@
+name: Fix dynamic AI catalogue lint
+
+on:
+  push:
+    branches: [feature/dynamic-ai-model-catalog]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.head_commit.message != 'Fix dynamic model catalogue lint'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/dynamic-ai-model-catalog
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Fix imports and lint
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('google_health_viewer/main_window.py')
+          text = path.read_text(encoding='utf-8')
+          if 'from .ai_model_catalog import model_description\n' not in text:
+              text = text.replace(
+                  'from .local_ai import (\n',
+                  'from .ai_model_catalog import model_description\nfrom .local_ai import (\n',
+                  1,
+              )
+          text = text.replace('    model_description,\n', '', 1)
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('google_health_viewer/local_ai.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('    model_description,\n', '', 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          python -m pip install ruff
+          ruff check --fix google_health_viewer/ai_hardware.py google_health_viewer/ai_model_catalog.py google_health_viewer/local_ai.py google_health_viewer/main_window.py tests/test_ai_model_catalog.py
+          ruff check .
+          python -m compileall -q google_health_viewer tests
+
+      - name: Commit fixes and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-dynamic-ai-catalog-lint.yml
+          git add google_health_viewer/ai_hardware.py google_health_viewer/ai_model_catalog.py google_health_viewer/local_ai.py google_health_viewer/main_window.py tests/test_ai_model_catalog.py
+          git commit -m "Fix dynamic model catalogue lint"
+          git push origin HEAD:feature/dynamic-ai-model-catalog
