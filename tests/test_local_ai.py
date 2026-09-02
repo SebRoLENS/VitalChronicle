@@ -1,5 +1,3 @@
-import json
-
 from google_health_viewer.local_ai import (
     DEFAULT_MODEL,
     MODEL_OPTIONS,
