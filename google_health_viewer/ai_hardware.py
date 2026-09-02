@@ -17,6 +17,8 @@ import requests
 
 from .ai_model_catalog import (
     model_memory_gb as catalog_model_memory_gb,
+)
+from .ai_model_catalog import (
     recommended_model_for_hardware,
 )
 

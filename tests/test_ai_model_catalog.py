@@ -40,7 +40,7 @@ def test_future_qwen_generation_is_suggested_without_app_update_on_cpu_profile(m
 
 
 def test_modern_hardware_ladder_keeps_small_gpu_conservative(monkeypatch):
-    monkeypatch.setattr(catalog, "_read_cache", lambda: {})
+    monkeypatch.setattr(catalog, "_read_cache", dict)
     assert recommended_model_for_hardware(
         ram_gb=16, vram_gb=8, has_gpu=True, profile="standard"
     ) == "qwen3.5:9b"

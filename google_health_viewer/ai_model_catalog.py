@@ -13,9 +13,10 @@ import os
 import re
 import sys
 import time
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import quote
 
 import requests

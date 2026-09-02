@@ -14,10 +14,11 @@ from .ai_model_catalog import (
     CURATED_MODEL_DESCRIPTIONS,
     CURATED_MODEL_OPTIONS,
     discover_model_options,
-    model_description,
-    newer_model_suggestion as catalog_newer_model_suggestion,
     recommended_model_for_legacy_profile,
     remember_installed_models,
+)
+from .ai_model_catalog import (
+    newer_model_suggestion as catalog_newer_model_suggestion,
 )
 from .i18n import _, current_language
 

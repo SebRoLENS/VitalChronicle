@@ -44,6 +44,7 @@ from . import __version__
 from .ai_chat import AIChatWindow, SnapshotBuildThread
 from .ai_conversations import ConversationStore
 from .ai_insights import build_ai_ready_snapshot
+from .ai_model_catalog import model_description
 from .ai_setup import AISetupDialog
 from .analysis import (
     available_metrics,
@@ -89,7 +90,6 @@ from .local_ai import (
     OllamaClient,
     OllamaStatus,
     detected_hardware_profile,
-    model_description,
     recommended_model,
     system_prompt,
 )
