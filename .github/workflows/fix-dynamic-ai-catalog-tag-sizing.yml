@@ -1,0 +1,44 @@
+name: Fix dynamic AI catalogue tag sizing
+
+on:
+  push:
+    branches: [feature/dynamic-ai-model-catalog]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.head_commit.message != 'Preserve model tags during upgrade ranking'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/dynamic-ai-model-catalog
+          fetch-depth: 0
+
+      - name: Preserve exact Ollama tag while ranking successors
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('google_health_viewer/ai_model_catalog.py')
+          text = path.read_text(encoding='utf-8')
+          old = '        newer.append((parsed[1], candidate.split(":", 1)[0]))\n'
+          new = '        newer.append((parsed[1], candidate.strip()))\n'
+          if old not in text:
+              raise SystemExit('successor candidate line not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          python -m compileall -q google_health_viewer tests
+
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-dynamic-ai-catalog-tag-sizing.yml
+          git add google_health_viewer/ai_model_catalog.py
+          git commit -m "Preserve model tags during upgrade ranking"
+          git push origin HEAD:feature/dynamic-ai-model-catalog
