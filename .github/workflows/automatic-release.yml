@@ -71,10 +71,18 @@ jobs:
 
       - name: Prepare semantic version
         id: prepare
+        env:
+          RELEASE_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          VERSION="$(python scripts/prepare_release.py)"
+          BUMP=patch
+          if grep -qi '\[major\]' <<< "$RELEASE_COMMIT_MESSAGE"; then
+            BUMP=major
+          elif grep -qi '\[minor\]' <<< "$RELEASE_COMMIT_MESSAGE"; then
+            BUMP=minor
+          fi
+          VERSION="$(VITAL_RELEASE_BUMP="$BUMP" python scripts/prepare_release.py)"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Preparing VitalChronicle v$VERSION"
+          echo "Preparing VitalChronicle v$VERSION ($BUMP)"
 
       - name: Refresh real GUI screenshots
         env:
