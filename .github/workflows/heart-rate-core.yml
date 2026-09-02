@@ -22,7 +22,7 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install project
         run: python -m pip install -e ".[dev]"
-      - name: Lint changed heart-rate core
-        run: ruff check google_health_viewer/__init__.py google_health_viewer/heart_rate_core.py tests/test_heart_rate_five_minute_core.py
+      - name: Show heart-rate lint fix if needed
+        run: ruff check --fix --diff google_health_viewer/__init__.py google_health_viewer/heart_rate_core.py tests/test_heart_rate_five_minute_core.py
       - name: Test five-minute heart-rate semantics
         run: pytest -q tests/test_heart_rate_five_minute_core.py
