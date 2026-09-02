@@ -1,6 +1,6 @@
 # VitalChronicle Release Guide
 
-Updated for VitalChronicle **1.1.18**.
+Updated for VitalChronicle **1.2.0**.
 
 ## Automated path
 
@@ -33,7 +33,7 @@ Use semantic versioning consistently:
 ## Manual rebuild
 
 Use **Actions → Build desktop packages → Run workflow** and provide an existing tag such
-as `v1.1.18`. Existing release assets are replaced by filename.
+as `v1.2.0`. Existing release assets are replaced by filename.
 
 ## Version consistency
 
