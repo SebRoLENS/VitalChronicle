@@ -18,6 +18,7 @@ def test_catalog_includes_current_qwen_gemma_and_open_weight_options():
 
 
 def test_official_library_parser_accepts_future_generations_and_rejects_cloud():
+    # Version discovery must not require shipping a new VitalChronicle release.
     html = '''
     <a href="/library/qwen3.8">Qwen 3.8</a>
     <a href="/library/qwen4">Qwen 4</a>
