@@ -25,16 +25,16 @@ def test_rtx_4060_class_machine_gets_three_distinct_profiles():
 
     assert recommend_model(machine, "fast").model == "qwen3:4b"
     assert recommend_model(machine, "standard").model == "qwen3.5:9b"
-    assert recommend_model(machine, "max").model == "qwen3:14b"
+    assert recommend_model(machine, "max").model == "gemma4:12b"
     assert legacy_hardware_profile(machine) == "gpu16"
 
 
-def test_cpu_32gb_uses_moe_for_standard_and_larger_moe_for_maximum():
+def test_cpu_32gb_uses_modern_local_models_for_standard_and_maximum():
     machine = hardware(ram=32)
 
-    assert recommend_model(machine, "fast").model == "qwen3:8b"
-    assert recommend_model(machine, "standard").model == "qwen3:30b-a3b"
-    assert recommend_model(machine, "max").model == "qwen3.6:35b-a3b"
+    assert recommend_model(machine, "fast").model == "qwen3.5:9b"
+    assert recommend_model(machine, "standard").model == "gemma4:12b"
+    assert recommend_model(machine, "max").model == "qwen3.8"
     assert legacy_hardware_profile(machine) == "cpu32"
 
 
