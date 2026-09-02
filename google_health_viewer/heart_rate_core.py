@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import collections
+import datetime
 import math
 import statistics
-from collections import defaultdict
-from datetime import date
-from typing import Any
+import typing
 
 
 FIVE_MINUTE_SECONDS = 300
 
 
-def _first_timestamp(value: Any, analysis) -> float | None:
+def _first_timestamp(value: typing.Any, analysis) -> float | None:
     raw = analysis._find_named_value(
         value,
         {"physicaltime", "starttime", "endtime", "time"},
@@ -19,7 +19,7 @@ def _first_timestamp(value: Any, analysis) -> float | None:
 
 
 def heart_rate_sample_points(
-    records: list[dict[str, Any]],
+    records: list[dict[str, typing.Any]],
     analysis,
 ) -> list[tuple[float, float]]:
     """Read canonical heart-rate samples and Google Health roll-up averages.
@@ -70,7 +70,7 @@ def five_minute_average_points(
     if bin_seconds <= 0:
         raise ValueError("Heart-rate averaging interval must be positive")
 
-    buckets: dict[int, list[float]] = defaultdict(list)
+    buckets: dict[int, list[float]] = collections.defaultdict(list)
     for timestamp, value in points:
         if math.isfinite(timestamp) and math.isfinite(value) and 20 <= value <= 250:
             buckets[math.floor(timestamp / bin_seconds)].append(value)
@@ -92,7 +92,9 @@ def install_shared_heart_rate_core(analysis) -> None:
 
     original_dashboard = analysis.build_daily_progress_snapshot
 
-    def shared_points(records: list[dict[str, Any]]) -> list[tuple[float, float]]:
+    def shared_points(
+        records: list[dict[str, typing.Any]],
+    ) -> list[tuple[float, float]]:
         return heart_rate_sample_points(records, analysis)
 
     def shared_average(
@@ -109,10 +111,10 @@ def install_shared_heart_rate_core(analysis) -> None:
 
     def shared_dashboard(
         store,
-        reference_day: date | None = None,
+        reference_day: datetime.date | None = None,
         *,
-        heart_day: date | None = None,
-    ) -> dict[str, Any]:
+        heart_day: datetime.date | None = None,
+    ) -> dict[str, typing.Any]:
         snapshot = original_dashboard(store, reference_day, heart_day=heart_day)
         for metric in snapshot.get("metrics", []):
             if not isinstance(metric, dict) or metric.get("data_type") != "heart-rate-today":
