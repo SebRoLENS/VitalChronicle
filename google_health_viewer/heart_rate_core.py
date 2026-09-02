@@ -6,7 +6,6 @@ import math
 import statistics
 import typing
 
-
 FIVE_MINUTE_SECONDS = 300
 
 
