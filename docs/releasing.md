@@ -7,8 +7,10 @@ Updated for VitalChronicle **1.1.18**.
 A non-bot push to `main` that changes application or packaging files starts
 `automatic-release.yml`.
 
-1. The release-preparation script keeps a manually advanced semantic version such as
-   `1.1.18`, or advances the patch version when the source still matches the latest tag.
+1. The release-preparation script keeps a manually advanced semantic version when one is
+   already declared. Otherwise it advances from the latest tag according to the triggering
+   commit message: the default is a patch release, `[minor]` requests a feature/minor release,
+   and `[major]` requests a major release.
 2. Lint, tests, compilation, metadata validation, screenshot generation, and the PDF
    manual build must succeed.
 3. Generated metadata and documentation are committed by `github-actions[bot]`.
@@ -19,6 +21,14 @@ A non-bot push to `main` that changes application or packaging files starts
    are attached to the GitHub release.
 
 The bot commit does not recursively start another release.
+
+## Version policy
+
+Use semantic versioning consistently:
+
+- bug fixes and maintenance: `x.x.y` (patch, default);
+- user-facing features: `x.y.0` (`[minor]` in the triggering commit);
+- breaking changes: `x.0.0` (`[major]` in the triggering commit).
 
 ## Manual rebuild
 
