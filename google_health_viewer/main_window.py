@@ -84,12 +84,12 @@ from .i18n import (
 )
 from .local_ai import (
     HARDWARE_PROFILE_LABELS,
-    MODEL_DESCRIPTIONS,
     MODEL_OPTIONS,
     LocalAIError,
     OllamaClient,
     OllamaStatus,
     detected_hardware_profile,
+    model_description,
     recommended_model,
     system_prompt,
 )
@@ -2236,12 +2236,7 @@ class MainWindow(QMainWindow):
             )
 
     def _update_ai_model_hint(self, model: str) -> None:
-        self.ai_model_hint.setText(
-            MODEL_DESCRIPTIONS.get(
-                model.strip(),
-                _("Custom model: check that the name is available in Ollama."),
-            )
-        )
+        self.ai_model_hint.setText(model_description(model))
 
     def check_ai_status(self) -> None:
         if self.ai_status_thread and self.ai_status_thread.isRunning():
@@ -2257,7 +2252,17 @@ class MainWindow(QMainWindow):
     def _ai_status_ready(self, status: OllamaStatus) -> None:
         if status.online:
             self._known_ai_models = set(status.models)
-            installed = self.ai_model_combo.currentText() in status.models
+            selected_model = self.ai_model_combo.currentText()
+            self.ai_model_combo.blockSignals(True)
+            for candidate in (*status.catalog_models, *status.models):
+                if not candidate or "cloud" in candidate.lower():
+                    continue
+                if self.ai_model_combo.findText(candidate) < 0:
+                    self.ai_model_combo.addItem(candidate)
+            self.ai_model_combo.setCurrentText(selected_model)
+            self.ai_model_combo.blockSignals(False)
+            self._update_ai_model_hint(selected_model)
+            installed = selected_model in status.models
             self.ai_status_label.setText(("● " if installed else "◐ ") + status.message)
             self.ai_status_label.setStyleSheet(
                 "font-weight: 700; color: #B06000"

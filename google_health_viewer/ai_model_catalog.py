@@ -334,7 +334,10 @@ def model_description(model: str) -> str:
             "Local Ollama model · about {size:.1f} GB · detected dynamically",
             size=memory,
         )
-    if value in discover_model_families():
+    cached_families = tuple(
+        str(item) for item in _read_cache().get("families", []) if item
+    )
+    if value in cached_families:
         return _(
             "Official Ollama family discovered dynamically. Check/download it locally to read exact size and context."
         )

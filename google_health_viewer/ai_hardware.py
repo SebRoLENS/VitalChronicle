@@ -15,6 +15,11 @@ from typing import Any
 
 import requests
 
+from .ai_model_catalog import (
+    model_memory_gb as catalog_model_memory_gb,
+    recommended_model_for_hardware,
+)
+
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 PERFORMANCE_PROFILES = ("fast", "standard", "max")
 PERFORMANCE_LABELS = {
@@ -368,8 +373,12 @@ def recommend_model(
     hardware: HardwareInfo, profile: str = "standard"
 ) -> ModelRecommendation:
     profile = profile if profile in PERFORMANCE_PROFILES else "standard"
-    models = _gpu_models(hardware) if hardware.has_gpu else _cpu_models(hardware.ram_gb)
-    model = models[profile]
+    model = recommended_model_for_hardware(
+        ram_gb=hardware.ram_gb,
+        vram_gb=hardware.vram_gb,
+        has_gpu=hardware.has_gpu,
+        profile=profile,
+    )
     if hardware.has_gpu:
         accelerator = hardware.gpu_name
         memory_text = (
@@ -378,16 +387,18 @@ def recommend_model(
             else "VRAM not reported"
         )
         rationale = (
-            f"Sized for {accelerator} ({memory_text}) and {hardware.ram_gb:.0f} GB RAM."
+            f"Sized for {accelerator} ({memory_text}) and {hardware.ram_gb:.0f} GB RAM. "
+            "The catalogue can adopt newer compatible Ollama generations automatically."
         )
     else:
         rationale = (
-            f"Sized conservatively for CPU inference and {hardware.ram_gb:.0f} GB RAM."
+            f"Sized conservatively for CPU inference and {hardware.ram_gb:.0f} GB RAM. "
+            "The catalogue can adopt newer compatible Ollama generations automatically."
         )
     return ModelRecommendation(
         profile=profile,
         model=model,
-        model_memory_gb=MODEL_MEMORY_GB.get(model),
+        model_memory_gb=catalog_model_memory_gb(model) or MODEL_MEMORY_GB.get(model),
         expected_time=_expected_time(hardware, profile),
         rationale=rationale,
     )

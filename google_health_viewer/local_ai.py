@@ -10,49 +10,38 @@ from urllib.parse import quote
 
 import requests
 
+from .ai_model_catalog import (
+    CURATED_MODEL_DESCRIPTIONS,
+    CURATED_MODEL_OPTIONS,
+    discover_model_options,
+    model_description,
+    newer_model_suggestion as catalog_newer_model_suggestion,
+    recommended_model_for_legacy_profile,
+    remember_installed_models,
+)
 from .i18n import _, current_language
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 OLLAMA_REGISTRY_URL = "https://registry.ollama.ai"
-DEFAULT_MODEL = "qwen3.5:9b"
+DEFAULT_MODEL = recommended_model_for_legacy_profile("gpu16")
 HARDWARE_PROFILE_LABELS = {
     "gpu16": "NVIDIA GPU · 16 GB RAM",
     "cpu32": _("CPU only · 32 GB RAM"),
 }
-MODEL_OPTIONS = (
-    "qwen3.5:9b",
-    "qwen3:14b",
-    "qwen3:30b-a3b",
-    "qwen3.5:27b",
-    "qwen3.6:35b-a3b",
-    "qwen3:8b",
-    "qwen3:4b",
-)
-MODEL_DESCRIPTIONS = {
-    "qwen3.5:9b": _("Current and efficient · about 6.6 GB · recommended for RTX 4060/16 GB"),
-    "qwen3:14b": _("Larger · about 9.3 GB · can use GPU and RAM together"),
-    "qwen3:30b-a3b": _("High-quality MoE · about 19 GB · recommended for CPU/32 GB"),
-    "qwen3.5:27b": _("Dense 27B · about 17 GB · accurate but very slow on CPU"),
-    "qwen3.6:35b-a3b": _("Maximum MoE · about 23 GB · experimental on 32 GB"),
-    "qwen3:8b": _("Compact · about 5.2 GB · compatibility"),
-    "qwen3:4b": _("Lightweight · about 2.5 GB · compatibility"),
-}
+MODEL_OPTIONS = CURATED_MODEL_OPTIONS
+MODEL_DESCRIPTIONS = CURATED_MODEL_DESCRIPTIONS
 
 
 def recommended_model(profile: str) -> str:
-    return "qwen3:30b-a3b" if profile == "cpu32" else DEFAULT_MODEL
+    return recommended_model_for_legacy_profile(profile)
 
 
-def newer_model_suggestion(model: str, profile: str) -> str | None:
-    """Return a newer generation that remains sensible for the selected hardware."""
-    name, _, tag = model.strip().partition(":")
-    if name == "qwen3":
-        if profile == "cpu32":
-            return "qwen3.6:35b-a3b" if tag in {"30b-a3b", "32b"} else "qwen3.5:27b"
-        return "qwen3.5:9b"
-    if name == "qwen3.5" and profile == "cpu32" and tag in {"27b", "35b", "35b-a3b"}:
-        return "qwen3.6:35b-a3b"
-    return None
+def newer_model_suggestion(
+    model: str, profile: str, catalog_models: tuple[str, ...] = ()
+) -> str | None:
+    return catalog_newer_model_suggestion(
+        model, profile, catalog_models=catalog_models
+    )
 
 
 def detected_hardware_profile(nvidia_available: bool | None = None) -> str:
@@ -74,6 +63,7 @@ class OllamaStatus:
     online: bool
     models: tuple[str, ...]
     message: str
+    catalog_models: tuple[str, ...] = ()
     update_available: bool = False
     update_message: str = ""
     update_target: str | None = None
@@ -396,6 +386,9 @@ class OllamaClient:
         except (TypeError, ValueError) as exc:
             return OllamaStatus(False, (), _("Invalid Ollama response: {error}", error=exc))
 
+        remember_installed_models(model_items)
+        catalog_models = discover_model_options(installed=models)
+
         installed_item = next(
             (item for item in model_items if str(item.get("name")) == self.model), None
         )
@@ -417,7 +410,9 @@ class OllamaClient:
                 update_messages.append(_("new weights available for {model}", model=self.model))
                 update_target = self.model
 
-        successor = newer_model_suggestion(self.model, self.hardware_profile)
+        successor = newer_model_suggestion(
+            self.model, self.hardware_profile, catalog_models
+        )
         if successor:
             qualifier = _("already installed") if successor in models else _("available")
             update_messages.append(
@@ -430,6 +425,7 @@ class OllamaClient:
             online=True,
             models=models,
             message=message,
+            catalog_models=catalog_models,
             update_available=bool(update_messages),
             update_message=" · ".join(update_messages),
             update_target=update_target,
