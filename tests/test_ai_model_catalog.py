@@ -40,6 +40,12 @@ def test_future_qwen_generation_is_suggested_without_app_update_on_cpu_profile(m
     ) == "qwen4"
 
 
+def test_known_successor_tag_is_preserved_for_memory_ranking():
+    assert newer_model_suggestion(
+        "qwen3:8b", "gpu16", catalog_models=CURATED_MODEL_OPTIONS
+    ) == "qwen3.5:9b"
+
+
 def test_modern_hardware_ladder_keeps_small_gpu_conservative(monkeypatch):
     monkeypatch.setattr(catalog, "_read_cache", dict)
     assert recommended_model_for_hardware(
