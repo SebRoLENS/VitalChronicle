@@ -96,6 +96,7 @@ jobs:
           git rm -r --ignore-unmatch google_health_viewer/locales
           git checkout origin/weblate-vitalchronicle-application -- google_health_viewer/locales
           cp "${RUNNER_TEMP}/en.json" google_health_viewer/locales/en.json
+          python scripts/update_translations.py
           git add -A google_health_viewer/locales
           if ! git diff --cached --quiet; then
             git commit -m 'chore(l10n): sync translations from Weblate'
