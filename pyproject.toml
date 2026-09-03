@@ -54,5 +54,6 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint.per-file-ignores]
-"google_health_viewer/ai_query_planner.py" = ["RUF100", "TRY004"]
+"google_health_viewer/ai_query_planner.py" = ["RUF100", "TRY004", "F401", "I001"]
+"google_health_viewer/ai_query_planner_core.py" = ["RUF100", "TRY004"]
 "tests/test_ai_query_planner.py" = ["RUF100"]
