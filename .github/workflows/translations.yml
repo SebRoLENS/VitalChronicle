@@ -1,10 +1,9 @@
-name: Translation sync
+name: Translation catalogues
 
 on:
   push:
     branches:
       - main
-      - weblate-vitalchronicle-application
     paths:
       - 'google_health_viewer/**/*.py'
       - 'google_health_viewer/locales/**'
@@ -20,18 +19,20 @@ on:
       - '.github/workflows/translations.yml'
   workflow_dispatch:
 
+# Weblate itself now handles repository updates and outbound translation
+# delivery through the Hosted Weblate GitHub App. This workflow only keeps
+# the source catalogues generated from the application code in sync and
+# validates translation changes proposed through pull requests.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: translation-sync-${{ github.ref }}
+  group: translation-catalogues-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   validate:
     if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
@@ -46,8 +47,10 @@ jobs:
           git diff --exit-code -- google_health_viewer/locales/en.json google_health_viewer/locales/it.json
           pytest -q tests/test_i18n.py
 
-  main-to-weblate:
+  refresh-source-catalogues:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
@@ -66,39 +69,5 @@ jobs:
           git add google_health_viewer/locales/en.json google_health_viewer/locales/it.json
           if ! git diff --cached --quiet; then
             git commit -m 'chore(l10n): refresh source catalogues'
-            git push origin HEAD:main
-          fi
-      - name: Keep Weblate source branch current
-        run: |
-          git fetch origin weblate-vitalchronicle-application
-          git switch -C weblate-vitalchronicle-application origin/weblate-vitalchronicle-application
-          git checkout main -- google_health_viewer/locales/en.json .github/workflows/translations.yml
-          git add google_health_viewer/locales/en.json .github/workflows/translations.yml
-          if ! git diff --cached --quiet; then
-            git commit -m 'chore(l10n): sync source catalogue from main'
-            git push origin HEAD:weblate-vitalchronicle-application
-          fi
-
-  weblate-to-main:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/weblate-vitalchronicle-application'
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: main
-          fetch-depth: 0
-      - name: Mirror Weblate translations into main
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git fetch origin weblate-vitalchronicle-application
-          cp google_health_viewer/locales/en.json "${RUNNER_TEMP}/en.json"
-          git rm -r --ignore-unmatch google_health_viewer/locales
-          git checkout origin/weblate-vitalchronicle-application -- google_health_viewer/locales
-          cp "${RUNNER_TEMP}/en.json" google_health_viewer/locales/en.json
-          python scripts/update_translations.py
-          git add -A google_health_viewer/locales
-          if ! git diff --cached --quiet; then
-            git commit -m 'chore(l10n): sync translations from Weblate'
             git push origin HEAD:main
           fi
