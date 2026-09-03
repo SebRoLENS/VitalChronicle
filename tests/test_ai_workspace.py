@@ -7,6 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
+from google_health_viewer.app import _configure_period_visibility
 from google_health_viewer.local_ai import SYSTEM_PROMPT
 from google_health_viewer.main_window import MainWindow
 from google_health_viewer.storage import HealthStore
@@ -35,6 +36,31 @@ def test_ai_settings_metrics_and_prompt_share_one_main_tab(tmp_path: Path):
     window._set_version_badge(ReleaseInfo("9.9.9", "https://example.test/release"))
     assert "9.9.9" in window.version_badge.text()
     assert window.version_badge.objectName() == "versionBadgeUpdate"
+    window.close()
+
+
+def test_dashboard_period_controls_are_hidden_only_in_ai_tab(tmp_path: Path):
+    app = _application()
+    window = MainWindow(store=HealthStore(tmp_path / "health.sqlite3"), screenshot_mode=True)
+    _configure_period_visibility(window)
+
+    window.tabs.setCurrentIndex(0)
+    app.processEvents()
+    assert not window.range_combo.isHidden()
+    assert not window.start_date.isHidden()
+    assert not window.end_date.isHidden()
+
+    window.tabs.setCurrentIndex(2)
+    app.processEvents()
+    assert window.range_combo.isHidden()
+    assert window.start_date.isHidden()
+    assert window.end_date.isHidden()
+
+    window.tabs.setCurrentIndex(1)
+    app.processEvents()
+    assert not window.range_combo.isHidden()
+    assert not window.start_date.isHidden()
+    assert not window.end_date.isHidden()
     window.close()
 
 
