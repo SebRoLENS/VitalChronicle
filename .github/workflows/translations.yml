@@ -1,24 +1,37 @@
-name: Translation validation
+name: Translation sync
 
 on:
   push:
+    branches:
+      - main
+      - weblate-vitalchronicle-application
     paths:
+      - 'google_health_viewer/**/*.py'
       - 'google_health_viewer/locales/**'
-      - 'google_health_viewer/i18n.py'
       - 'scripts/update_translations.py'
       - 'tests/test_i18n.py'
+      - '.github/workflows/translations.yml'
   pull_request:
     paths:
+      - 'google_health_viewer/**/*.py'
       - 'google_health_viewer/locales/**'
-      - 'google_health_viewer/i18n.py'
       - 'scripts/update_translations.py'
       - 'tests/test_i18n.py'
+      - '.github/workflows/translations.yml'
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: translation-sync-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   validate:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
@@ -27,8 +40,64 @@ jobs:
           python-version: '3.12'
       - name: Install project
         run: python -m pip install -e '.[dev]'
-      - name: Validate translation catalogues
+      - name: Validate source catalogues and i18n
         run: |
           python scripts/update_translations.py
-          git diff --exit-code -- google_health_viewer/locales
+          git diff --exit-code -- google_health_viewer/locales/en.json google_health_viewer/locales/it.json
           pytest -q tests/test_i18n.py
+
+  main-to-weblate:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Refresh source catalogues
+        run: python scripts/update_translations.py
+      - name: Commit refreshed catalogues when needed
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add google_health_viewer/locales/en.json google_health_viewer/locales/it.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore(l10n): refresh source catalogues'
+            git push origin HEAD:main
+          fi
+      - name: Keep Weblate source branch current
+        run: |
+          git fetch origin weblate-vitalchronicle-application
+          git switch -C weblate-vitalchronicle-application origin/weblate-vitalchronicle-application
+          git checkout main -- google_health_viewer/locales/en.json .github/workflows/translations.yml
+          git add google_health_viewer/locales/en.json .github/workflows/translations.yml
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore(l10n): sync source catalogue from main'
+            git push origin HEAD:weblate-vitalchronicle-application
+          fi
+
+  weblate-to-main:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/weblate-vitalchronicle-application'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Mirror Weblate translations into main
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin weblate-vitalchronicle-application
+          cp google_health_viewer/locales/en.json "${RUNNER_TEMP}/en.json"
+          git rm -r --ignore-unmatch google_health_viewer/locales
+          git checkout origin/weblate-vitalchronicle-application -- google_health_viewer/locales
+          cp "${RUNNER_TEMP}/en.json" google_health_viewer/locales/en.json
+          git add -A google_health_viewer/locales
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore(l10n): sync translations from Weblate'
+            git push origin HEAD:main
+          fi
