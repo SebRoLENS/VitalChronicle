@@ -82,6 +82,62 @@ def _expose_hardware_ai_entry(window) -> None:
             break
 
 
+def _configure_period_visibility(window) -> None:
+    """Show dashboard date controls only where they actually affect the displayed data."""
+
+    tabs = getattr(window, "tabs", None)
+    ai_sections = getattr(window, "ai_sections", None)
+    central = window.centralWidget()
+    if tabs is None or ai_sections is None or central is None:
+        return
+
+    ai_index = next(
+        (
+            index
+            for index in range(tabs.count())
+            if tabs.widget(index) is ai_sections
+            or tabs.widget(index).isAncestorOf(ai_sections)
+        ),
+        -1,
+    )
+    if ai_index < 0:
+        return
+
+    root_layout = central.layout()
+    header = root_layout.itemAt(0).layout() if root_layout and root_layout.count() else None
+    range_combo = getattr(window, "range_combo", None)
+    if header is None or range_combo is None:
+        return
+
+    range_index = next(
+        (
+            index
+            for index in range(header.count())
+            if header.itemAt(index).widget() is range_combo
+        ),
+        -1,
+    )
+    if range_index < 1:
+        return
+
+    # Period label + combo + From label + start date + to label + end date.
+    period_widgets = [
+        widget
+        for index in range(range_index - 1, min(header.count(), range_index + 5))
+        if (widget := header.itemAt(index).widget()) is not None
+    ]
+
+    def sync_period_controls(current_index: int) -> None:
+        visible = current_index != ai_index
+        for widget in period_widgets:
+            widget.setVisible(visible)
+
+    # Keep a reference on the window as well as the Qt signal connection.
+    window._sync_period_controls = sync_period_controls
+    tabs.currentChanged.connect(sync_period_controls)
+    sync_period_controls(tabs.currentIndex())
+
+
 def _install_health_benchmark() -> None:
     """Route the setup benchmark through representative synthetic health evidence."""
 
@@ -171,6 +227,7 @@ def main() -> int:
         return 78
     window = MainWindow(screenshot_mode=smoke_test)
     _expose_hardware_ai_entry(window)
+    _configure_period_visibility(window)
     window.show()
     if _should_show_hardware_ai_intro(
         settings,
