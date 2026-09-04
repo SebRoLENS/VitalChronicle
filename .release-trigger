@@ -2,3 +2,5 @@ VitalChronicle automatic release marker.
 
 The first automated run publishes the declared 1.0.0 version. Later application changes
 advance the patch version through scripts/prepare_release.py.
+
+Release trigger: 2026-09-04 v1.2.1
