@@ -210,12 +210,14 @@ def main() -> int:
     _install_one_minute_heart_rate_rendering()
     _install_health_benchmark()
     from . import main_window as main_window_module
+    from .ai_model_selector import install_ai_model_selector
     from .ai_query_planner import install_ai_query_planner
 
     # Planner-first selection is installed after the legacy retrieval guards: it
     # chooses source data before extraction, while those guards remain as a final
     # compact-packet/context safety layer.
     install_ai_query_planner(main_window_module)
+    install_ai_model_selector(main_window_module)
     MainWindow = main_window_module.MainWindow
 
     app.setApplicationDisplayName(APP_NAME)
