@@ -1,6 +1,9 @@
 """VitalChronicle: a local-first Google Health dashboard."""
 
 from . import analysis as _analysis
+from .deterministic_context_patch import (
+    install_deterministic_context_patch as _install_deterministic_context_patch,
+)
 from .deterministic_detail_core import (
     install_deterministic_detail_core as _install_deterministic_detail_core,
 )
@@ -17,3 +20,7 @@ _install_shared_heart_rate_core(_analysis)
 # the existing adaptive pipeline retains structured details for relevant metrics
 # and can trim them from broad requests when the context budget is tight.
 _install_deterministic_detail_core(_analysis)
+
+# Correct Google Health sleep-stage/short-awakening parsing and add temporal
+# heart-rate context for detected workouts/activity levels.
+_install_deterministic_context_patch(_analysis)
