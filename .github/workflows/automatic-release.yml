@@ -147,9 +147,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.prepare.outputs.version }}
-          RELEASE_SHA: ${{ steps.commit.outputs.commit_sha }}
         run: |
           set -euo pipefail
+          BEFORE_RUN_ID="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/build-desktop.yml/runs?event=workflow_dispatch&per_page=1" \
+              --jq '.workflow_runs[0].id // 0'
+          )"
           gh workflow run build-desktop.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
@@ -159,7 +163,7 @@ jobs:
             RUN_ID="$(
               gh api \
                 "repos/${GITHUB_REPOSITORY}/actions/workflows/build-desktop.yml/runs?event=workflow_dispatch&per_page=20" \
-                --jq ".workflow_runs[] | select(.head_sha == \"${RELEASE_SHA}\") | .id" \
+                --jq ".workflow_runs[] | select(.id > ${BEFORE_RUN_ID}) | .id" \
                 | head -n 1
             )"
             if [ -n "$RUN_ID" ]; then break; fi
