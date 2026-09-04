@@ -16,7 +16,7 @@ from .scientific_context_preserve_core import (
     install_scientific_context_preserve_core as _install_scientific_context_preserve_core,
 )
 
-__version__ = "1.2.1"
+__version__ = "1.5.1"
 
 # Keep desktop and Android on exactly the same heart-rate semantics. Importing
 # the package installs the shared five-minute averaging/parser into analysis.py;
