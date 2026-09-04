@@ -89,9 +89,18 @@ class _ConfirmedPage(QWizardPage):
         self.confirm = QCheckBox(confirmation)
         self.confirm.toggled.connect(self.completeChanged)
 
-    def finish_layout(self) -> None:
+    def finish_layout(self, action_text: str | None = None) -> None:
         self.layout.addSpacing(14)
-        self.layout.addWidget(self.confirm)
+        gate = QFrame()
+        gate.setFrameShape(QFrame.Shape.StyledPanel)
+        gate_layout = QVBoxLayout(gate)
+        action = action_text or _("Next step")
+        hint = QLabel(f"☑  →  {action}")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("font-weight: 700; font-size: 14px;")
+        gate_layout.addWidget(hint)
+        gate_layout.addWidget(self.confirm)
+        self.layout.addWidget(gate)
         self.layout.addStretch()
 
     def isComplete(self) -> bool:
@@ -456,7 +465,7 @@ class _ReadyPage(_ConfirmedPage):
         )
         note.setStyleSheet("color: #5f6368;")
         self.layout.addWidget(note)
-        self.finish_layout()
+        self.finish_layout(_("Finish and sign in with Google"))
 
     def validatePage(self) -> bool:
         if port_is_available():
