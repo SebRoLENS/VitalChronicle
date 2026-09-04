@@ -1,6 +1,6 @@
 """Clarify user intent and daily-record completeness for local AI requests.
 
-This layer runs after the scientific-context hooks.  It keeps pure scientific
+This layer runs after the scientific-context hooks. It keeps pure scientific
 questions separate from personal-data analysis and prevents the clock being in
 the middle of a day from making already-emitted Google Health Daily records look
 partial to the language model.
@@ -36,7 +36,6 @@ _DEFINITION_PREFIXES = (
     "spiegami ",
 )
 
-# These make a superficially definitional sentence personal/analytical instead.
 _PERSONAL_OR_ANALYTICAL_HINTS = (
     " my ",
     " mine ",
@@ -133,6 +132,13 @@ def _is_pure_definition(question: str) -> bool:
 
 
 def _annotate_daily_record_semantics(result: dict[str, Any]) -> None:
+    metadata = result.get("packet")
+    retrieval_mode = str(metadata.get("retrieval_mode") or "") if isinstance(metadata, dict) else ""
+    # Per-metric annotations are only needed when the request is focused. Broad
+    # requests rely on the system-level rule so they do not pay a repeated token cost.
+    if retrieval_mode not in {"specific_metrics", "domain"}:
+        return
+
     daily_types: list[str] = []
     for metrics in (result.get("domains") or {}).values():
         if not isinstance(metrics, list):
@@ -154,7 +160,6 @@ def _annotate_daily_record_semantics(result: dict[str, Any]) -> None:
             }
             daily_types.append(data_type)
 
-    metadata = result.get("packet")
     if isinstance(metadata, dict) and daily_types:
         metadata["daily_summary_data_types"] = sorted(set(daily_types))
 
@@ -167,22 +172,15 @@ def _fix_observation_semantics(result: dict[str, Any]) -> None:
         observation.pop("current_day_is_incomplete", False)
         or observation.get("selected_period_includes_today")
     )
-    # Elapsed-day percentage is useful only for explicitly cumulative metrics, which
-    # already carry their own metric-level `today` context. Globally it invites the
-    # model to discount Daily summaries such as HRV, SpO2 or resting heart rate.
+    # Intraday cumulative metrics already carry their own metric-level `today`
+    # context. Keeping elapsed-day percentage globally makes Daily summaries look
+    # partial even though clock-time proration does not apply to them.
     observation.pop("elapsed_day_percent", None)
     if day_in_progress:
         observation["calendar_day_in_progress"] = True
-        observation["metric_completeness_rule"] = (
-            "Clock-day progress alone does not make a metric partial. Only a metric-level "
-            "today/temporal status may mark an intraday metric partial; returned Daily records "
-            "must not be prorated by clock time."
-        )
 
 
-def _science_only_packet(
-    result: dict[str, Any], question: str
-) -> dict[str, Any]:
+def _science_only_packet(result: dict[str, Any], question: str) -> dict[str, Any]:
     science = copy.deepcopy(result.get("scientific_context") or {})
     metadata = copy.deepcopy(result.get("packet") or {})
     metadata["response_mode"] = "scientific_definition"
@@ -220,6 +218,16 @@ def _select_with_query_semantics(
 
     if analysis_mode == "question" and _is_pure_definition(question):
         return _science_only_packet(result, question)
+
+    # Preserve the existing Maximum/deep guarantee. Other modes are allowed to
+    # re-trim after adding semantics so the original evidence budgets remain true.
+    preserve_full = performance_profile == "max" and analysis_mode == "deep"
+    if not preserve_full:
+        target = ai_adaptive_retrieval.PROFILE_EVIDENCE_TARGETS.get(
+            performance_profile,
+            ai_adaptive_retrieval.PROFILE_EVIDENCE_TARGETS["standard"],
+        )
+        ai_adaptive_retrieval._trim_to_target(result, target)
 
     metadata = result.get("packet")
     if isinstance(metadata, dict):
