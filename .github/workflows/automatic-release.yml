@@ -125,8 +125,10 @@ jobs:
             git commit -m "Prepare VitalChronicle v${VERSION} release"
             git fetch origin main
             git rebase origin/main
-            git push origin HEAD:main
           fi
+          RELEASE_BRANCH="automation/release-v${VERSION}"
+          git push --force-with-lease origin "HEAD:refs/heads/${RELEASE_BRANCH}"
+          echo "Prepared release commit on ${RELEASE_BRANCH}; protected main remains untouched."
           echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Create immutable release tag
