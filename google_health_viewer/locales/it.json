@@ -490,6 +490,7 @@
   "The value remains editable. After calculation, the only maximum applied is the physical context reported by the model.": "Il valore resta liberamente modificabile. Dopo il calcolo, l'unico massimo applicato sarà il contesto fisico dichiarato dal modello.",
   "There is not enough local data in the selected period.": "Non ci sono abbastanza dati locali nel periodo selezionato.",
   "There is not enough local data to analyse.": "",
+  "These are open-source models that fit this computer. Installed Ollama models are shown first. To use another model, install it manually with Ollama and it will appear here.": "",
   "These permissions let the OAuth client request health data. Every permission used by VitalChronicle is read-only: the app cannot modify Google Health data.": "Queste autorizzazioni consentono al client OAuth di richiedere i dati sanitari. Ogni autorizzazione usata da VitalChronicle è di sola lettura: l'app non può modificare i dati di Google Health.",
   "Thinking and the answer share this limit. You can edit the recommendation.": "Thinking e risposta condividono questo limite. Puoi modificare il consiglio.",
   "This information is not available yet. Run a download or check the related OAuth permission.": "Questa informazione non è ancora disponibile. Esegui il download oppure controlla il relativo permesso OAuth.",
