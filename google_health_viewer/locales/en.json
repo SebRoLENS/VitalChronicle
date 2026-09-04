@@ -490,6 +490,7 @@
   "The value remains editable. After calculation, the only maximum applied is the physical context reported by the model.": "The value remains editable. After calculation, the only maximum applied is the physical context reported by the model.",
   "There is not enough local data in the selected period.": "There is not enough local data in the selected period.",
   "There is not enough local data to analyse.": "There is not enough local data to analyse.",
+  "These are open-source models that fit this computer. Installed Ollama models are shown first. To use another model, install it manually with Ollama and it will appear here.": "These are open-source models that fit this computer. Installed Ollama models are shown first. To use another model, install it manually with Ollama and it will appear here.",
   "These permissions let the OAuth client request health data. Every permission used by VitalChronicle is read-only: the app cannot modify Google Health data.": "These permissions let the OAuth client request health data. Every permission used by VitalChronicle is read-only: the app cannot modify Google Health data.",
   "Thinking and the answer share this limit. You can edit the recommendation.": "Thinking and the answer share this limit. You can edit the recommendation.",
   "This information is not available yet. Run a download or check the related OAuth permission.": "This information is not available yet. Run a download or check the related OAuth permission.",
