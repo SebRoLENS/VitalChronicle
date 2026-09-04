@@ -1,8 +1,8 @@
 """Coherent local Ollama model selection for the desktop AI panel.
 
-Installed models are always kept available as an explicit manual override.  Models
+Installed models are always kept available as an explicit manual override. Models
 that are not installed are offered only when their known memory footprint is a good
-fit for the detected machine.  The selector never silently replaces the model the
+fit for the detected machine. The selector never silently replaces the model the
 user last chose.
 """
 
@@ -62,7 +62,7 @@ def optimal_model_options(
 ) -> tuple[str, ...]:
     """Return models that are neither wastefully small nor impractically large.
 
-    Only candidates with a known footprint are auto-suggested.  Unknown or custom
+    Only candidates with a known footprint are auto-suggested. Unknown or custom
     models remain available as soon as the user installs them in Ollama.
     """
 
@@ -103,7 +103,7 @@ def ordered_model_choices(
     last = last_used.strip()
     if last and not is_cloud_model(last) and not any(_same_model(last, item) for item in result):
         # Preserve the user's last choice even if it has since been removed from
-        # Ollama.  Status will clearly report that it is no longer installed.
+        # Ollama. Status will clearly report that it is no longer installed.
         result.append(last)
 
     for model in suggestions:
@@ -243,6 +243,7 @@ def install_ai_model_selector(main_window_module) -> None:
     # longer silently replaces the last-used model.
     SetupDialog = main_window_module.AISetupDialog
     original_setup_init = SetupDialog.__init__
+    original_setup_sync_parent = SetupDialog._sync_parent
 
     def setup_init(self, *args, **kwargs):
         QSettings().setValue("ai/automatic_model_selection", False)
@@ -250,9 +251,20 @@ def install_ai_model_selector(main_window_module) -> None:
         self.auto_model_check.setChecked(False)
         self.auto_model_check.setVisible(False)
 
+    def setup_sync_parent(self, model: str, hardware: HardwareInfo) -> None:
+        # Explicitly choosing a hardware recommendation is still allowed. Since
+        # the main combo is deliberately non-editable, make sure that explicit
+        # choice exists in the list before the legacy dialog selects it.
+        parent = self.parent()
+        combo = getattr(parent, "ai_model_combo", None) if parent is not None else None
+        if combo is not None and combo.findText(model) < 0:
+            combo.addItem(model)
+        original_setup_sync_parent(self, model, hardware)
+
     MainWindow._build_ai_page = build_ai_page
     MainWindow._ai_profile_changed = ai_profile_changed
     MainWindow._ai_model_changed = ai_model_changed
     MainWindow._ai_status_ready = ai_status_ready
     SetupDialog.__init__ = setup_init
+    SetupDialog._sync_parent = setup_sync_parent
     MainWindow._coherent_model_selector_installed = True
