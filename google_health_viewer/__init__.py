@@ -11,6 +11,9 @@ from .heart_rate_core import install_shared_heart_rate_core as _install_shared_h
 from .scientific_context_core import (
     install_scientific_context_core as _install_scientific_context_core,
 )
+from .scientific_context_preserve_core import (
+    install_scientific_context_preserve_core as _install_scientific_context_preserve_core,
+)
 
 __version__ = "1.2.1"
 
@@ -31,3 +34,7 @@ _install_deterministic_context_patch(_analysis)
 # Selectively add curated scientific interpretation to relevant AI requests while
 # still allowing the language model to supplement it with established general knowledge.
 _install_scientific_context_core()
+
+# Preserve the established Maximum/deep guarantee: scientific context is additive
+# there and must never evict compact deterministic measurements.
+_install_scientific_context_preserve_core()
