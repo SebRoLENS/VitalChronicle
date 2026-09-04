@@ -6,7 +6,7 @@ from .deterministic_detail_core import (
 )
 from .heart_rate_core import install_shared_heart_rate_core as _install_shared_heart_rate_core
 
-__version__ = "1.2.1"
+__version__ = "1.3.0"
 
 # Keep desktop and Android on exactly the same heart-rate semantics. Importing
 # the package installs the shared five-minute averaging/parser into analysis.py;
