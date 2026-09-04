@@ -11,7 +11,12 @@ from google_health_viewer.scientific_context import (
 def _packet(data_type: str | None = None) -> dict:
     domains = {}
     if data_type is not None:
-        domain = "heart" if "heart" in data_type else "vitals"
+        if data_type == "steps":
+            domain = "activity"
+        elif "heart" in data_type:
+            domain = "heart"
+        else:
+            domain = "vitals"
         label = {
             "daily-heart-rate-variability": "Daily heart-rate variability",
             "steps": "Steps",
