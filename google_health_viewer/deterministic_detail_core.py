@@ -4,6 +4,7 @@ import math
 import statistics
 from collections import defaultdict
 from datetime import datetime
+from itertools import pairwise
 from typing import Any
 
 _WAKE_STAGES = {"AWAKE", "WAKE", "OUT_OF_BED"}
@@ -128,7 +129,7 @@ def _sleep_session_details(record: dict[str, Any], analysis) -> dict[str, Any] |
         if any(stage not in _WAKE_STAGES for _s, _e, stage in runs[:index])
         and any(stage not in _WAKE_STAGES for _s, _e, stage in runs[index + 1 :])
     )
-    transitions = sum(1 for left, right in zip(runs, runs[1:]) if left[2] != right[2])
+    transitions = sum(1 for left, right in pairwise(runs) if left[2] != right[2])
 
     def latency(stage_name: str) -> float | None:
         if first_sleep is None:
