@@ -35,6 +35,7 @@ class SparklineWidget(QWidget):
         self._mean: float | None = None
         self._std: float | None = None
         self._x_bounds: tuple[float, float] | None = None
+        self._show_markers = True
         self.setFixedHeight(62)
 
     def set_series(
@@ -43,11 +44,13 @@ class SparklineWidget(QWidget):
         mean: float | None = None,
         std: float | None = None,
         x_bounds: tuple[float, float] | None = None,
+        show_markers: bool = True,
     ) -> None:
         self._points = points
         self._mean = mean
         self._std = std
         self._x_bounds = x_bounds
+        self._show_markers = show_markers
         self.setVisible(bool(points))
         self.update()
 
@@ -112,10 +115,11 @@ class SparklineWidget(QWidget):
         painter.setBrush(Qt.NoBrush)
         painter.setPen(QPen(self._color, 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         painter.drawPath(path)
-        last_point = QPointF(map_x(self._points[-1][0]), map_y(self._points[-1][1]))
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(self._color)
-        painter.drawEllipse(last_point, 3.2, 3.2)
+        if self._show_markers:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(self._color)
+            for timestamp, value in self._points:
+                painter.drawEllipse(QPointF(map_x(timestamp), map_y(value)), 2.8, 2.8)
 
 
 class MetricCard(QFrame):
@@ -274,6 +278,7 @@ class MetricCard(QFrame):
                     mean,
                     std,
                     (day_start.timestamp(), visible_end.timestamp()),
+                    show_markers=False,
                 )
                 minimum = format_value(metric.get("heart_day_min"), unit)
                 maximum = format_value(metric.get("heart_day_max"), unit)
