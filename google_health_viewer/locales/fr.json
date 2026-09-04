@@ -1,4 +1,0 @@
-{
-  "\n\n# Context budget\n\nEstimated input: {input} tokens · context: {context} tokens · maximum response: {output} tokens": "",
-  "\n\n## VitalChronicle AI · thinking\n\n> {thinking}": "\n\n## VitalChronicle AI · réflexion\n\n> {thinking}"
-}
