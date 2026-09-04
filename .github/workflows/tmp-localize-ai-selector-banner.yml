@@ -1,0 +1,45 @@
+name: Temporary AI selector localization
+
+on:
+  push:
+    branches:
+      - feature/coherent-ai-model-selector
+
+permissions:
+  contents: write
+
+jobs:
+  localize:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/coherent-ai-model-selector
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Add Italian banner translation
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('google_health_viewer/locales/it.json')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          key = ('These are open-source models that fit this computer. Installed Ollama models '
+                 'are shown first. To use another model, install it manually with Ollama and it '
+                 'will appear here.')
+          data[key] = ('Questi sono modelli open source adatti a questo computer. I modelli Ollama '
+                       'già installati sono mostrati per primi. Per usare un altro modello, installalo '
+                       'manualmente con Ollama e comparirà qui.')
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          PY
+      - name: Commit translation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add google_health_viewer/locales/it.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore(l10n): translate AI selector banner'
+            git push origin HEAD:feature/coherent-ai-model-selector
+          fi
