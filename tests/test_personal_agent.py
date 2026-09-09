@@ -129,6 +129,51 @@ def test_runtime_starts_uncalibrated_when_health_data_exist(tmp_path: Path):
     assert not runtime.needs_calibration()
 
 
+def test_runtime_executes_tool_then_returns_grounded_answer(tmp_path: Path, monkeypatch):
+    health = HealthStore(tmp_path / "health.sqlite3")
+    health.upsert_records("steps", [_step_record(1, 1000), _step_record(3, 1800)])
+    runtime = AgentRuntime(health, AgentStore(tmp_path / "agent.sqlite3"))
+    calls: list[list[dict]] = []
+
+    def fake_chat_once(**kwargs):
+        calls.append(list(kwargs["messages"]))
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "get_data_coverage",
+                            "arguments": {
+                                "start": "2026-08-01",
+                                "end": "2026-08-03",
+                            },
+                        }
+                    }
+                ],
+            }
+        return {"content": "Grounded answer", "tool_calls": []}
+
+    monkeypatch.setattr(runtime, "_chat_once", fake_chat_once)
+    events: list[str] = []
+    answer = runtime.analyze(
+        model="test-model",
+        snapshot={"analysis_scope": "selected_interval"},
+        question="How complete are my data?",
+        history=[],
+        max_tokens=1024,
+        model_context_limit=8192,
+        performance_profile="standard",
+        thread_id="thread-1",
+        event_callback=events.append,
+    )
+
+    assert answer == "Grounded answer"
+    assert len(calls) == 2
+    assert any(message.get("role") == "tool" for message in calls[1])
+    assert any("get_data_coverage" in event for event in events)
+
+
 def test_tool_argument_parser_accepts_ollama_dict_and_json_string():
     assert _tool_arguments({"function": {"arguments": {"metric": "hrv"}}}) == {
         "metric": "hrv"
