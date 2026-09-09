@@ -1,0 +1,35 @@
+name: Refresh agent translation catalogues
+
+on:
+  push:
+    branches:
+      - feature/personal-health-agent
+    paths:
+      - 'google_health_viewer/agent_*.py'
+      - '.github/workflows/agent-catalog-refresh.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/personal-health-agent
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Refresh source catalogues
+        run: python scripts/update_translations.py
+      - name: Commit generated catalogues
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add google_health_viewer/locales/en.json google_health_viewer/locales/it.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore(l10n): refresh personal agent catalogues'
+            git push origin HEAD:feature/personal-health-agent
+          fi
