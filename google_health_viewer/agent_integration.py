@@ -1,0 +1,258 @@
+from __future__ import annotations
+
+from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+)
+
+from .agent_runtime import AgentAnalysisThread, AgentRuntime
+from .agent_ui import build_personal_ai_page, refresh_personal_ai_page
+from .ai_hardware import reasoning_value
+from .i18n import _
+
+
+def _install_agent_reasoning_compatibility() -> None:
+    """Use the same Ollama reasoning semantics as the existing desktop AI path."""
+
+    if getattr(AgentRuntime, "_reasoning_compatibility_installed", False):
+        return
+    original_chat_once = AgentRuntime._chat_once
+
+    def chat_once(self, **kwargs):
+        think = kwargs.get("think")
+        model = str(kwargs.get("model") or "")
+        if isinstance(think, bool):
+            profile = str(QSettings().value("ai/performance_profile", "standard") or "standard")
+            # GPT-OSS requires low/medium/high instead of a boolean. A deliberate
+            # think=False pass maps to the fast/low level; boolean-thinking models
+            # keep the original True/False value.
+            resolved = reasoning_value(model, profile if think else "fast")
+            if isinstance(resolved, str):
+                kwargs["think"] = resolved
+        return original_chat_once(self, **kwargs)
+
+    AgentRuntime._chat_once = chat_once
+    AgentRuntime._reasoning_compatibility_installed = True
+
+
+def _install_chat_integration(ai_chat_module) -> None:
+    AIChatWindow = ai_chat_module.AIChatWindow
+    if getattr(AIChatWindow, "_personal_agent_integration_installed", False):
+        return
+
+    original_build_ui = AIChatWindow._build_ui
+    original_load_thread = AIChatWindow._load_current_thread
+    original_start_request = AIChatWindow._start_request
+    original_analysis_completed = AIChatWindow._analysis_completed
+
+    def build_ui(self) -> None:
+        original_build_ui(self)
+        central = self.centralWidget()
+        root = central.layout() if central is not None else None
+        splitter = root.itemAt(0).widget() if root is not None and root.count() else None
+        conversation = splitter.widget(1) if splitter is not None and splitter.count() > 1 else None
+        layout = conversation.layout() if conversation is not None else None
+        if layout is None:
+            return
+
+        self.agent_feedback_panel = QFrame()
+        self.agent_feedback_panel.setObjectName("aiCard")
+        panel_layout = QVBoxLayout(self.agent_feedback_panel)
+        panel_layout.setContentsMargins(14, 11, 14, 11)
+        self.agent_feedback_title = QLabel(_("A question that can improve personalisation"))
+        self.agent_feedback_title.setObjectName("chatSectionTitle")
+        panel_layout.addWidget(self.agent_feedback_title)
+        self.agent_feedback_question = QLabel()
+        self.agent_feedback_question.setWordWrap(True)
+        panel_layout.addWidget(self.agent_feedback_question)
+        self.agent_feedback_reason = QLabel()
+        self.agent_feedback_reason.setObjectName("pageSubtitle")
+        self.agent_feedback_reason.setWordWrap(True)
+        panel_layout.addWidget(self.agent_feedback_reason)
+        answer_row = QHBoxLayout()
+        self.agent_feedback_answer = QLineEdit()
+        self.agent_feedback_answer.setPlaceholderText(
+            _("Optional subjective context; stored only on this computer")
+        )
+        answer_row.addWidget(self.agent_feedback_answer, 1)
+        self.agent_feedback_save = QPushButton(_("Save feedback"))
+        self.agent_feedback_save.setObjectName("primaryButton")
+        answer_row.addWidget(self.agent_feedback_save)
+        self.agent_feedback_skip = QPushButton(_("Skip"))
+        answer_row.addWidget(self.agent_feedback_skip)
+        panel_layout.addLayout(answer_row)
+        self.agent_feedback_panel.setVisible(False)
+        self._agent_pending_feedback_id = None
+
+        insert_at = max(0, layout.count() - 1)
+        layout.insertWidget(insert_at, self.agent_feedback_panel)
+
+        def save_feedback() -> None:
+            runtime = getattr(self, "agent_runtime", None)
+            feedback_id = getattr(self, "_agent_pending_feedback_id", None)
+            answer = self.agent_feedback_answer.text().strip()
+            if runtime is None or not feedback_id or not answer:
+                return
+            runtime.agent_store.answer_feedback(str(feedback_id), answer)
+            if self.current_thread_id:
+                self.conversations.add_message(
+                    self.current_thread_id,
+                    "event",
+                    _("Personalisation feedback saved locally."),
+                )
+            self.agent_feedback_answer.clear()
+            self._refresh_agent_feedback()
+            self._render_transcript()
+            host = getattr(self, "agent_host_window", None)
+            if host is not None:
+                refresh_personal_ai_page(host)
+
+        def skip_feedback() -> None:
+            runtime = getattr(self, "agent_runtime", None)
+            feedback_id = getattr(self, "_agent_pending_feedback_id", None)
+            if runtime is None or not feedback_id:
+                return
+            runtime.agent_store.dismiss_feedback(str(feedback_id))
+            self.agent_feedback_answer.clear()
+            self._refresh_agent_feedback()
+
+        self.agent_feedback_save.clicked.connect(save_feedback)
+        self.agent_feedback_skip.clicked.connect(skip_feedback)
+
+    def refresh_agent_feedback(self) -> None:
+        panel = getattr(self, "agent_feedback_panel", None)
+        runtime = getattr(self, "agent_runtime", None)
+        if panel is None or runtime is None or not runtime.enabled or not self.current_thread_id:
+            if panel is not None:
+                panel.setVisible(False)
+            self._agent_pending_feedback_id = None
+            return
+        item = runtime.agent_store.pending_feedback(self.current_thread_id)
+        if not item:
+            panel.setVisible(False)
+            self._agent_pending_feedback_id = None
+            return
+        self._agent_pending_feedback_id = item.get("feedback_id")
+        self.agent_feedback_question.setText(str(item.get("question") or ""))
+        self.agent_feedback_reason.setText(str(item.get("reason") or ""))
+        panel.setVisible(True)
+
+    def load_current_thread(self) -> None:
+        original_load_thread(self)
+        self._refresh_agent_feedback()
+
+    def start_request(self, question: str, mode: str, *, persist_user: bool = True) -> None:
+        runtime = getattr(self, "agent_runtime", None)
+        if runtime is None or not runtime.enabled:
+            original_start_request(self, question, mode, persist_user=persist_user)
+            return
+        if self.analysis_thread and self.analysis_thread.isRunning():
+            return
+        thread = self._current_thread()
+        if not thread:
+            return
+        display_question = question.strip() or _(
+            "Analyse my complete health history deeply and explain the strongest useful patterns."
+        )
+        history = self.conversations.model_history(
+            thread["id"], exclude_last_user=not persist_user
+        )
+        if persist_user:
+            self.conversations.add_message(thread["id"], "user", display_question)
+        self.input.clear()
+        self._pending_mode = mode
+        self._live_thinking = _("Preparing the personal agent…\n")
+        self._live_answer = ""
+        self._answer_received = False
+        self._prompt_sections = []
+        self.prompt_view.clear()
+        self.prompt_button.setEnabled(False)
+        self.prompt_button.setChecked(False)
+        self._set_running(True)
+        if self._activity_active:
+            self._activity_event(_("Question received; preparing the personal agent…"))
+        else:
+            self._begin_activity(_("Question received; preparing the personal agent…"))
+        self.refresh_threads(select_id=thread["id"])
+        self._render_transcript()
+
+        self.analysis_thread = AgentAnalysisThread(
+            runtime,
+            str(thread.get("model") or self.model_provider()),
+            thread["snapshot"],
+            question,
+            self.tokens_provider(),
+            self.context_limit_provider(),
+            history=history,
+            analysis_mode=mode,
+            thread_id=str(thread["id"]),
+        )
+        self.analysis_thread.thinking_chunk.connect(self._thinking_chunk)
+        self.analysis_thread.answer_chunk.connect(self._answer_chunk)
+        self.analysis_thread.prompt_ready.connect(self._prompt_ready)
+        self.analysis_thread.agent_event.connect(self._activity_event)
+        self.analysis_thread.completed.connect(self._analysis_completed)
+        self.analysis_thread.failed.connect(self._analysis_failed)
+        self.analysis_thread.cancelled.connect(self._analysis_cancelled)
+        self.analysis_thread.start()
+
+    def analysis_completed(self, answer: str) -> None:
+        original_analysis_completed(self, answer)
+        self._refresh_agent_feedback()
+        host = getattr(self, "agent_host_window", None)
+        if host is not None:
+            refresh_personal_ai_page(host)
+
+    AIChatWindow._build_ui = build_ui
+    AIChatWindow._refresh_agent_feedback = refresh_agent_feedback
+    AIChatWindow._load_current_thread = load_current_thread
+    AIChatWindow._start_request = start_request
+    AIChatWindow._analysis_completed = analysis_completed
+    AIChatWindow._personal_agent_integration_installed = True
+
+
+def install_personal_agent(main_window_module) -> None:
+    """Install the agent as a thin layer over the existing desktop AI pipeline."""
+
+    from . import ai_chat as ai_chat_module
+
+    _install_agent_reasoning_compatibility()
+    _install_chat_integration(ai_chat_module)
+    MainWindow = main_window_module.MainWindow
+    if getattr(MainWindow, "_personal_agent_integration_installed", False):
+        return
+
+    original_build_ai_page = MainWindow._build_ai_page
+    original_ensure_chat = MainWindow._ensure_ai_chat_window
+    original_sync_completed = MainWindow._sync_completed
+
+    def build_ai_page(self):
+        if not hasattr(self, "agent_runtime"):
+            self.agent_runtime = AgentRuntime(self.store)
+        page = original_build_ai_page(self)
+        self.ai_sections.addTab(
+            build_personal_ai_page(self, self.agent_runtime),
+            _("Personal AI"),
+        )
+        return page
+
+    def ensure_ai_chat_window(self):
+        window = original_ensure_chat(self)
+        window.agent_runtime = self.agent_runtime
+        window.agent_host_window = self
+        window._refresh_agent_feedback()
+        return window
+
+    def sync_completed(self, success: int, errors: int, automatic: bool = False) -> None:
+        original_sync_completed(self, success, errors, automatic)
+        refresh_personal_ai_page(self)
+
+    MainWindow._build_ai_page = build_ai_page
+    MainWindow._ensure_ai_chat_window = ensure_ai_chat_window
+    MainWindow._sync_completed = sync_completed
+    MainWindow._personal_agent_integration_installed = True
