@@ -210,14 +210,17 @@ def main() -> int:
     _install_one_minute_heart_rate_rendering()
     _install_health_benchmark()
     from . import main_window as main_window_module
+    from .agent_integration import install_personal_agent
     from .ai_model_selector import install_ai_model_selector
     from .ai_query_planner import install_ai_query_planner
 
     # Planner-first selection is installed after the legacy retrieval guards: it
     # chooses source data before extraction, while those guards remain as a final
-    # compact-packet/context safety layer.
+    # compact-packet/context safety layer. The personal agent wraps the completed
+    # desktop AI workspace so disabling it cleanly restores the existing path.
     install_ai_query_planner(main_window_module)
     install_ai_model_selector(main_window_module)
+    install_personal_agent(main_window_module)
     MainWindow = main_window_module.MainWindow
 
     app.setApplicationDisplayName(APP_NAME)
