@@ -33,7 +33,9 @@ def test_agent_store_keeps_feedback_and_health_data_separate(tmp_path: Path):
         learning_key="load_tolerance",
         context={"observation": "training load was above the recent baseline"},
     )
-    answered = agent.answer_feedback(str(feedback["feedback_id"]), "Manageable, not exhausting")
+    answered = agent.answer_feedback(
+        str(feedback["feedback_id"]), "Manageable, not exhausting"
+    )
 
     assert answered is not None
     learned = agent.user_model_entry("load_tolerance")
@@ -111,7 +113,10 @@ def test_metric_tool_reads_local_series_without_zero_filling(tmp_path: Path):
     assert result["expected_days"] == 3
     assert result["coverage"] == pytest.approx(2 / 3, abs=0.001)
     assert len(result["points"]) == 2
-    assert {point["date"] for point in result["points"]} == {"2026-08-01", "2026-08-03"}
+    assert {point["time"][:10] for point in result["points"]} == {
+        "2026-08-01",
+        "2026-08-03",
+    }
 
 
 def test_runtime_starts_uncalibrated_when_health_data_exist(tmp_path: Path):
