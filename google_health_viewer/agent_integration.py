@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -11,7 +12,32 @@ from PySide6.QtWidgets import (
 
 from .agent_runtime import AgentAnalysisThread, AgentRuntime
 from .agent_ui import build_personal_ai_page, refresh_personal_ai_page
+from .ai_hardware import reasoning_value
 from .i18n import _
+
+
+def _install_agent_reasoning_compatibility() -> None:
+    """Use the same Ollama reasoning semantics as the existing desktop AI path."""
+
+    if getattr(AgentRuntime, "_reasoning_compatibility_installed", False):
+        return
+    original_chat_once = AgentRuntime._chat_once
+
+    def chat_once(self, **kwargs):
+        think = kwargs.get("think")
+        model = str(kwargs.get("model") or "")
+        if isinstance(think, bool):
+            profile = str(QSettings().value("ai/performance_profile", "standard") or "standard")
+            # GPT-OSS requires low/medium/high instead of a boolean. A deliberate
+            # think=False pass maps to the fast/low level; boolean-thinking models
+            # keep the original True/False value.
+            resolved = reasoning_value(model, profile if think else "fast")
+            if isinstance(resolved, str):
+                kwargs["think"] = resolved
+        return original_chat_once(self, **kwargs)
+
+    AgentRuntime._chat_once = chat_once
+    AgentRuntime._reasoning_compatibility_installed = True
 
 
 def _install_chat_integration(ai_chat_module) -> None:
@@ -195,6 +221,7 @@ def install_personal_agent(main_window_module) -> None:
 
     from . import ai_chat as ai_chat_module
 
+    _install_agent_reasoning_compatibility()
     _install_chat_integration(ai_chat_module)
     MainWindow = main_window_module.MainWindow
     if getattr(MainWindow, "_personal_agent_integration_installed", False):
