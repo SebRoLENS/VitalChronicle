@@ -1,0 +1,59 @@
+name: Tool Factory v2 i18n refresh
+
+on:
+  push:
+    branches:
+      - feature/tool-factory-v2
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/tool-factory-v2
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Refresh source catalogues and localize new agent UI
+        run: |
+          python scripts/update_translations.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('google_health_viewer/locales/it.json')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          translations = {
+              'Agent activity · completed': 'Attività agente · completata',
+              'Agent: finalising with the evidence already collected…': 'Agente: preparo la risposta finale con le evidenze già raccolte…',
+              'Complex reusable transformation detected · checking available capabilities…': 'Rilevata una trasformazione complessa e riutilizzabile · controllo le capacità disponibili…',
+              'Copy activity': 'Copia attività',
+              'I could not complete the exact analysis with the deterministic evidence available. I stopped rather than substituting a different metric or an unsupported proxy.': 'Non sono riuscito a completare l’analisi esatta con le evidenze deterministiche disponibili. Mi sono fermato invece di sostituire la metrica richiesta con una metrica diversa o un proxy non supportato.',
+              'Operational agent activity will appear here.': 'Qui comparirà l’attività operativa dell’agente.',
+              'Repairing the learned-tool definition without consuming an analysis step…': 'Correggo la definizione del tool appreso senza consumare uno step di analisi…',
+              'Save activity…': 'Salva attività…',
+              'Save agent activity': 'Salva attività agente',
+              'Text files (*.txt);;All files (*)': 'File di testo (*.txt);;Tutti i file (*)',
+              'Tool Factory repair budget reached · continuing without proxy substitution and preserving the evidence already collected.': 'Raggiunto il limite di correzioni della Tool Factory · continuo senza sostituire proxy e conservando le evidenze già raccolte.',
+              'Tool Factory repair {attempt}/{maximum}: pipeline validation failed; feeding the exact DSL error back to the agent…': 'Correzione Tool Factory {attempt}/{maximum}: validazione della pipeline non riuscita; restituisco all’agente l’errore DSL esatto…',
+          }
+          for key, value in translations.items():
+              if key in data:
+                  data[key] = value
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          PY
+      - name: Commit catalogues when changed
+        run: |
+          if git diff --quiet -- google_health_viewer/locales/en.json google_health_viewer/locales/it.json; then
+            echo 'No catalogue changes required.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add google_health_viewer/locales/en.json google_health_viewer/locales/it.json
+          git commit -m 'Refresh Tool Factory v2 translations'
+          git push origin HEAD:feature/tool-factory-v2
