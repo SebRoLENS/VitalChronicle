@@ -9,7 +9,11 @@ from google_health_viewer.agent_runtime import (
     AGENT_TRACE_PREFIX,
     _tool_calling_unavailable_error,
 )
-from google_health_viewer.agent_runtime_v2 import AgentRuntime, _factory_hint
+from google_health_viewer.agent_runtime_v2 import (
+    AgentRuntime,
+    _factory_hint,
+    _is_comprehensive_analysis,
+)
 from google_health_viewer.agent_store import AgentStore
 from google_health_viewer.agent_tool_factory import EnhancedSafeToolExecutor
 from google_health_viewer.ai_engine import TOKEN_USAGE_PREFIX
@@ -851,3 +855,60 @@ def test_generic_tool_word_does_not_trigger_unsupported_model_fallback():
         "The local model returned neither an answer nor a tool call."
     ) is False
     assert _tool_calling_unavailable_error("model does not support tools") is True
+
+
+def test_comprehensive_analysis_detection():
+    assert _is_comprehensive_analysis("") is True
+    assert _is_comprehensive_analysis("Fammi una analisi totale") is True
+    assert _is_comprehensive_analysis("Analizza solo il sonno di ieri") is False
+
+
+class ComprehensivePersonalizationRuntime(AgentRuntime):
+    def __init__(self, health_store, agent_store):
+        super().__init__(health_store, agent_store)
+        self.turn = 0
+        self.final_messages = None
+
+    def _chat_once(self, **kwargs):
+        self.turn += 1
+        if self.turn == 1:
+            return {"content": "Analisi generale corretta ma con consigli generici."}
+        self.final_messages = kwargs.get("messages")
+        assert kwargs.get("tools") == []
+        return {
+            "content": (
+                "Raccomandazioni personalizzate: adatta il recupero al tuo attuale obiettivo "
+                "di allenamento, trattando i self-report recenti come osservazioni soggettive."
+            )
+        }
+
+
+def test_comprehensive_analysis_forces_personalized_final_synthesis(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    store.learn_user_model(
+        "current_training_goal",
+        "User feedback: cycling commute and strength training are current goals",
+        evidence={"answer": "cycling commute and strength training"},
+        source="feedback",
+    )
+    runtime = ComprehensivePersonalizationRuntime(
+        DummyHealthStore(tmp_path / "health.sqlite3"), store
+    )
+
+    answer = runtime.analyze(
+        model="test",
+        snapshot={},
+        question="Analisi totale",
+        history=[],
+        max_tokens=1024,
+        model_context_limit=None,
+        performance_profile="standard",
+        thread_id="personalized-total",
+    )
+
+    assert runtime.turn == 2
+    assert "Raccomandazioni personalizzate" in answer
+    assert runtime.final_messages is not None
+    joined = "\n".join(str(item.get("content") or "") for item in runtime.final_messages)
+    assert "COMPREHENSIVE PERSONALISATION CHECKPOINT" in joined
+    assert "cycling commute and strength training" in joined
