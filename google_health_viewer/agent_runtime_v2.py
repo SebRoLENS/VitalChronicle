@@ -38,6 +38,84 @@ def _is_comprehensive_analysis(question: str) -> bool:
     return any(marker in text for marker in _COMPREHENSIVE_ANALYSIS_MARKERS)
 
 
+_TOPIC_MARKERS = {
+    "sleep": (
+        "sonno", "dorm", "notte", "letto", "svegl", "sleep", "slept", "bed", "night",
+    ),
+    "training": (
+        "allen", "palestra", "cardio", "bici", "cicl", "workout", "training", "gym",
+        "bike", "cycling", "carico", "load", "attivit", "activity",
+    ),
+    "recovery": (
+        "recuper", "readiness", "resilien", "hrv", "variabil", "stanc", "affatic",
+        "sonnol", "stress", "recovery", "fatigue", "tired", "sleepy",
+    ),
+}
+
+_CONTEXT_KEY_TOPICS = {
+    "sleep_schedule_context": {"sleep"},
+    "subjective_sleep_need_context": {"sleep", "recovery"},
+    "current_training_goal": {"training"},
+    "recent_training_context": {"training", "recovery"},
+}
+
+_SELF_REPORT_CATEGORY_TOPICS = {
+    "sleep_quality": {"sleep", "recovery"},
+    "sleepiness": {"sleep", "recovery"},
+    "fatigue": {"recovery", "training", "sleep"},
+    "soreness": {"training", "recovery"},
+    "stress": {"recovery"},
+    "energy": {"recovery", "training"},
+}
+
+
+def _request_topics(question: str) -> set[str]:
+    text = str(question or "").casefold()
+    return {
+        topic
+        for topic, markers in _TOPIC_MARKERS.items()
+        if any(marker in text for marker in markers)
+    }
+
+
+def _item_topics(item: dict[str, Any]) -> set[str]:
+    key = str(item.get("key") or "").strip()
+    topics = set(_CONTEXT_KEY_TOPICS.get(key, set()))
+    haystack = f"{key} {item.get('statement', '')}".casefold()
+    for topic, markers in _TOPIC_MARKERS.items():
+        if any(marker in haystack for marker in markers):
+            topics.add(topic)
+    return topics
+
+
+def _report_topics(item: dict[str, Any]) -> set[str]:
+    category = str(item.get("category") or "").strip().casefold()
+    topics = set(_SELF_REPORT_CATEGORY_TOPICS.get(category, set()))
+    haystack = f"{category} {item.get('statement', '')}".casefold()
+    for topic, markers in _TOPIC_MARKERS.items():
+        if any(marker in haystack for marker in markers):
+            topics.add(topic)
+    return topics
+
+
+def _relevant_personal_evidence(
+    question: str,
+    personal_model: list[dict[str, Any]],
+    recent_self_reports: list[dict[str, Any]],
+    *,
+    comprehensive: bool = False,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    current_model = [item for item in personal_model if item.get("is_current", True)]
+    if comprehensive:
+        return current_model, list(recent_self_reports)
+    topics = _request_topics(question)
+    if not topics:
+        return [], []
+    model = [item for item in current_model if _item_topics(item) & topics]
+    reports = [item for item in recent_self_reports if _report_topics(item) & topics]
+    return model, reports
+
+
 _PERSONALIZATION_POLICY = """
 
 Personalisation synthesis policy:
@@ -48,9 +126,12 @@ Personalisation synthesis policy:
 - When a current personal statement materially changes interpretation, say so explicitly and distinguish it from
   wearable-derived evidence. Example: if irregular sleep was reported as an exceptional social event, do not present
   one low regularity score as proof of a persistent schedule problem.
-- For a comprehensive/whole-history analysis with active personal context, the final answer MUST contain a clearly
-  identifiable personalised recommendations section. Translate relevant current goals, temporary context and recent
-  self-reports into concrete next actions rather than repeating generic advice.
+- Personalisation applies to focused questions too. If the request is about sleep, training or recovery and current
+  relevant personal evidence exists, use it in the interpretation and/or next action instead of giving a generic answer.
+  For a comprehensive analysis, include a clearly identifiable personalised recommendations section.
+- If the current measured pattern resembles the observation attached to a temporary learned association, never reuse the
+  old explanation as a fact. Acknowledge it as prior user-reported context and, when useful, ask whether the same context
+  applies this time (for example, a late night that was previously explained by a social event).
 - Personalisation must remain evidence-bound: do not invent preferences, schedules, symptoms or causes that are not
   present in the current personal context, recent reports or deterministic health evidence.
 """
@@ -418,15 +499,24 @@ class AgentRuntime(base_rt.AgentRuntime):
             if isinstance(initial.get("recent_self_reports"), list)
             else []
         )
-        personalization_available = bool(active_personal_context or recent_self_reports)
-        if comprehensive_analysis and personalization_available:
+        relevant_personal_context, relevant_self_reports = _relevant_personal_evidence(
+            request,
+            active_personal_context,
+            recent_self_reports,
+            comprehensive=comprehensive_analysis,
+        )
+        personalization_required = bool(relevant_personal_context or relevant_self_reports)
+        if personalization_required:
+            initial["relevant_personal_context"] = relevant_personal_context
+            initial["relevant_self_reports"] = relevant_self_reports
             initial["personalization_requirement"] = {
-                "mode": "comprehensive",
+                "mode": "comprehensive" if comprehensive_analysis else "focused",
                 "required": True,
                 "instruction": (
-                    "Use materially relevant current personal context and recent self-reports in the final "
-                    "recommendations. Distinguish subjective reports from measured evidence, respect temporal "
-                    "validity, and do not infer causation from a single report."
+                    "Use the relevant current personal evidence in the final interpretation or next action. "
+                    "Distinguish subjective reports from measured evidence, respect temporal validity, and "
+                    "do not infer causation from a single report. If a prior temporary explanation may or may "
+                    "not apply to the current event, ask one concise contextual question rather than assuming it."
                 ),
             }
         if captured_self_report:
@@ -727,21 +817,22 @@ class AgentRuntime(base_rt.AgentRuntime):
                         answer_callback=answer_callback,
                     )
                 if final_answer:
-                    if comprehensive_analysis and personalization_available:
+                    if personalization_required:
                         messages.append({"role": "assistant", "content": final_answer})
                         messages.append(
                             {
                                 "role": "system",
                                 "content": (
-                                    "COMPREHENSIVE PERSONALISATION CHECKPOINT. Treat the previous assistant "
-                                    "message as a draft, not the final answer. Preserve supported findings and "
-                                    "limitations, but now produce the final response with a clearly identifiable "
-                                    "personalised recommendations section. Use materially relevant CURRENT entries "
-                                    "from personal_model and recent_self_reports already supplied in the local "
-                                    "session context. Respect temporal validity and confidence. Explicitly label "
-                                    "subjective context as user-reported; a one-off report can support a short-term "
-                                    "conditional recommendation but not a stable trait or causal claim. Do not "
-                                    "invent new measurements and do not call tools."
+                                    "PERSONALISATION CHECKPOINT. Treat the previous assistant message as a draft. "
+                                    "Preserve supported findings and limitations, but make the final response genuinely "
+                                    "personal using ONLY relevant_personal_context and relevant_self_reports from the "
+                                    "local session context. For focused questions, weave the relevant context naturally "
+                                    "into interpretation or the next action; do not add unrelated profile facts. For a "
+                                    "comprehensive analysis, include a clearly identifiable personalised recommendations "
+                                    "section. Respect temporal validity and confidence. Explicitly label subjective context "
+                                    "as user-reported. If a current pattern resembles a prior temporary event explanation, "
+                                    "do not assume the old cause still applies: ask one concise contextual question when it "
+                                    "would improve interpretation. Do not invent measurements and do not call tools."
                                 ),
                             }
                         )
