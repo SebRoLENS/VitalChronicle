@@ -36,19 +36,23 @@ def test_cpu32_catalog_hides_models_that_are_too_small_or_too_large():
     assert "gpt-oss:120b" not in models
 
 
-def test_installed_models_are_always_kept_first_even_outside_optimal_band():
+def test_known_oversized_installed_model_is_not_offered():
     choices = ordered_model_choices(
-        installed=("tiny-custom:latest", "huge-custom:latest"),
+        installed=("qwen3:4b", "gpt-oss:120b", "huge-custom:latest"),
         catalog=("qwen3:4b", "qwen3.8", "gpt-oss:120b"),
         hardware=_cpu_hardware(32),
-        last_used="huge-custom:latest",
+        last_used="qwen3:4b",
     )
 
-    assert choices[:2] == ("tiny-custom:latest", "huge-custom:latest")
+    assert choices[0] == "qwen3:4b"
+    assert "gpt-oss:120b" not in choices
+    # Unknown custom models remain selectable because their footprint cannot be
+    # determined reliably until Ollama/catalogue metadata provide a size.
+    assert "huge-custom:latest" in choices
     assert "qwen3.8" in choices
 
 
-def test_last_used_model_is_preserved_if_it_was_removed_from_ollama():
+def test_last_used_model_is_preserved_if_compatible_and_removed_from_ollama():
     choices = ordered_model_choices(
         installed=("qwen3.8:latest",),
         catalog=("qwen3.8", "gpt-oss:20b"),
@@ -58,6 +62,18 @@ def test_last_used_model_is_preserved_if_it_was_removed_from_ollama():
 
     assert choices[0] == "qwen3.8:latest"
     assert choices[1] == "my-old-model:7b"
+
+
+def test_known_oversized_last_used_model_is_not_preserved():
+    choices = ordered_model_choices(
+        installed=("qwen3.8:latest",),
+        catalog=("qwen3.8", "gpt-oss:20b", "gpt-oss:120b"),
+        hardware=_cpu_hardware(32),
+        last_used="gpt-oss:120b",
+    )
+
+    assert "gpt-oss:120b" not in choices
+    assert "qwen3.8:latest" in choices
 
 
 def test_midrange_machine_does_not_offer_very_large_catalog_models():
