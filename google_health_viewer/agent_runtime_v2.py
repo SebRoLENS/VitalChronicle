@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from . import agent_runtime as base_rt
 from .agent_tool_factory import EnhancedSafeToolExecutor
 from .i18n import _
 from .local_ai import AIAnalysisCancelled, LocalAIError
-
 
 MAX_ANALYSIS_STEPS = 10
 MAX_FACTORY_REPAIR_ATTEMPTS = 3
@@ -202,7 +202,9 @@ class AgentRuntime(base_rt.AgentRuntime):
             {"role": "user", "content": user_content},
         ]
         schemas = self.tools.tool_schemas()
-        physical_limit = model_context_limit if model_context_limit and model_context_limit > 0 else None
+        physical_limit = (
+            model_context_limit if model_context_limit and model_context_limit > 0 else None
+        )
         max_tokens = max(512, int(max_tokens))
         if physical_limit:
             max_tokens = min(max_tokens, physical_limit)
@@ -344,9 +346,7 @@ class AgentRuntime(base_rt.AgentRuntime):
                             )
                     elif status == "reused":
                         event(
-                            _(
-                                "Equivalent tool found · reusing it instead of creating a duplicate."
-                            )
+                            _("Equivalent tool found · reusing it instead of creating a duplicate.")
                         )
                         schemas = self.tools.tool_schemas()
                     elif status == "created":
@@ -367,9 +367,7 @@ class AgentRuntime(base_rt.AgentRuntime):
                 analysis_steps += 1
             elif factory_repairs < MAX_FACTORY_REPAIR_ATTEMPTS:
                 event(
-                    _(
-                        "Repairing the learned-tool definition without consuming an analysis step…"
-                    )
+                    _("Repairing the learned-tool definition without consuming an analysis step…")
                 )
 
             if analysis_steps >= MAX_ANALYSIS_STEPS - 1:

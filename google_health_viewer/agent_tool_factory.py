@@ -7,7 +7,6 @@ from typing import Any
 
 from . import agent_tools as base
 
-
 EXTRA_BUILTIN_SPEC = {
     "name": "get_sleep_stage_series",
     "description": (
@@ -19,9 +18,7 @@ EXTRA_BUILTIN_SPEC = {
 }
 
 SAFE_COMPOSABLE_TOOLS = {
-    spec.name
-    for spec in base.BUILTIN_TOOL_SPECS
-    if not spec.capability.startswith("agent.")
+    spec.name for spec in base.BUILTIN_TOOL_SPECS if not spec.capability.startswith("agent.")
 }
 SAFE_COMPOSABLE_TOOLS.add(EXTRA_BUILTIN_SPEC["name"])
 
@@ -41,9 +38,7 @@ DSL_REFERENCE = {
         "Convert a list of rows inside a tool result into a {date: numeric_value} series."
     ),
     "baseline": "Calculate mean/median/MAD from a date series.",
-    "filter_relative": (
-        "Keep dates above/below a baseline by a percentage, e.g. > baseline +30%."
-    ),
+    "filter_relative": ("Keep dates above/below a baseline by a percentage, e.g. > baseline +30%."),
     "shift_days": "Shift date keys by a bounded integer number of calendar days.",
     "event_response": (
         "Measure an offset response after selected events and time-to-recovery to a personal "
@@ -287,7 +282,7 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
         for index, raw_step in enumerate(pipeline):
             step_number = index + 1
             if not isinstance(raw_step, dict):
-                raise ValueError(f"Pipeline step {step_number} must be an object")
+                raise TypeError(f"Pipeline step {step_number} must be an object")
             op = str(raw_step.get("op") or "")
             if op not in ALLOWED_DSL_OPS:
                 allowed = ", ".join(sorted(ALLOWED_DSL_OPS))
@@ -301,11 +296,15 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
             if not alias.replace("_", "").isalnum():
                 raise ValueError(f"Invalid result alias '{alias}' at step {step_number}")
 
-            def require_alias(field: str) -> None:
-                ref = str(step.get(field) or "")
+            def require_alias(
+                field: str,
+                current_step: dict[str, Any] = step,
+                current_number: int = step_number,
+            ) -> None:
+                ref = str(current_step.get(field) or "")
                 if ref and ref not in aliases:
                     raise ValueError(
-                        f"Step {step_number} references unknown earlier result '{ref}' in {field}."
+                        f"Step {current_number} references unknown earlier result '{ref}' in {field}."
                     )
 
             if op == "load_series" and not step.get("metric"):
@@ -317,9 +316,23 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                         f"call_tool at step {step_number} may only call deterministic built-ins. "
                         f"Unsupported tool '{tool}'."
                     )
-                if step.get("arguments") is not None and not isinstance(step.get("arguments"), dict):
+                if step.get("arguments") is not None and not isinstance(
+                    step.get("arguments"), dict
+                ):
                     raise ValueError(f"call_tool arguments must be an object at step {step_number}")
-            if op in {"daily", "window", "summarize", "trend", "count_above", "count_below", "extract_series", "baseline", "filter_relative", "shift_days", "return"}:
+            if op in {
+                "daily",
+                "window",
+                "summarize",
+                "trend",
+                "count_above",
+                "count_below",
+                "extract_series",
+                "baseline",
+                "filter_relative",
+                "shift_days",
+                "return",
+            }:
                 require_alias("source")
             if op in {"compare", "correlate"}:
                 require_alias("left")
@@ -337,7 +350,9 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                 try:
                     shift = int(step.get("days") or 0)
                 except (TypeError, ValueError) as exc:
-                    raise ValueError(f"shift_days requires an integer days value at step {step_number}") from exc
+                    raise ValueError(
+                        f"shift_days requires an integer days value at step {step_number}"
+                    ) from exc
                 if not -30 <= shift <= 30:
                     raise ValueError(f"shift_days is limited to -30..30 days at step {step_number}")
             if op == "event_response":
@@ -360,7 +375,9 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
             result.append(step)
             aliases.add(alias)
         if result[-1]["op"] != "return":
-            result.append({"op": "return", "source": str(result[-1].get("as") or f"step_{len(result)}")})
+            result.append(
+                {"op": "return", "source": str(result[-1].get("as") or f"step_{len(result)}")}
+            )
         return result
 
     def _tool_create_learned_tool(self, args, **_):
@@ -396,7 +413,9 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
             "description": str(args.get("description") or ""),
             "capability": str(args.get("capability") or name),
             "parameters": (
-                args.get("parameters") if isinstance(args.get("parameters"), dict) else base._period()
+                args.get("parameters")
+                if isinstance(args.get("parameters"), dict)
+                else base._period()
             ),
             "pipeline": pipeline,
             "dependencies": dependencies,
@@ -509,7 +528,11 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                 if baseline is None:
                     last = {"series": {}, "count": 0, "total": len(series), "baseline": None}
                 else:
-                    threshold = baseline * (1 + percent / 100) if direction == "above" else baseline * (1 - percent / 100)
+                    threshold = (
+                        baseline * (1 + percent / 100)
+                        if direction == "above"
+                        else baseline * (1 - percent / 100)
+                    )
                     selected = {
                         day: value
                         for day, value in series.items()
@@ -562,9 +585,7 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                     sx, sy = statistics.pstdev(xs), statistics.pstdev(ys)
                     if sx and sy:
                         mx, my = statistics.fmean(xs), statistics.fmean(ys)
-                        r = sum((x - mx) * (y - my) for x, y in pairs) / (
-                            len(pairs) * sx * sy
-                        )
+                        r = sum((x - mx) * (y - my) for x, y in pairs) / (len(pairs) * sx * sy)
                 last = {"paired_days": len(pairs), "pearson_r": r}
             elif op in {"count_above", "count_below"}:
                 threshold = float(self._runtime_value(step.get("threshold"), args, env) or 0)
@@ -595,9 +616,7 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                 )
                 direction = str(step.get("response_direction") or "below")
                 response_percent = self._percent(step.get("response_percent"), args, env, 20.0)
-                tolerance = self._percent(
-                    step.get("recovery_tolerance_percent"), args, env, 10.0
-                )
+                tolerance = self._percent(step.get("recovery_tolerance_percent"), args, env, 10.0)
                 offset = int(step.get("response_offset_days") or 1)
                 max_days = int(step.get("max_recovery_days") or 14)
                 evaluated = 0
