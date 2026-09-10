@@ -109,7 +109,6 @@ class SyncThread(QThread):
                     )
                     if needs_heart_rate_migration:
                         heart_rate_bounds = self.store.data_type_date_bounds("heart-rate")
-                        self.store.delete_records_by_kind("heart-rate", "data_point")
                         self.store.reset_sync_ranges("heart-rate")
                         migration_start = (
                             min(self.start_date, heart_rate_bounds[0])
@@ -163,6 +162,10 @@ class SyncThread(QThread):
                         stable_end = min(range_end, today - timedelta(days=1))
                         self.store.mark_sync_range(spec.key, range_start, stable_end)
                     if needs_heart_rate_migration:
+                        # Keep legacy raw samples until every requested rollup page has
+                        # been persisted successfully. A failed network/API migration
+                        # therefore remains retryable without losing local history.
+                        self.store.delete_records_by_kind("heart-rate", "data_point")
                         self.store.set_app_marker(HEART_RATE_STORAGE_VERSION)
                     if needs_filter_repair:
                         self.store.set_app_marker(repair_key)
