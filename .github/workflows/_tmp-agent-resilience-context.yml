@@ -1,0 +1,53 @@
+name: Agent resilience/context patch
+
+on:
+  push:
+    branches: [feature/agent-live-telemetry]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/agent-live-telemetry
+      - name: Install Linux GUI libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e '.[dev]'
+      - name: Apply patch
+        run: python scripts/_tmp_patch_agent_resilience_context.py
+      - name: Refresh translations
+        run: |
+          python scripts/update_translations.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('google_health_viewer/locales/it.json')
+          data = json.loads(path.read_text())
+          data['Agent exchange'] = 'Scambio agente'
+          data['Agent returned an empty turn · retrying with the evidence already collected.'] = 'L’agente ha restituito un turno vuoto · nuovo tentativo con le evidenze già raccolte.'
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + '\n')
+          PY
+      - name: Validate
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ruff check google_health_viewer/agent_runtime.py google_health_viewer/agent_runtime_v2.py google_health_viewer/agent_integration.py google_health_viewer/ai_chat.py tests/test_agent_tool_factory_v2.py tests/test_agent_self_reports_temporal.py
+          pytest -q tests/test_agent_tool_factory_v2.py tests/test_agent_self_reports_temporal.py tests/test_ai_chat.py tests/test_i18n.py
+          git diff --exit-code --check
+      - name: Commit application changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add google_health_viewer/agent_runtime.py google_health_viewer/agent_runtime_v2.py google_health_viewer/locales/en.json google_health_viewer/locales/it.json tests/test_agent_tool_factory_v2.py tests/test_agent_self_reports_temporal.py
+          git commit -m 'Keep retrospective self-reports and recover empty agent turns' || exit 0
+          git push
