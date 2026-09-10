@@ -348,6 +348,65 @@ class AgentRuntime(base_rt.AgentRuntime):
             tool_calls = (
                 message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
             )
+            gate_active = factory_gate_required and not factory_disabled
+            if gate_active and tool_calls:
+                allowed_gate_calls = [
+                    call
+                    for call in tool_calls
+                    if isinstance(call, dict)
+                    and base_rt._tool_name(call) == "create_learned_tool"
+                ]
+                blocked_gate_names = [
+                    base_rt._tool_name(call)
+                    for call in tool_calls
+                    if isinstance(call, dict)
+                    and base_rt._tool_name(call) != "create_learned_tool"
+                ]
+                if blocked_gate_names:
+                    event(
+                        _(
+                            "Tool Factory gate blocked an out-of-scope tool call: {tools}",
+                            tools=", ".join(name for name in blocked_gate_names if name),
+                        )
+                    )
+                if allowed_gate_calls:
+                    tool_calls = allowed_gate_calls
+                    message = dict(message)
+                    message["tool_calls"] = tool_calls
+                    factory_gate_refusals = 0
+                else:
+                    factory_gate_refusals += 1
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "RUNTIME TOOL FACTORY GATE ENFORCEMENT: the previous tool call was "
+                                "rejected because only create_learned_tool is allowed while this gate "
+                                "is active. Do not call any raw metric reader or other built-in now. "
+                                "Call create_learned_tool with a safe reusable pipeline, or repair that "
+                                "pipeline if validation returns an error."
+                            ),
+                        }
+                    )
+                    if factory_gate_refusals <= MAX_FACTORY_GATE_REFUSALS:
+                        continue
+                    factory_gate_required = False
+                    factory_disabled = True
+                    event(
+                        _(
+                            "Tool Factory gate attempt limit reached · finalising without executing out-of-scope tools."
+                        )
+                    )
+                    return self._final_answer(
+                        model=model,
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        physical_limit=physical_limit,
+                        think=think,
+                        cancel_callback=cancel_callback,
+                        event=event,
+                        answer_callback=answer_callback,
+                    )
             if not tool_calls:
                 final_answer = str(message.get("content") or "").strip()
                 if factory_gate_required and not factory_disabled:
