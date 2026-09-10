@@ -23,10 +23,9 @@ def heart_rate_sample_points(
 ) -> list[tuple[float, float]]:
     """Read canonical heart-rate samples and Google Health roll-up averages.
 
-    Desktop normally stores native samples, while Android stores Google Health
-    five-minute roll-ups to keep the local archive bounded. Both representations
-    are converted to the same timestamp/value series here before dashboard
-    aggregation.
+    Desktop and Android sync now store Google Health five-minute roll-ups to keep
+    the local archive bounded. Legacy raw desktop records and imported native
+    samples remain readable and are converted to the same timestamp/value series.
     """
     points: list[tuple[float, float]] = []
     for record in records:

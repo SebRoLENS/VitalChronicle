@@ -17,6 +17,7 @@ from .storage import HealthStore
 from .updates import fetch_latest_release
 
 FILTER_REPAIR_VERSION = "snake-case-filters-v1"
+HEART_RATE_STORAGE_VERSION = "heart-rate-five-minute-rollup-v1"
 
 
 class AuthThread(QThread):
@@ -96,13 +97,32 @@ class SyncThread(QThread):
                 count = 0
                 try:
                     repair_key = f"{FILTER_REPAIR_VERSION}:{spec.key}"
+                    needs_heart_rate_migration = bool(
+                        spec.key == "heart-rate"
+                        and not self.store.has_app_marker(HEART_RATE_STORAGE_VERSION)
+                    )
                     needs_filter_repair = bool(
                         spec.operation == "list"
                         and spec.filter_field
                         and "_" in spec.filter_field.split(".", 1)[0]
                         and not self.store.has_app_marker(repair_key)
                     )
-                    if needs_filter_repair:
+                    if needs_heart_rate_migration:
+                        heart_rate_bounds = self.store.data_type_date_bounds("heart-rate")
+                        self.store.delete_records_by_kind("heart-rate", "data_point")
+                        self.store.reset_sync_ranges("heart-rate")
+                        migration_start = (
+                            min(self.start_date, heart_rate_bounds[0])
+                            if heart_rate_bounds
+                            else self.start_date
+                        )
+                        migration_end = (
+                            max(self.end_date, heart_rate_bounds[1])
+                            if heart_rate_bounds
+                            else self.end_date
+                        )
+                        ranges = [(migration_start, migration_end)]
+                    elif needs_filter_repair:
                         archive_bounds = self.store.data_date_bounds()
                         repair_start = (
                             min(self.start_date, archive_bounds[0])
@@ -118,28 +138,32 @@ class SyncThread(QThread):
                             refresh_date=today,
                         )
                     for range_start, range_end in ranges:
-                        iterator = (
-                            client.iter_daily_rollups(
+                        if spec.operation == "daily_rollup":
+                            iterator = client.iter_daily_rollups(
                                 spec, range_start, range_end, self._is_cancelled
                             )
-                            if spec.operation == "daily_rollup"
-                            else client.iter_data_pages(
+                            record_kind = "daily_rollup"
+                        elif spec.operation == "five_minute_rollup":
+                            iterator = client.iter_five_minute_heart_rate_rollups(
                                 spec, range_start, range_end, self._is_cancelled
                             )
-                        )
+                            record_kind = "five_minute_rollup"
+                        else:
+                            iterator = client.iter_data_pages(
+                                spec, range_start, range_end, self._is_cancelled
+                            )
+                            record_kind = "data_point"
                         for page in iterator:
                             count += self.store.upsert_records(
                                 spec.key,
                                 page,
-                                (
-                                    "daily_rollup"
-                                    if spec.operation == "daily_rollup"
-                                    else "data_point"
-                                ),
+                                record_kind,
                             )
                         # Today is intentionally left open: wearable data can still arrive.
                         stable_end = min(range_end, today - timedelta(days=1))
                         self.store.mark_sync_range(spec.key, range_start, stable_end)
+                    if needs_heart_rate_migration:
+                        self.store.set_app_marker(HEART_RATE_STORAGE_VERSION)
                     if needs_filter_repair:
                         self.store.set_app_marker(repair_key)
                     message = (

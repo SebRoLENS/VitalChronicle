@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import math
 import time
 from collections.abc import Callable, Iterator
 from datetime import date, datetime, timedelta
@@ -190,6 +192,77 @@ class GoogleHealthClient:
                     cancel=cancel,
                 )
                 yield response.get("rollupDataPoints", [])
+                page_token = response.get("nextPageToken")
+                if not page_token:
+                    break
+                if page_token in seen_tokens:
+                    raise ApiError(508, _("Repeated roll-up page for {label}.", label=spec.label))
+                seen_tokens.add(page_token)
+            cursor = chunk_end
+
+    @staticmethod
+    def _prepare_five_minute_heart_rate_rollup(
+        point: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Preserve Google's rollup payload and expose its average canonically."""
+        prepared = copy.deepcopy(point)
+        heart_rate = prepared.get("heartRate")
+        if isinstance(heart_rate, dict):
+            raw_average = heart_rate.get("beatsPerMinuteAvg")
+            try:
+                average = float(raw_average)
+            except (TypeError, ValueError):
+                average = None
+            if average is not None and math.isfinite(average):
+                heart_rate["beatsPerMinute"] = average
+
+        start = str(prepared.get("startTime") or "")
+        end = str(prepared.get("endTime") or "")
+        if start or end:
+            prepared["name"] = f"heart-rate:5m:{start}:{end}"
+        return prepared
+
+    def iter_five_minute_heart_rate_rollups(
+        self,
+        spec: DataTypeSpec,
+        start: date,
+        end: date,
+        cancel: Callable[[], bool] | None = None,
+    ) -> Iterator[list[dict[str, Any]]]:
+        """Download only Google Health five-minute mean heart-rate windows."""
+        if spec.key != "heart-rate":
+            raise ValueError("Five-minute heart-rate rollups require the heart-rate data type")
+
+        cursor = start
+        while cursor <= end:
+            chunk_end = min(end + timedelta(days=1), cursor + timedelta(days=14))
+            body: dict[str, Any] = {
+                "range": {
+                    "startTime": datetime.combine(cursor, clock.min).astimezone().isoformat(),
+                    "endTime": datetime.combine(chunk_end, clock.min).astimezone().isoformat(),
+                },
+                "windowSize": "300s",
+                "pageSize": 10000,
+            }
+            page_token = None
+            seen_tokens: set[str] = set()
+            while True:
+                if page_token:
+                    body["pageToken"] = page_token
+                else:
+                    body.pop("pageToken", None)
+                response = self._request(
+                    "POST",
+                    f"users/me/dataTypes/{spec.key}/dataPoints:rollUp",
+                    json_body=body,
+                    cancel=cancel,
+                )
+                page = [
+                    self._prepare_five_minute_heart_rate_rollup(point)
+                    for point in response.get("rollupDataPoints", [])
+                    if isinstance(point, dict)
+                ]
+                yield page
                 page_token = response.get("nextPageToken")
                 if not page_token:
                     break

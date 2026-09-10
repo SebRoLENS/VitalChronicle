@@ -430,3 +430,59 @@ def test_app_markers_persist_for_one_time_repairs(tmp_path: Path):
     assert store.has_app_marker("repair") is False
     store.set_app_marker("repair")
     assert store.has_app_marker("repair") is True
+
+
+def test_five_minute_heart_rate_rollup_replaces_same_window(tmp_path: Path):
+    store = HealthStore(tmp_path / "health.sqlite3")
+
+    def rollup(avg: float) -> dict:
+        return {
+            "startTime": "2026-09-02T10:00:00+00:00",
+            "endTime": "2026-09-02T10:05:00+00:00",
+            "heartRate": {"beatsPerMinuteAvg": avg, "beatsPerMinute": avg},
+        }
+
+    store.upsert_records("heart-rate", [rollup(70.0)], "five_minute_rollup")
+    store.upsert_records("heart-rate", [rollup(74.0)], "five_minute_rollup")
+
+    records = store.list_records("heart-rate")
+    assert len(records) == 1
+    assert records[0]["record_kind"] == "five_minute_rollup"
+    assert records[0]["payload"]["heartRate"]["beatsPerMinuteAvg"] == 74.0
+
+
+def test_heart_rate_storage_migration_removes_raw_only_and_resets_coverage(tmp_path: Path):
+    store = HealthStore(tmp_path / "health.sqlite3")
+    raw = {
+        "name": "legacy-heart-rate",
+        "heartRate": {
+            "sampleTime": {"physicalTime": "2026-09-01T10:01:00+00:00"},
+            "beatsPerMinute": 71.0,
+        },
+    }
+    rolled = {
+        "name": "heart-rate:5m:2026-09-02T10:00:00+00:00:2026-09-02T10:05:00+00:00",
+        "startTime": "2026-09-02T10:00:00+00:00",
+        "endTime": "2026-09-02T10:05:00+00:00",
+        "heartRate": {"beatsPerMinuteAvg": 72.0, "beatsPerMinute": 72.0},
+    }
+    store.upsert_records("heart-rate", [raw], "data_point")
+    store.upsert_records("heart-rate", [rolled], "five_minute_rollup")
+    store.mark_sync_range("heart-rate", date(2026, 9, 1), date(2026, 9, 2))
+
+    assert store.data_type_date_bounds("heart-rate") == (
+        date(2026, 9, 1),
+        date(2026, 9, 2),
+    )
+    assert store.delete_records_by_kind("heart-rate", "data_point") == 1
+    store.reset_sync_ranges("heart-rate")
+
+    records = store.list_records("heart-rate")
+    assert len(records) == 1
+    assert records[0]["record_kind"] == "five_minute_rollup"
+    assert store.missing_sync_ranges(
+        "heart-rate",
+        date(2026, 9, 1),
+        date(2026, 9, 2),
+        refresh_date=date(2026, 9, 3),
+    ) == [(date(2026, 9, 1), date(2026, 9, 1))]
