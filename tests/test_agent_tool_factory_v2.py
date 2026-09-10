@@ -237,3 +237,76 @@ def test_factory_repairs_do_not_end_analysis_without_answer(tmp_path):
     assert runtime.turn == 4
     assert any("repair 3/3" in event for event in events)
     assert not any("maximum tool steps" in event for event in events)
+
+
+class FactoryGateRuntime(AgentRuntime):
+    def __init__(self, health_store, agent_store):
+        super().__init__(health_store, agent_store)
+        self.turn = 0
+        self.available_by_turn: list[set[str]] = []
+
+    def _chat_once(self, **kwargs):
+        self.turn += 1
+        names = {
+            str(item.get("function", {}).get("name") or "")
+            for item in kwargs.get("tools", [])
+            if isinstance(item, dict)
+        }
+        self.available_by_turn.append(names)
+        if self.turn <= 3:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "get_metric_series",
+                            "arguments": {"metric": f"guessed-metric-{self.turn}"},
+                        }
+                    }
+                ],
+            }
+        if self.turn == 4:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "create_learned_tool",
+                            "arguments": {
+                                "name": "forced_factory_tool",
+                                "description": "Reusable threshold and temporal analysis",
+                                "capability": "analysis.composed.personal_baseline_temporal_event_response",
+                                "pipeline": [{"op": "return"}],
+                            },
+                        }
+                    }
+                ],
+            }
+        return {"content": "Risposta finale dopo la decisione della Tool Factory."}
+
+
+def test_complex_query_stops_repeated_raw_metric_probing_and_forces_factory(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    runtime = FactoryGateRuntime(DummyHealthStore(tmp_path / "health.sqlite3"), store)
+    events: list[str] = []
+
+    answer = runtime.analyze(
+        model="test",
+        snapshot={},
+        question=(
+            "Quando il carico supera del 20% la baseline personale, il sonno profondo della notte "
+            "successiva diminuisce e dopo quanti giorni torna al livello abituale?"
+        ),
+        history=[],
+        max_tokens=1024,
+        model_context_limit=None,
+        performance_profile="standard",
+        thread_id="gate-thread",
+        event_callback=events.append,
+    )
+
+    assert answer.startswith("Risposta finale")
+    assert runtime.turn == 5
+    assert runtime.available_by_turn[3] == {"create_learned_tool"}
+    assert any("raw-series probing stopped" in event.lower() for event in events)
+    assert any("registry checked" in event.lower() for event in events)

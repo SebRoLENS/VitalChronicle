@@ -10,7 +10,8 @@ from .local_ai import AIAnalysisCancelled, LocalAIError
 
 MAX_ANALYSIS_STEPS = 10
 MAX_FACTORY_REPAIR_ATTEMPTS = 3
-MAX_TOTAL_MODEL_TURNS = MAX_ANALYSIS_STEPS + MAX_FACTORY_REPAIR_ATTEMPTS + 2
+MAX_RAW_SERIES_PROBES_BEFORE_FACTORY = 2
+MAX_TOTAL_MODEL_TURNS = MAX_ANALYSIS_STEPS + MAX_FACTORY_REPAIR_ATTEMPTS + 4
 
 _FACTORY_POLICY = """
 
@@ -32,6 +33,8 @@ Tool Factory decision policy:
 - After a learned tool is created or reused for the current request, execute that tool to answer the
   question unless its creation was explicitly only for future use.
 - Tool creation is a means to answer the user's question, not an end in itself.
+- When a runtime Tool Factory gate is active, stop raw-series probing and make the capability decision now.
+- Prefer semantic deterministic tools (for example calculate_cardio_load) over guessing raw metric names.
 """
 
 
@@ -97,6 +100,32 @@ def _without_factory_creation(schemas: list[dict[str, Any]]) -> list[dict[str, A
         if name != "create_learned_tool":
             result.append(schema)
     return result
+
+
+def _only_named_tools(
+    schemas: list[dict[str, Any]], names: set[str]
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for schema in schemas:
+        function = schema.get("function") if isinstance(schema, dict) else None
+        name = str(function.get("name") or "") if isinstance(function, dict) else ""
+        if name in names:
+            result.append(schema)
+    return result
+
+
+def _factory_capability(hint: dict[str, Any]) -> str:
+    signals = {str(item) for item in hint.get("signals", [])}
+    parts = ["analysis", "composed"]
+    if "relative personal-baseline threshold" in signals:
+        parts.append("personal_baseline")
+    if "event-conditioned or lagged relationship" in signals:
+        parts.append("temporal_event_response")
+    if "time-to-recovery/return-to-baseline" in signals:
+        parts.append("recovery_latency")
+    if "threshold/frequency analysis" in signals:
+        parts.append("threshold_frequency")
+    return ".".join(parts)
 
 
 class AgentRuntime(base_rt.AgentRuntime):
@@ -225,8 +254,30 @@ class AgentRuntime(base_rt.AgentRuntime):
             )
         event(_("Personal agent started · {count} tools available", count=len(schemas)))
         hint = initial["tool_factory_decision_hint"]
-        if hint.get("consider_reusable_tool"):
+        factory_candidate = bool(hint.get("consider_reusable_tool"))
+        factory_capability = _factory_capability(hint)
+        if factory_candidate:
             event(_("Complex reusable transformation detected · checking available capabilities…"))
+            registry_preflight = self.tools.execute(
+                "search_tool_registry",
+                {"capability": factory_capability, "description": request},
+                thread_id=thread_id,
+            )
+            event(_("Tool Factory preflight: registry checked before raw-data exploration."))
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "RUNTIME TOOL FACTORY PREFLIGHT: this request contains a reusable complex "
+                        f"capability pattern ({factory_capability}). Registry result: "
+                        + base_rt._json_text(registry_preflight, 5000)
+                        + ". You may inspect at most two raw metric series before making the "
+                        "capability decision. If no exact existing capability answers the request, "
+                        "create a reusable safe learned tool. Prefer semantic built-ins such as "
+                        "calculate_cardio_load or get_sleep_stage_series over guessing raw metric names."
+                    ),
+                }
+            )
         think = performance_profile != "fast"
         if thinking_callback:
             thinking_callback(_("Agent: selecting the minimum deterministic evidence needed…\n"))
@@ -235,6 +286,10 @@ class AgentRuntime(base_rt.AgentRuntime):
         factory_repairs = 0
         total_turns = 0
         factory_disabled = False
+        factory_gate_required = False
+        factory_resolution_seen = False
+        raw_series_probes = 0
+        tool_result_cache: dict[str, dict[str, Any]] = {}
 
         while total_turns < MAX_TOTAL_MODEL_TURNS:
             if cancel_callback and cancel_callback():
@@ -260,6 +315,9 @@ class AgentRuntime(base_rt.AgentRuntime):
                 )
             )
             active_schemas = _without_factory_creation(schemas) if factory_disabled else schemas
+            if factory_gate_required and not factory_disabled:
+                active_schemas = _only_named_tools(active_schemas, {"create_learned_tool"})
+                event(_("Tool Factory gate active · the next decision must resolve the reusable capability gap."))
             message = self._chat_once(
                 model=model,
                 messages=messages,
@@ -299,7 +357,28 @@ class AgentRuntime(base_rt.AgentRuntime):
                 elif name == "ask_user_feedback":
                     event(_("A targeted question could improve personalisation."))
 
-                if factory_disabled and name == "create_learned_tool":
+                blocked_for_factory = False
+                if name == "get_metric_series" and factory_candidate and not factory_resolution_seen:
+                    raw_series_probes += 1
+                    if raw_series_probes > MAX_RAW_SERIES_PROBES_BEFORE_FACTORY:
+                        blocked_for_factory = True
+                        factory_gate_required = True
+                        result = {
+                            "status": "factory_decision_required",
+                            "error": (
+                                "Raw-series exploration budget reached for a reusable complex request. "
+                                "The registry preflight is already complete. Create a safe reusable learned "
+                                "tool now instead of probing more raw metric names."
+                            ),
+                            "capability": factory_capability,
+                        }
+                        event(_("Repeated raw-series probing stopped · switching to the Tool Factory decision."))
+
+                cache_key = base_rt._json_text({"tool": name, "arguments": args}, 8000)
+                if not blocked_for_factory and cache_key in tool_result_cache:
+                    result = tool_result_cache[cache_key]
+                    event(_("Repeated identical tool call reused from this analysis instead of consuming another query."))
+                elif not blocked_for_factory and factory_disabled and name == "create_learned_tool":
                     result = {
                         "status": "repair_budget_exhausted",
                         "error": (
@@ -307,7 +386,7 @@ class AgentRuntime(base_rt.AgentRuntime):
                             "exact existing evidence and state any remaining capability gap."
                         ),
                     }
-                else:
+                elif not blocked_for_factory:
                     try:
                         result = self.tools.execute(name, args, thread_id=thread_id)
                     except Exception as exc:  # noqa: BLE001 - tool errors are evidence for the agent.
@@ -315,6 +394,7 @@ class AgentRuntime(base_rt.AgentRuntime):
                         event(_("Tool {tool} could not complete: {error}", tool=name, error=exc))
                     else:
                         productive_tool_call = True
+                        tool_result_cache[cache_key] = result
 
                 if name == "create_learned_tool":
                     status = str(result.get("status") or "")
@@ -345,11 +425,15 @@ class AgentRuntime(base_rt.AgentRuntime):
                                 )
                             )
                     elif status == "reused":
+                        factory_resolution_seen = True
+                        factory_gate_required = False
                         event(
                             _("Equivalent tool found · reusing it instead of creating a duplicate.")
                         )
                         schemas = self.tools.tool_schemas()
                     elif status == "created":
+                        factory_resolution_seen = True
+                        factory_gate_required = False
                         event(_("Learned tool validated and saved locally."))
                         schemas = self.tools.tool_schemas()
                 elif name == "ask_user_feedback" and result.get("queued"):
@@ -369,6 +453,14 @@ class AgentRuntime(base_rt.AgentRuntime):
                 event(
                     _("Repairing the learned-tool definition without consuming an analysis step…")
                 )
+
+            if (
+                factory_candidate
+                and not factory_resolution_seen
+                and not factory_disabled
+                and analysis_steps >= 4
+            ):
+                factory_gate_required = True
 
             if analysis_steps >= MAX_ANALYSIS_STEPS - 1:
                 messages.append(
