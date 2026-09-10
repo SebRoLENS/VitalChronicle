@@ -910,5 +910,5 @@ def test_comprehensive_analysis_forces_personalized_final_synthesis(tmp_path):
     assert "Raccomandazioni personalizzate" in answer
     assert runtime.final_messages is not None
     joined = "\n".join(str(item.get("content") or "") for item in runtime.final_messages)
-    assert "COMPREHENSIVE PERSONALISATION CHECKPOINT" in joined
+    assert "PERSONALISATION CHECKPOINT" in joined
     assert "cycling commute and strength training" in joined

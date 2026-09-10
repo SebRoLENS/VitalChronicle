@@ -306,7 +306,7 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
 
     def _tool_get_sleep_stage_series(self, args, **_):
         left, right = base._bounds(args.get("start"), args.get("end"), 60)
-        records = self._records("sleep", left, right)
+        records = self._semantic_records("sleep", left, right)
         by_day: dict[str, dict[str, float]] = {}
         sessions_with_stages = 0
         for record in records:
@@ -316,11 +316,10 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
             values = stage_points[0][1]
             if not isinstance(values, dict):
                 continue
-            wake_day = base._parse_date(record.get("end_time") or record.get("start_time"))
-            if wake_day is None:
+            day = base._semantic_day(record, "sleep")
+            if day is None:
                 continue
             sessions_with_stages += 1
-            day = wake_day.isoformat()
             row = by_day.setdefault(day, {"deep": 0.0, "rem": 0.0, "light": 0.0, "awake": 0.0})
             for raw_name, raw_value in values.items():
                 name = str(raw_name).strip().lower().replace("-", "_").replace(" ", "_")
