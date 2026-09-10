@@ -20,7 +20,10 @@ jobs:
       - name: Install project
         run: python -m pip install -e '.[dev]'
       - name: Apply patch
-        run: python scripts/_tmp_patch_resilience_history.py
+        run: |
+          sed -i 's/needle = '\''10\. When confidence/needle = '\''11. When confidence/'\'' scripts/_tmp_patch_resilience_history.py
+          sed -i 's/replacement = '\''10\. When confidence/replacement = '\''11. When confidence/'\'' scripts/_tmp_patch_resilience_history.py
+          python scripts/_tmp_patch_resilience_history.py
       - name: Validate
         run: |
           python -m ruff check google_health_viewer/agent_tools.py google_health_viewer/agent_runtime.py tests/test_agent_resilience_load_history.py
