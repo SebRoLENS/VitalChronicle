@@ -565,3 +565,134 @@ def test_agent_analysis_budget_is_fifteen_steps():
     from google_health_viewer import agent_runtime_v2
 
     assert agent_runtime_v2.MAX_ANALYSIS_STEPS == 15
+
+
+def test_factory_schema_includes_canonical_event_response_example(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    executor = EnhancedSafeToolExecutor(DummyHealthStore(tmp_path / "health.sqlite3"), store)
+    functions = {item["function"]["name"]: item["function"] for item in executor.tool_schemas()}
+    create_schema = functions["create_learned_tool"]["parameters"]
+    pipeline_examples = create_schema["properties"]["pipeline"]["examples"]
+    parameters_examples = create_schema["properties"]["parameters"]["examples"]
+
+    assert pipeline_examples[0][0]["tool"] == "calculate_cardio_load"
+    assert any(step.get("tool") == "get_sleep_stage_series" for step in pipeline_examples[0])
+    assert any(step.get("op") == "event_response" for step in pipeline_examples[0])
+    assert parameters_examples[0]["properties"]["event_percent"]["default"] == 30
+
+
+def test_learned_tool_applies_parameter_defaults(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    executor = StubToolExecutor(DummyHealthStore(tmp_path / "health.sqlite3"), store)
+    pipeline = _original_question_pipeline()
+    pipeline[3]["percent"] = "$event_percent"
+    pipeline[7]["response_percent"] = "$response_percent"
+    pipeline[7]["recovery_tolerance_percent"] = "$recovery_tolerance_percent"
+    created = executor.execute(
+        "create_learned_tool",
+        {
+            "name": "defaulted_event_response",
+            "description": "Reusable event response with parameter defaults.",
+            "capability": "analysis.event_response.defaults",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start": {"type": "string"},
+                    "end": {"type": "string"},
+                    "event_percent": {"type": "number", "default": 30},
+                    "response_percent": {"type": "number", "default": 20},
+                    "recovery_tolerance_percent": {"type": "number", "default": 10},
+                },
+            },
+            "pipeline": pipeline,
+        },
+    )
+    assert created["status"] == "created"
+
+    answer = executor.execute(
+        "defaulted_event_response",
+        {"start": "2026-01-01", "end": "2026-01-08"},
+    )["result"]
+    assert answer["trigger_events"] == 2
+    assert answer["response_matches"] == 2
+    assert answer["response_rate_percent"] == pytest.approx(100.0)
+
+
+class ExhaustedRepairHallucinationRuntime(AgentRuntime):
+    def __init__(self, health_store, agent_store):
+        super().__init__(health_store, agent_store)
+        self.turn = 0
+        self.available_by_turn: list[set[str]] = []
+
+    def _chat_once(self, **kwargs):
+        self.turn += 1
+        names = {
+            str(item.get("function", {}).get("name") or "")
+            for item in kwargs.get("tools", [])
+            if isinstance(item, dict)
+        }
+        self.available_by_turn.append(names)
+        if self.turn <= 3:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "create_learned_tool",
+                            "arguments": {
+                                "name": "repair_budget_test",
+                                "description": "Invalid until budget exhaustion",
+                                "capability": "analysis.repair_budget",
+                                "pipeline": [{"op": "invented_operation"}],
+                            },
+                        }
+                    }
+                ],
+            }
+        if self.turn == 4:
+            # Deliberately hallucinate the now-hidden factory function. Runtime must block it.
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "create_learned_tool",
+                            "arguments": {
+                                "name": "should_never_be_created",
+                                "description": "Must be blocked after repair exhaustion",
+                                "capability": "analysis.must_not_create",
+                                "pipeline": [{"op": "return"}],
+                            },
+                        }
+                    }
+                ],
+            }
+        return {"content": "Risposta finale deterministica dopo il repair budget."}
+
+
+def test_factory_cannot_execute_fourth_create_after_three_failed_repairs(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    runtime = ExhaustedRepairHallucinationRuntime(
+        DummyHealthStore(tmp_path / "health.sqlite3"), store
+    )
+    events: list[str] = []
+    answer = runtime.analyze(
+        model="test",
+        snapshot={},
+        question=(
+            "Quando il carico supera del 30% la baseline personale, quanto spesso la notte "
+            "successiva il sonno profondo scende del 20% e quanto impiega a recuperare?"
+        ),
+        history=[],
+        max_tokens=1024,
+        model_context_limit=None,
+        performance_profile="standard",
+        thread_id="repair-exhaustion-thread",
+        event_callback=events.append,
+    )
+
+    assert answer.startswith("Risposta finale deterministica")
+    assert runtime.turn == 5
+    assert "create_learned_tool" not in runtime.available_by_turn[3]
+    assert store.tool("should_never_be_created") is None
+    assert any("unavailable in this turn" in event.lower() for event in events)

@@ -11,6 +11,7 @@ from .local_ai import AIAnalysisCancelled, LocalAIError
 MAX_ANALYSIS_STEPS = 15
 MAX_FACTORY_REPAIR_ATTEMPTS = 3
 MAX_FACTORY_GATE_REFUSALS = 2
+MAX_OUT_OF_SCOPE_TOOL_REFUSALS = 2
 MAX_RAW_SERIES_PROBES_BEFORE_FACTORY = 2
 FACTORY_GATE_AFTER_ANALYSIS_STEPS = 3
 MAX_TOTAL_MODEL_TURNS = MAX_ANALYSIS_STEPS + MAX_FACTORY_REPAIR_ATTEMPTS + 4
@@ -42,6 +43,10 @@ Tool Factory decision policy:
 - If a learned tool returns an empty/zero result because a semantic input is unavailable, inspect the relevant semantic built-in directly before claiming the underlying data are absent.
 - Sleep stages must be checked with get_sleep_stage_series/analyze_sleep_stages, not inferred from a missing generic sleep.summary field.
 - Preserve units and method labels returned by deterministic tools; never relabel VitalChronicle cardio-load points as kcal.
+- Once the Tool Factory repair budget is exhausted, do not call create_learned_tool again in that request. Continue with exact existing deterministic tools only.
+- If a fallback answer must derive a personal baseline from an already-returned semantic date series, use the median as the robust VitalChronicle baseline convention and state that choice once; do not switch between mean and median.
+- Final answers must be result-first. Do not narrate scratchpad deliberation, self-corrections, or step-by-step arithmetic.
+- If there are zero qualifying trigger events, report zero events and explain that response frequency/recovery cannot be estimated; do not manufacture a downstream estimate.
 """
 
 
@@ -161,7 +166,12 @@ class AgentRuntime(base_rt.AgentRuntime):
                     "FINAL ANSWER REQUIRED NOW. Do not call tools. Answer the user's exact request "
                     "using only the evidence already collected. If a capability remains unavailable, "
                     "state that limitation precisely; do not substitute a different metric or proxy. "
-                    "Mention any learned-tool validation failure only if it materially limits the answer."
+                    "Mention any learned-tool validation failure only if it materially limits the answer. "
+                    "Do not narrate scratchpad deliberation, self-corrections, or step-by-step arithmetic. "
+                    "If you must derive a personal baseline from an already-returned semantic date series, "
+                    "use its median as the robust VitalChronicle baseline convention and state that once. "
+                    "If there are zero qualifying trigger events, report that directly and do not infer "
+                    "response frequency or recovery time."
                 ),
             },
         ]
@@ -308,6 +318,7 @@ class AgentRuntime(base_rt.AgentRuntime):
         factory_gate_required = False
         factory_resolution_seen = False
         factory_gate_refusals = 0
+        out_of_scope_tool_refusals = 0
         raw_series_probes = 0
         factory_creation_notice_shown = False
         tool_result_cache: dict[str, dict[str, Any]] = {}
@@ -412,6 +423,61 @@ class AgentRuntime(base_rt.AgentRuntime):
                         event=event,
                         answer_callback=answer_callback,
                     )
+            if not gate_active and tool_calls:
+                active_tool_names = {
+                    str(item.get("function", {}).get("name") or "")
+                    for item in active_schemas
+                    if isinstance(item, dict) and isinstance(item.get("function"), dict)
+                }
+                allowed_turn_calls = [
+                    call
+                    for call in tool_calls
+                    if isinstance(call, dict) and base_rt._tool_name(call) in active_tool_names
+                ]
+                blocked_turn_names = [
+                    base_rt._tool_name(call)
+                    for call in tool_calls
+                    if isinstance(call, dict) and base_rt._tool_name(call) not in active_tool_names
+                ]
+                if blocked_turn_names:
+                    event(
+                        _(
+                            "Agent runtime blocked a tool call unavailable in this turn: {tools}",
+                            tools=", ".join(name for name in blocked_turn_names if name),
+                        )
+                    )
+                if allowed_turn_calls:
+                    tool_calls = allowed_turn_calls
+                    message = dict(message)
+                    message["tool_calls"] = tool_calls
+                    out_of_scope_tool_refusals = 0
+                elif blocked_turn_names:
+                    out_of_scope_tool_refusals += 1
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "RUNTIME TOOL ALLOW-LIST: the previous tool call was rejected because "
+                                "that function is not available in this turn. Use only tools advertised "
+                                "in the current schema, or answer from the exact deterministic evidence "
+                                "already collected. If Tool Factory repairs were exhausted, do not call "
+                                "create_learned_tool again."
+                            ),
+                        }
+                    )
+                    if out_of_scope_tool_refusals >= MAX_OUT_OF_SCOPE_TOOL_REFUSALS:
+                        return self._final_answer(
+                            model=model,
+                            messages=messages,
+                            max_tokens=max_tokens,
+                            physical_limit=physical_limit,
+                            think=think,
+                            cancel_callback=cancel_callback,
+                            event=event,
+                            answer_callback=answer_callback,
+                        )
+                    continue
+
             if not tool_calls:
                 final_answer = str(message.get("content") or "").strip()
                 if factory_gate_required and not factory_disabled:
@@ -585,6 +651,16 @@ class AgentRuntime(base_rt.AgentRuntime):
                         )
                         if factory_repairs >= MAX_FACTORY_REPAIR_ATTEMPTS:
                             factory_disabled = True
+                            factory_gate_required = False
+                            repair_turn = False
+                            result = dict(result)
+                            result["repairable"] = False
+                            result["repair_budget_exhausted"] = True
+                            result["instruction"] = (
+                                "Tool Factory repair budget is exhausted for this request. Do not call "
+                                "create_learned_tool again. Continue with exact semantic deterministic "
+                                "tools and state any remaining limitation without substituting proxies."
+                            )
                             event(
                                 _(
                                     "Tool Factory repair budget reached · continuing without proxy "
