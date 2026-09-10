@@ -1,9 +1,9 @@
 """Coherent local Ollama model selection for the desktop AI panel.
 
-Installed models are always kept available as an explicit manual override. Models
-that are not installed are offered only when their known memory footprint is a good
-fit for the detected machine. The selector never silently replaces the model the
-user last chose.
+Installed models are kept available only when their known memory footprint fits the
+detected machine. Unknown custom models remain available because VitalChronicle cannot
+reliably size them. The selector never proposes a known model that exceeds the safe
+local memory budget and never silently replaces a compatible model the user last chose.
 """
 
 from __future__ import annotations
@@ -54,6 +54,16 @@ def usable_model_capacity_gb(hardware: HardwareInfo) -> float:
     return max(2.5, ram - 5.0)
 
 
+def model_fits_hardware(model: str, hardware: HardwareInfo) -> bool:
+    """Return False only when a model has a known footprint above safe capacity."""
+
+    size = model_memory_gb(model)
+    if size is None or size <= 0:
+        # Custom/local models with unknown size cannot be rejected safely here.
+        return True
+    return size <= usable_model_capacity_gb(hardware)
+
+
 def optimal_model_options(
     candidates: Iterable[str],
     hardware: HardwareInfo,
@@ -63,7 +73,7 @@ def optimal_model_options(
     """Return models that are neither wastefully small nor impractically large.
 
     Only candidates with a known footprint are auto-suggested. Unknown or custom
-    models remain available as soon as the user installs them in Ollama.
+    models remain available only when the user already has them locally.
     """
 
     capacity = usable_model_capacity_gb(hardware)
@@ -94,16 +104,25 @@ def ordered_model_choices(
     hardware: HardwareInfo,
     last_used: str = "",
 ) -> tuple[str, ...]:
-    """Put installed models first, then the last-used fallback, then optimal suggestions."""
+    """Put compatible installed models first, then compatible optimal suggestions."""
 
-    installed_models = list(_unique_models(installed))
+    installed_models = [
+        model
+        for model in _unique_models(installed)
+        if model_fits_hardware(model, hardware)
+    ]
     suggestions = list(optimal_model_options(catalog, hardware))
     result = list(installed_models)
 
     last = last_used.strip()
-    if last and not is_cloud_model(last) and not any(_same_model(last, item) for item in result):
-        # Preserve the user's last choice even if it has since been removed from
-        # Ollama. Status will clearly report that it is no longer installed.
+    if (
+        last
+        and not is_cloud_model(last)
+        and model_fits_hardware(last, hardware)
+        and not any(_same_model(last, item) for item in result)
+    ):
+        # Preserve a compatible previous/custom choice even if it has since been
+        # removed from Ollama. Status will report that it is no longer installed.
         result.append(last)
 
     for model in suggestions:
@@ -135,6 +154,27 @@ def hardware_from_settings(settings: QSettings) -> HardwareInfo:
         ram_gb=ram,
         gpu_name=gpu_name,
         vram_gb=vram,
+    )
+
+
+def _hardware_summary(hardware: HardwareInfo) -> str:
+    parts = [_ ("{ram:.1f} GB RAM", ram=hardware.ram_gb)]
+    if hardware.gpu_name:
+        parts.append(hardware.gpu_name)
+    if hardware.vram_gb is not None:
+        parts.append(_("{vram:.1f} GB VRAM", vram=hardware.vram_gb))
+    return " · ".join(parts)
+
+
+def _refresh_hardware_summary(window, hardware: HardwareInfo) -> None:
+    label = getattr(window, "ai_hardware_summary", None)
+    if label is None:
+        return
+    label.setText(
+        _(
+            "Detected hardware: {hardware}. Models that exceed the safe local memory budget are hidden.",
+            hardware=_hardware_summary(hardware),
+        )
     )
 
 
@@ -174,6 +214,7 @@ def _rebuild_combo(window, status) -> None:
         combo.setCurrentIndex(0)
     combo.blockSignals(False)
 
+    _refresh_hardware_summary(window, hardware)
     window._known_ai_models = set(status.models)
     window._refresh_ai_model_styles()
     selected = combo.currentText().strip()
@@ -198,26 +239,44 @@ def install_ai_model_selector(main_window_module) -> None:
         combo = self.ai_model_combo
         combo.setEditable(False)
         last_used = str(self.settings.value("ai/model", combo.currentText()) or combo.currentText())
+        hardware = hardware_from_settings(self.settings)
         combo.blockSignals(True)
         combo.clear()
-        if last_used:
+        if last_used and model_fits_hardware(last_used, hardware):
             combo.addItem(last_used)
             combo.setCurrentText(last_used)
         combo.blockSignals(False)
 
+        parent = combo.parentWidget()
+        layout = parent.layout() if parent is not None else None
+
+        # The old profile selector is an implementation detail that made the first
+        # AI card unnecessarily technical. Keep it alive for backwards-compatible
+        # settings, but replace it visually with the hardware VitalChronicle found.
+        self.ai_profile_combo.setVisible(False)
+        if parent is not None:
+            for label in parent.findChildren(QLabel):
+                if label.text() == _("Hardware profile"):
+                    label.setVisible(False)
+                    break
+
+        hardware_summary = QLabel()
+        hardware_summary.setObjectName("pageSubtitle")
+        hardware_summary.setWordWrap(True)
+        self.ai_hardware_summary = hardware_summary
+        _refresh_hardware_summary(self, hardware)
+
         banner = QLabel(
             _(
-                "These are open-source models that fit this computer. Installed Ollama models "
-                "are shown first. To use another model, install it manually with Ollama and it "
-                "will appear here."
+                "Local AI · Health data and conversations stay on this device. Only models "
+                "compatible with the detected hardware are offered; larger known models are hidden."
             )
         )
         banner.setObjectName("coverageNeutral")
         banner.setWordWrap(True)
         self.ai_model_catalog_banner = banner
-        parent = combo.parentWidget()
-        layout = parent.layout() if parent is not None else None
         if layout is not None:
+            layout.addWidget(hardware_summary, 1, 0, 1, 3)
             layout.addWidget(banner, 6, 0, 1, 3)
         return page
 
