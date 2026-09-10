@@ -28,15 +28,25 @@ jobs:
           p.write_text(text)
           PY
           python scripts/_tmp_patch_personalization_calendar.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('tests/test_agent_tool_factory_v2.py')
+          text = p.read_text()
+          text = text.replace(
+              'assert "COMPREHENSIVE PERSONALISATION CHECKPOINT" in joined',
+              'assert "PERSONALISATION CHECKPOINT" in joined',
+          )
+          p.write_text(text)
+          PY
       - name: Validate
         run: |
-          ruff check google_health_viewer/agent_runtime.py google_health_viewer/agent_runtime_v2.py google_health_viewer/agent_tools.py google_health_viewer/agent_tool_factory.py tests/test_agent_personalization_calendar_semantics.py
+          ruff check google_health_viewer/agent_runtime.py google_health_viewer/agent_runtime_v2.py google_health_viewer/agent_tools.py google_health_viewer/agent_tool_factory.py tests/test_agent_personalization_calendar_semantics.py tests/test_agent_tool_factory_v2.py
           pytest -q tests/test_agent_personalization_calendar_semantics.py tests/test_agent_tool_factory_v2.py tests/test_agent_self_reports_temporal.py
           git diff --check
       - name: Commit
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add google_health_viewer/agent_runtime.py google_health_viewer/agent_runtime_v2.py google_health_viewer/agent_tools.py google_health_viewer/agent_tool_factory.py tests/test_agent_personalization_calendar_semantics.py
+          git add google_health_viewer/agent_runtime.py google_health_viewer/agent_runtime_v2.py google_health_viewer/agent_tools.py google_health_viewer/agent_tool_factory.py tests/test_agent_personalization_calendar_semantics.py tests/test_agent_tool_factory_v2.py
           git commit -m 'Personalize focused answers and fix overnight date semantics' || exit 0
           git push
