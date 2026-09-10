@@ -1,12 +1,22 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from google_health_viewer.agent_runtime_v2 import AgentRuntime, _factory_hint
+from google_health_viewer.agent_runtime import (
+    AGENT_TRACE_PREFIX,
+    _tool_calling_unavailable_error,
+)
+from google_health_viewer.agent_runtime_v2 import (
+    AgentRuntime,
+    _factory_hint,
+    _is_comprehensive_analysis,
+)
 from google_health_viewer.agent_store import AgentStore
 from google_health_viewer.agent_tool_factory import EnhancedSafeToolExecutor
+from google_health_viewer.ai_engine import TOKEN_USAGE_PREFIX
 
 
 class DummyHealthStore:
@@ -696,3 +706,209 @@ def test_factory_cannot_execute_fourth_create_after_three_failed_repairs(tmp_pat
     assert "create_learned_tool" not in runtime.available_by_turn[3]
     assert store.tool("should_never_be_created") is None
     assert any("unavailable in this turn" in event.lower() for event in events)
+
+
+def test_agent_runtime_emits_exact_cumulative_token_usage_and_exchange(monkeypatch, tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    runtime = AgentRuntime(DummyHealthStore(tmp_path / "health.sqlite3"), store)
+    telemetry: list[str] = []
+    runtime._reset_agent_telemetry(telemetry.append)
+
+    payloads = iter(
+        [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "get_available_metrics",
+                                "arguments": {},
+                            }
+                        }
+                    ],
+                },
+                "prompt_eval_count": 120,
+                "eval_count": 18,
+                "eval_duration": 1_000_000_000,
+            },
+            {
+                "message": {"content": "Final answer"},
+                "prompt_eval_count": 220,
+                "eval_count": 30,
+                "eval_duration": 2_000_000_000,
+            },
+        ]
+    )
+
+    class FakeResponse:
+        status_code = 200
+        reason = "OK"
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    monkeypatch.setattr(
+        "google_health_viewer.agent_runtime.requests.post",
+        lambda *_args, **_kwargs: FakeResponse(next(payloads)),
+    )
+
+    runtime._telemetry_phase = "agent step 1"
+    runtime._chat_once(
+        model="test",
+        messages=[{"role": "user", "content": "test"}],
+        tools=[],
+        num_ctx=4096,
+        num_predict=512,
+        think=False,
+        cancel_callback=None,
+    )
+    runtime._telemetry_phase = "agent step 2"
+    runtime._chat_once(
+        model="test",
+        messages=[{"role": "user", "content": "test"}],
+        tools=[],
+        num_ctx=4096,
+        num_predict=512,
+        think=False,
+        cancel_callback=None,
+    )
+
+    usage = [
+        json.loads(item[len(TOKEN_USAGE_PREFIX) :])
+        for item in telemetry
+        if item.startswith(TOKEN_USAGE_PREFIX)
+    ]
+    assert len(usage) == 2
+    assert usage[0]["exact"] is True
+    assert usage[0]["input_tokens"] == 120
+    assert usage[0]["generated_tokens"] == 18
+    assert usage[1]["call"] == 2
+    assert usage[1]["total_input_tokens"] == 340
+    assert usage[1]["total_generated_tokens"] == 48
+    assert usage[1]["total_tokens"] == 388
+
+    traces = [
+        json.loads(item[len(AGENT_TRACE_PREFIX) :])
+        for item in telemetry
+        if item.startswith(AGENT_TRACE_PREFIX)
+    ]
+    assert any(
+        item["kind"] == "tool_call" and item["target"] == "get_available_metrics"
+        for item in traces
+    )
+    assert any(
+        item["kind"] == "assistant" and item["content"] == "Final answer"
+        for item in traces
+    )
+
+
+def test_agent_analysis_reports_tool_results_in_exchange(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+
+    class TraceRuntime(AgentRuntime):
+        def __init__(self, health_store, agent_store):
+            super().__init__(health_store, agent_store)
+            self.turn = 0
+
+        def _chat_once(self, **_kwargs):
+            self.turn += 1
+            if self.turn == 1:
+                return {
+                    "content": "",
+                    "tool_calls": [
+                        {"function": {"name": "get_available_metrics", "arguments": {}}}
+                    ],
+                }
+            return {"content": "Done"}
+
+    runtime = TraceRuntime(DummyHealthStore(tmp_path / "health.sqlite3"), store)
+    telemetry: list[str] = []
+    answer = runtime.analyze(
+        model="test",
+        snapshot={},
+        question="Quali metriche sono disponibili?",
+        history=[],
+        max_tokens=1024,
+        model_context_limit=None,
+        performance_profile="standard",
+        thread_id="trace-thread",
+        prompt_callback=telemetry.append,
+    )
+    assert answer == "Done"
+    traces = [
+        json.loads(item[len(AGENT_TRACE_PREFIX) :])
+        for item in telemetry
+        if item.startswith(AGENT_TRACE_PREFIX)
+    ]
+    assert any(
+        item["kind"] == "tool_result" and item["source"] == "get_available_metrics"
+        for item in traces
+    )
+
+
+def test_generic_tool_word_does_not_trigger_unsupported_model_fallback():
+    assert _tool_calling_unavailable_error(
+        "The local model returned neither an answer nor a tool call."
+    ) is False
+    assert _tool_calling_unavailable_error("model does not support tools") is True
+
+
+def test_comprehensive_analysis_detection():
+    assert _is_comprehensive_analysis("") is True
+    assert _is_comprehensive_analysis("Fammi una analisi totale") is True
+    assert _is_comprehensive_analysis("Analizza solo il sonno di ieri") is False
+
+
+class ComprehensivePersonalizationRuntime(AgentRuntime):
+    def __init__(self, health_store, agent_store):
+        super().__init__(health_store, agent_store)
+        self.turn = 0
+        self.final_messages = None
+
+    def _chat_once(self, **kwargs):
+        self.turn += 1
+        if self.turn == 1:
+            return {"content": "Analisi generale corretta ma con consigli generici."}
+        self.final_messages = kwargs.get("messages")
+        assert kwargs.get("tools") == []
+        return {
+            "content": (
+                "Raccomandazioni personalizzate: adatta il recupero al tuo attuale obiettivo "
+                "di allenamento, trattando i self-report recenti come osservazioni soggettive."
+            )
+        }
+
+
+def test_comprehensive_analysis_forces_personalized_final_synthesis(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    store.learn_user_model(
+        "current_training_goal",
+        "User feedback: cycling commute and strength training are current goals",
+        evidence={"answer": "cycling commute and strength training"},
+        source="feedback",
+    )
+    runtime = ComprehensivePersonalizationRuntime(
+        DummyHealthStore(tmp_path / "health.sqlite3"), store
+    )
+
+    answer = runtime.analyze(
+        model="test",
+        snapshot={},
+        question="Analisi totale",
+        history=[],
+        max_tokens=1024,
+        model_context_limit=None,
+        performance_profile="standard",
+        thread_id="personalized-total",
+    )
+
+    assert runtime.turn == 2
+    assert "Raccomandazioni personalizzate" in answer
+    assert runtime.final_messages is not None
+    joined = "\n".join(str(item.get("content") or "") for item in runtime.final_messages)
+    assert "COMPREHENSIVE PERSONALISATION CHECKPOINT" in joined
+    assert "cycling commute and strength training" in joined

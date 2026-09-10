@@ -16,6 +16,45 @@ MAX_RAW_SERIES_PROBES_BEFORE_FACTORY = 2
 FACTORY_GATE_AFTER_ANALYSIS_STEPS = 3
 MAX_TOTAL_MODEL_TURNS = MAX_ANALYSIS_STEPS + MAX_FACTORY_REPAIR_ATTEMPTS + 4
 
+_COMPREHENSIVE_ANALYSIS_MARKERS = (
+    "analisi totale",
+    "analisi completa",
+    "analisi profonda",
+    "cronologia completa",
+    "tutta la cronologia",
+    "full analysis",
+    "complete analysis",
+    "deep analysis",
+    "complete health history",
+    "complete local health history",
+    "entire health history",
+)
+
+
+def _is_comprehensive_analysis(question: str) -> bool:
+    text = str(question or "").strip().casefold()
+    if not text:
+        return True
+    return any(marker in text for marker in _COMPREHENSIVE_ANALYSIS_MARKERS)
+
+
+_PERSONALIZATION_POLICY = """
+
+Personalisation synthesis policy:
+- `personal_model` contains current, non-expired learned personal context. Treat its temporal scope, confidence,
+  freshness and evidence count as part of the evidence; never resurrect expired context.
+- `recent_self_reports` are dated subjective observations. They can justify short-term, conditional suggestions,
+  but one report is not a stable trait and does not prove a physiological cause.
+- When a current personal statement materially changes interpretation, say so explicitly and distinguish it from
+  wearable-derived evidence. Example: if irregular sleep was reported as an exceptional social event, do not present
+  one low regularity score as proof of a persistent schedule problem.
+- For a comprehensive/whole-history analysis with active personal context, the final answer MUST contain a clearly
+  identifiable personalised recommendations section. Translate relevant current goals, temporary context and recent
+  self-reports into concrete next actions rather than repeating generic advice.
+- Personalisation must remain evidence-bound: do not invent preferences, schedules, symptoms or causes that are not
+  present in the current personal context, recent reports or deterministic health evidence.
+"""
+
 _FACTORY_POLICY = """
 
 Tool Factory decision policy:
@@ -261,6 +300,7 @@ class AgentRuntime(base_rt.AgentRuntime):
         answer_callback: Callable[[str], None] | None,
     ) -> str:
         event(_("Agent: finalising with the evidence already collected…"))
+        self._telemetry_phase = "agent final"
         final_messages = [
             *messages,
             {
@@ -274,7 +314,10 @@ class AgentRuntime(base_rt.AgentRuntime):
                     "If you must derive a personal baseline from an already-returned semantic date series, "
                     "use its median as the robust VitalChronicle baseline convention and state that once. "
                     "If there are zero qualifying trigger events, report that directly and do not infer "
-                    "response frequency or recovery time."
+                    "response frequency or recovery time. Use any current, non-expired personal context and "
+                    "recent self-reports already present in the session when they materially improve the "
+                    "interpretation or recommendations; keep subjective reports explicitly separate from "
+                    "measured evidence."
                 ),
             },
         ]
@@ -326,11 +369,13 @@ class AgentRuntime(base_rt.AgentRuntime):
             if event_callback:
                 event_callback(text)
 
+        self._reset_agent_telemetry(prompt_callback)
         safe_history = [
             {"role": item["role"], "content": item["content"]}
             for item in (history or [])[-12:]
             if item.get("role") in {"user", "assistant"} and item.get("content")
         ]
+        comprehensive_analysis = _is_comprehensive_analysis(question)
         request = question.strip() or _(
             "Analyse my complete local health history and identify the most useful personal patterns."
         )
@@ -365,6 +410,25 @@ class AgentRuntime(base_rt.AgentRuntime):
                 if queued:
                     event(_("One targeted follow-up was queued to improve future personalisation."))
         initial = self._initial_context(snapshot)
+        active_personal_context = (
+            initial.get("personal_model") if isinstance(initial.get("personal_model"), list) else []
+        )
+        recent_self_reports = (
+            initial.get("recent_self_reports")
+            if isinstance(initial.get("recent_self_reports"), list)
+            else []
+        )
+        personalization_available = bool(active_personal_context or recent_self_reports)
+        if comprehensive_analysis and personalization_available:
+            initial["personalization_requirement"] = {
+                "mode": "comprehensive",
+                "required": True,
+                "instruction": (
+                    "Use materially relevant current personal context and recent self-reports in the final "
+                    "recommendations. Distinguish subjective reports from measured evidence, respect temporal "
+                    "validity, and do not infer causation from a single report."
+                ),
+            }
         if captured_self_report:
             initial["current_self_report"] = captured_self_report
             initial["self_report_rule"] = (
@@ -377,7 +441,7 @@ class AgentRuntime(base_rt.AgentRuntime):
             + "\n\nCurrent request: "
             + request
         )
-        system_prompt = base_rt.agent_system_prompt() + _FACTORY_POLICY
+        system_prompt = base_rt.agent_system_prompt() + _FACTORY_POLICY + _PERSONALIZATION_POLICY
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
             *safe_history,
@@ -485,6 +549,7 @@ class AgentRuntime(base_rt.AgentRuntime):
                 )
             )
             active_schemas = _without_factory_creation(schemas) if factory_disabled else schemas
+            self._telemetry_phase = f"agent step {analysis_steps + 1}"
             if factory_gate_required and not factory_disabled:
                 active_schemas = _only_named_tools(active_schemas, {"create_learned_tool"})
                 event(
@@ -662,6 +727,34 @@ class AgentRuntime(base_rt.AgentRuntime):
                         answer_callback=answer_callback,
                     )
                 if final_answer:
+                    if comprehensive_analysis and personalization_available:
+                        messages.append({"role": "assistant", "content": final_answer})
+                        messages.append(
+                            {
+                                "role": "system",
+                                "content": (
+                                    "COMPREHENSIVE PERSONALISATION CHECKPOINT. Treat the previous assistant "
+                                    "message as a draft, not the final answer. Preserve supported findings and "
+                                    "limitations, but now produce the final response with a clearly identifiable "
+                                    "personalised recommendations section. Use materially relevant CURRENT entries "
+                                    "from personal_model and recent_self_reports already supplied in the local "
+                                    "session context. Respect temporal validity and confidence. Explicitly label "
+                                    "subjective context as user-reported; a one-off report can support a short-term "
+                                    "conditional recommendation but not a stable trait or causal claim. Do not "
+                                    "invent new measurements and do not call tools."
+                                ),
+                            }
+                        )
+                        return self._final_answer(
+                            model=model,
+                            messages=messages,
+                            max_tokens=max_tokens,
+                            physical_limit=physical_limit,
+                            think=think,
+                            cancel_callback=cancel_callback,
+                            event=event,
+                            answer_callback=answer_callback,
+                        )
                     if answer_callback:
                         answer_callback(final_answer)
                     event(_("Agent finished the analysis."))
@@ -820,13 +913,15 @@ class AgentRuntime(base_rt.AgentRuntime):
                 elif name == "ask_user_feedback" and result.get("queued"):
                     event(_("Targeted feedback question queued for the user."))
 
+                tool_text = base_rt._json_text(result)
                 messages.append(
                     {
                         "role": "tool",
                         "tool_name": name,
-                        "content": base_rt._json_text(result),
+                        "content": tool_text,
                     }
                 )
+                self._emit_agent_trace(name, "Agent", tool_text, kind="tool_result")
 
             if not repair_turn or productive_tool_call:
                 analysis_steps += 1

@@ -606,11 +606,29 @@ class AIChatWindow(QMainWindow):
         except (TypeError, ValueError):
             speed_text = ""
         status = "NEAR LIMIT" if usage_percent >= 85 else "HIGH" if usage_percent >= 70 else "OK"
+        call_text = ""
+        total_text = ""
+        if payload.get("agentic"):
+            try:
+                call_number = max(1, int(payload.get("call") or 1))
+                total_input = max(0, int(payload.get("total_input_tokens") or input_tokens))
+                total_output = max(0, int(payload.get("total_generated_tokens") or generated))
+                total_tokens = max(0, int(payload.get("total_tokens") or total_input + total_output))
+            except (TypeError, ValueError):
+                call_number = 1
+                total_input = input_tokens
+                total_output = generated
+                total_tokens = total_input + total_output
+            call_text = f" · call {call_number}"
+            total_text = (
+                f" | Total {marker}{total_tokens:,} tok "
+                f"(In {marker}{total_input:,} + Out {marker}{total_output:,})"
+            )
         self._token_usage_text = (
-            f"{phase} · Ctx {marker}{context_used:,}/{context:,} ({usage_percent:.0f}%) "
+            f"{phase}{call_text} · Ctx {marker}{context_used:,}/{context:,} ({usage_percent:.0f}%) "
             f"· free {marker}{context_remaining:,} | In {marker}{input_tokens:,} | "
             f"Out {marker}{generated:,}/{output_budget:,} · free {marker}{output_remaining:,}"
-            f"{speed_text} | {status}"
+            f"{total_text}{speed_text} | {status}"
         )
         self.activity_progress.setRange(0, 1000)
         self.activity_progress.setValue(round(usage_percent * 10))

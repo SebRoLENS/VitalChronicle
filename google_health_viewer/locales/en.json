@@ -53,6 +53,7 @@
   "Agent activity": "Agent activity",
   "Agent activity · completed": "Agent activity · completed",
   "Agent context compacted while preserving the latest tool evidence.": "Agent context compacted while preserving the latest tool evidence.",
+  "Agent exchange": "Agent exchange",
   "Agent finished the analysis.": "Agent finished the analysis.",
   "Agent runtime blocked a tool call unavailable in this turn: {tools}": "Agent runtime blocked a tool call unavailable in this turn: {tools}",
   "Agent step {step}/{maximum}…": "Agent step {step}/{maximum}…",

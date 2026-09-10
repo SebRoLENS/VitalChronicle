@@ -10,7 +10,7 @@ from PySide6.QtCore import QSettings, QThread, Signal
 
 from .agent_store import AgentStore
 from .agent_tools import SafeToolExecutor
-from .ai_engine import OptimizedOllamaClient, _request_budget
+from .ai_engine import TOKEN_USAGE_PREFIX, OptimizedOllamaClient, _request_budget
 from .i18n import _, current_language
 from .local_ai import (
     AIAnalysisCancelled,
@@ -20,6 +20,7 @@ from .local_ai import (
 
 MAX_AGENT_STEPS = 10
 MAX_TOOL_RESULT_CHARS = 24000
+AGENT_TRACE_PREFIX = "__VC_AGENT_TRACE__:"
 CALIBRATION_VERSION = 1
 
 
@@ -51,6 +52,11 @@ Operating rules:
 10. Readiness, cardio load, target load, training status and resilience returned by tools are
    transparent VitalChronicle estimates based on personal baselines, not proprietary Google/Fitbit scores.
 11. When confidence or coverage is low, state that clearly. A missing/None score component means unavailable evidence, never a neutral or zero value.
+12. Current, non-expired personal context and recent subjective self-reports are evidence for personalisation.
+    Use them when they materially change interpretation or recommendations, while clearly distinguishing user-reported
+    context from measured physiology. For a comprehensive health-history analysis, recommendations must be adapted
+    to relevant current goals/context instead of remaining generic. A one-off self-report may guide a short-term
+    suggestion but must never be presented as a stable trait or as proof of causation.
 
 The health archive is read-only to the agent. Learned tools, feedback and personal associations are
 stored separately and locally. Use the minimum useful number of tool calls, then answer clearly.
@@ -100,11 +106,106 @@ def _tool_arguments(call: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _tool_calling_unavailable_error(detail: str) -> bool:
+    text = str(detail or "").casefold()
+    markers = (
+        "does not support tools", "doesn't support tools", "tools are not supported",
+        "tool calling is not supported", "tool calls are not supported",
+        "tool use is not supported", "does not support tool calling",
+        "doesn't support tool calling", "does not support function calling",
+        "doesn't support function calling", "function calling is not supported",
+        "unsupported tool calling", "unsupported function calling",
+    )
+    return any(marker in text for marker in markers)
+
+
 class AgentRuntime:
     def __init__(self, health_store, agent_store: AgentStore | None = None) -> None:
         self.health_store = health_store
         self.agent_store = agent_store or AgentStore.beside_health_store(health_store)
         self.tools = SafeToolExecutor(health_store, self.agent_store)
+        self._telemetry_callback: Callable[[str], None] | None = None
+        self._telemetry_phase = "agent"
+        self._agent_model_calls = 0
+        self._agent_prompt_tokens_total = 0
+        self._agent_generated_tokens_total = 0
+
+    def _reset_agent_telemetry(
+        self, callback: Callable[[str], None] | None
+    ) -> None:
+        self._telemetry_callback = callback
+        self._telemetry_phase = "agent"
+        self._agent_model_calls = 0
+        self._agent_prompt_tokens_total = 0
+        self._agent_generated_tokens_total = 0
+
+    def _emit_agent_trace(
+        self, source: str, target: str, content: str, *, kind: str = "message"
+    ) -> None:
+        callback = self._telemetry_callback
+        if callback is None:
+            return
+        callback(
+            AGENT_TRACE_PREFIX
+            + json.dumps(
+                {
+                    "kind": kind,
+                    "source": source,
+                    "target": target,
+                    "content": content,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+
+    def _emit_agent_usage(
+        self, payload: dict[str, Any], *, num_ctx: int, num_predict: int
+    ) -> None:
+        callback = self._telemetry_callback
+        if callback is None:
+            return
+        try:
+            prompt_tokens = max(0, int(payload.get("prompt_eval_count") or 0))
+            generated_tokens = max(0, int(payload.get("eval_count") or 0))
+            eval_duration = max(0, int(payload.get("eval_duration") or 0))
+        except (TypeError, ValueError):
+            return
+        self._agent_model_calls += 1
+        self._agent_prompt_tokens_total += prompt_tokens
+        self._agent_generated_tokens_total += generated_tokens
+        context = max(1, int(num_ctx))
+        context_used = min(context, prompt_tokens + generated_tokens)
+        speed = None
+        if generated_tokens and eval_duration > 0:
+            speed = generated_tokens / max(0.001, eval_duration / 1_000_000_000)
+        exact = "prompt_eval_count" in payload and "eval_count" in payload
+        callback(
+            TOKEN_USAGE_PREFIX
+            + json.dumps(
+                {
+                    "phase": self._telemetry_phase,
+                    "agentic": True,
+                    "call": self._agent_model_calls,
+                    "exact": exact,
+                    "input_tokens": prompt_tokens,
+                    "generated_tokens": generated_tokens,
+                    "total_input_tokens": self._agent_prompt_tokens_total,
+                    "total_generated_tokens": self._agent_generated_tokens_total,
+                    "total_tokens": (
+                        self._agent_prompt_tokens_total + self._agent_generated_tokens_total
+                    ),
+                    "output_budget": max(1, int(num_predict)),
+                    "output_remaining": max(0, int(num_predict) - generated_tokens),
+                    "context": context,
+                    "context_used": context_used,
+                    "context_remaining": max(0, context - context_used),
+                    "usage_percent": round(100.0 * context_used / context, 1),
+                    "tokens_per_second": (round(speed, 2) if speed is not None else None),
+                },
+                separators=(",", ":"),
+            )
+        )
 
     @property
     def enabled(self) -> bool:
@@ -181,6 +282,21 @@ class AgentRuntime:
         message = payload.get("message")
         if not isinstance(message, dict):
             raise LocalAIError(_("Ollama returned no agent message."))
+        self._emit_agent_usage(payload, num_ctx=num_ctx, num_predict=num_predict)
+        assistant_content = str(message.get("content") or "").strip()
+        if assistant_content:
+            self._emit_agent_trace("Agent", "Runtime", assistant_content, kind="assistant")
+        tool_calls = message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
+        for call in tool_calls[:6]:
+            if not isinstance(call, dict):
+                continue
+            name = _tool_name(call) or "tool"
+            self._emit_agent_trace(
+                "Agent",
+                name,
+                _json_text(_tool_arguments(call), 6000),
+                kind="tool_call",
+            )
         return message
 
     @staticmethod
@@ -214,6 +330,7 @@ class AgentRuntime:
             if event_callback:
                 event_callback(text)
 
+        self._reset_agent_telemetry(prompt_callback)
         safe_history = [
             {"role": item["role"], "content": item["content"]}
             for item in (history or [])[-12:]
@@ -266,6 +383,7 @@ class AgentRuntime:
             if cancel_callback and cancel_callback():
                 raise AIAnalysisCancelled(_("Analysis stopped."))
             event(_("Agent step {step}/{maximum}…", step=step, maximum=MAX_AGENT_STEPS))
+            self._telemetry_phase = f"agent step {step}"
             message = self._chat_once(
                 model=model,
                 messages=messages,
@@ -321,13 +439,15 @@ class AgentRuntime:
                         schemas = self.tools.tool_schemas()
                     elif name == "ask_user_feedback" and result.get("queued"):
                         event(_("Targeted feedback question queued for the user."))
+                tool_text = _json_text(result)
                 messages.append(
                     {
                         "role": "tool",
                         "tool_name": name,
-                        "content": _json_text(result),
+                        "content": tool_text,
                     }
                 )
+                self._emit_agent_trace(name, "Agent", tool_text, kind="tool_result")
 
             simple_messages = [
                 {"role": str(x.get("role", "")), "content": str(x.get("content", ""))}
@@ -655,15 +775,7 @@ class AgentAnalysisThread(QThread):
                     cancel_callback=self.isInterruptionRequested,
                 )
             except LocalAIError as exc:
-                lowered = str(exc).lower()
-                tool_support_markers = (
-                    "tool",
-                    "function",
-                    "unsupported",
-                    "does not support",
-                    "invalid tool",
-                )
-                if any(marker in lowered for marker in tool_support_markers):
+                if _tool_calling_unavailable_error(str(exc)):
                     answer = self._fallback(str(exc))
                 else:
                     raise

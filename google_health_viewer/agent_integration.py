@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from .agent_runtime import AGENT_TRACE_PREFIX
 from .agent_runtime_v2 import AgentAnalysisThread, AgentRuntime
 from .agent_ui import build_personal_ai_page, refresh_personal_ai_page
 from .ai_hardware import reasoning_value
@@ -54,11 +56,16 @@ def _install_chat_integration(ai_chat_module) -> None:
     original_load_thread = AIChatWindow._load_current_thread
     original_start_request = AIChatWindow._start_request
     original_analysis_completed = AIChatWindow._analysis_completed
+    original_prompt_ready = AIChatWindow._prompt_ready
 
     def render_activity_log(self) -> None:
         lines = [f"• {message}" for message in self._activity_events]
+        exchange = list(getattr(self, "_agent_exchange_events", []))
+        if exchange:
+            lines.extend(["", _("Agent exchange")])
+            lines.extend(exchange)
         if self._token_usage_text:
-            lines.append(self._token_usage_text)
+            lines.extend(["", self._token_usage_text])
         text = "\n".join(lines)
         if isinstance(self.activity_log, QPlainTextEdit):
             scrollbar = self.activity_log.verticalScrollBar()
@@ -139,6 +146,7 @@ def _install_chat_integration(ai_chat_module) -> None:
 
         self.activity_copy_button.clicked.connect(copy_activity)
         self.activity_save_button.clicked.connect(save_activity)
+        self._agent_exchange_events = []
 
         self.agent_feedback_panel = QFrame()
         self.agent_feedback_panel.setObjectName("aiCard")
@@ -244,6 +252,7 @@ def _install_chat_integration(ai_chat_module) -> None:
             self.conversations.add_message(thread["id"], "user", display_question)
         self.input.clear()
         self._pending_mode = mode
+        self._agent_exchange_events = []
         self._live_thinking = _("Preparing the personal agent…\n")
         self._live_answer = ""
         self._answer_received = False
@@ -279,6 +288,27 @@ def _install_chat_integration(ai_chat_module) -> None:
         self.analysis_thread.cancelled.connect(self._analysis_cancelled)
         self.analysis_thread.start()
 
+    def prompt_ready(self, text: str) -> None:
+        if text.startswith(AGENT_TRACE_PREFIX):
+            try:
+                payload = json.loads(text[len(AGENT_TRACE_PREFIX) :])
+            except (TypeError, ValueError):
+                return
+            if not isinstance(payload, dict):
+                return
+            source = str(payload.get("source") or "Agent")
+            target = str(payload.get("target") or "Runtime")
+            content = str(payload.get("content") or "").strip()
+            entry = f"{source} → {target}"
+            if content:
+                entry += f"\n{content}"
+            self._agent_exchange_events.append(entry)
+            # Bound only the UI transcript length; each individual message remains exact.
+            self._agent_exchange_events = self._agent_exchange_events[-80:]
+            self._render_activity_log()
+            return
+        original_prompt_ready(self, text)
+
     def analysis_completed(self, answer: str) -> None:
         original_analysis_completed(self, answer)
         self._refresh_agent_feedback()
@@ -292,6 +322,7 @@ def _install_chat_integration(ai_chat_module) -> None:
     AIChatWindow._refresh_agent_feedback = refresh_agent_feedback
     AIChatWindow._load_current_thread = load_current_thread
     AIChatWindow._start_request = start_request
+    AIChatWindow._prompt_ready = prompt_ready
     AIChatWindow._analysis_completed = analysis_completed
     AIChatWindow._personal_agent_integration_installed = True
 
