@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from google_health_viewer.agent_runtime import AGENT_TRACE_PREFIX
+from google_health_viewer.agent_runtime import (
+    AGENT_TRACE_PREFIX,
+    _tool_calling_unavailable_error,
+)
 from google_health_viewer.agent_runtime_v2 import AgentRuntime, _factory_hint
 from google_health_viewer.agent_store import AgentStore
 from google_health_viewer.agent_tool_factory import EnhancedSafeToolExecutor
@@ -841,3 +844,10 @@ def test_agent_analysis_reports_tool_results_in_exchange(tmp_path):
         item["kind"] == "tool_result" and item["source"] == "get_available_metrics"
         for item in traces
     )
+
+
+def test_generic_tool_word_does_not_trigger_unsupported_model_fallback():
+    assert _tool_calling_unavailable_error(
+        "The local model returned neither an answer nor a tool call."
+    ) is False
+    assert _tool_calling_unavailable_error("model does not support tools") is True

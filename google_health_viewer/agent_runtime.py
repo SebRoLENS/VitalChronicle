@@ -101,6 +101,19 @@ def _tool_arguments(call: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _tool_calling_unavailable_error(detail: str) -> bool:
+    text = str(detail or "").casefold()
+    markers = (
+        "does not support tools", "doesn't support tools", "tools are not supported",
+        "tool calling is not supported", "tool calls are not supported",
+        "tool use is not supported", "does not support tool calling",
+        "doesn't support tool calling", "does not support function calling",
+        "doesn't support function calling", "function calling is not supported",
+        "unsupported tool calling", "unsupported function calling",
+    )
+    return any(marker in text for marker in markers)
+
+
 class AgentRuntime:
     def __init__(self, health_store, agent_store: AgentStore | None = None) -> None:
         self.health_store = health_store
@@ -757,15 +770,7 @@ class AgentAnalysisThread(QThread):
                     cancel_callback=self.isInterruptionRequested,
                 )
             except LocalAIError as exc:
-                lowered = str(exc).lower()
-                tool_support_markers = (
-                    "tool",
-                    "function",
-                    "unsupported",
-                    "does not support",
-                    "invalid tool",
-                )
-                if any(marker in lowered for marker in tool_support_markers):
+                if _tool_calling_unavailable_error(str(exc)):
                     answer = self._fallback(str(exc))
                 else:
                     raise
