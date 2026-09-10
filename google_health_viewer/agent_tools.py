@@ -21,6 +21,8 @@ from .agent_store import AgentStore
 
 MAX_SERIES_POINTS = 360
 MAX_LEARNED_STEPS = 12
+MIN_ACUTE_LOAD_OBSERVED_DAYS = 5
+MIN_CHRONIC_LOAD_OBSERVED_DAYS = 21
 ALLOWED_DSL_OPS = {
     "load_series",
     "daily",
@@ -936,14 +938,48 @@ class SafeToolExecutor:
         daily, method = self._cardio_daily(right - timedelta(days=34), right)
         acute_days = {(right - timedelta(days=i)).isoformat() for i in range(7)}
         chronic_days = {(right - timedelta(days=i)).isoformat() for i in range(7, 35)}
-        acute = sum(value for day, value in daily.items() if day in acute_days)
-        chronic = sum(value for day, value in daily.items() if day in chronic_days) / 4
+        acute_values = [value for day, value in daily.items() if day in acute_days]
+        chronic_values = [value for day, value in daily.items() if day in chronic_days]
+        acute_observed = len(acute_values)
+        chronic_observed = len(chronic_values)
+        acute_sufficient = acute_observed >= MIN_ACUTE_LOAD_OBSERVED_DAYS
+        chronic_sufficient = chronic_observed >= MIN_CHRONIC_LOAD_OBSERVED_DAYS
+        acute = (
+            statistics.fmean(acute_values) * 7
+            if acute_sufficient and acute_values
+            else None
+        )
+        chronic = (
+            statistics.fmean(chronic_values) * 7
+            if chronic_sufficient and chronic_values
+            else None
+        )
+        ratio = (
+            None
+            if acute is None or chronic is None or chronic <= 1e-9
+            else acute / chronic
+        )
+        if not acute_sufficient:
+            history_status = "insufficient_acute_history"
+        elif not chronic_sufficient:
+            history_status = "insufficient_chronic_history"
+        else:
+            history_status = "sufficient"
         return {
-            "acute_7d": round(acute, 2),
-            "chronic_weekly_equivalent_28d": round(chronic, 2),
-            "acute_chronic_ratio": None if chronic <= 1e-9 else round(acute / chronic, 3),
+            "acute_7d": None if acute is None else round(acute, 2),
+            "chronic_weekly_equivalent_28d": None if chronic is None else round(chronic, 2),
+            "acute_chronic_ratio": None if ratio is None else round(ratio, 3),
+            "acute_observed_total": round(sum(acute_values), 2),
+            "chronic_observed_total": round(sum(chronic_values), 2),
+            "acute_observed_days": acute_observed,
+            "chronic_observed_days": chronic_observed,
+            "acute_coverage": round(acute_observed / 7, 3),
+            "chronic_coverage": round(chronic_observed / 28, 3),
+            "acute_history_sufficient": acute_sufficient,
+            "chronic_history_sufficient": chronic_sufficient,
+            "history_status": history_status,
             "observed_days": len(daily),
-            "method": method,
+            "method": method + "; weekly equivalents are normalized over observed days only when coverage is sufficient",
         }
 
     def _tool_calculate_cardio_load(self, args, **_):
@@ -965,28 +1001,50 @@ class SafeToolExecutor:
     def _tool_calculate_acute_load(self, args, **_):
         _left, right = _bounds(args.get("start"), args.get("end"), 35)
         item = self._load(right)
+        sufficient = bool(item["acute_history_sufficient"])
         return {
             "acute_load_7d": item["acute_7d"],
-            "confidence": _confidence(item["observed_days"], 35),
+            "observed_total": item["acute_observed_total"],
+            "observed_days": item["acute_observed_days"],
+            "coverage": item["acute_coverage"],
+            "status": "available" if sufficient else "insufficient_history",
+            "confidence": _confidence(item["acute_observed_days"], 7) if sufficient else 0.0,
             "method": item["method"],
+            "limitations": None if sufficient else "At least 5 observed days in the recent 7-day window are required; missing days are not treated as zero.",
         }
 
     def _tool_calculate_chronic_load(self, args, **_):
         _left, right = _bounds(args.get("start"), args.get("end"), 35)
         item = self._load(right)
+        sufficient = bool(item["chronic_history_sufficient"])
         return {
             "chronic_load_weekly_equivalent_28d": item["chronic_weekly_equivalent_28d"],
-            "confidence": _confidence(item["observed_days"], 35),
+            "observed_total": item["chronic_observed_total"],
+            "observed_days": item["chronic_observed_days"],
+            "coverage": item["chronic_coverage"],
+            "status": "available" if sufficient else "insufficient_history",
+            "confidence": _confidence(item["chronic_observed_days"], 28) if sufficient else 0.0,
             "method": item["method"],
+            "limitations": None if sufficient else "At least 21 observed days in the prior 28-day window are required; missing days are not treated as zero.",
         }
 
     def _target(self, right: date) -> dict[str, Any]:
         load = self._load(right)
         readiness = self._readiness(right)
-        chronic = float(load["chronic_weekly_equivalent_28d"])
+        chronic = load["chronic_weekly_equivalent_28d"]
+        if chronic is None:
+            return {
+                "target_weekly_load": None,
+                "current_acute_load": load["acute_7d"],
+                "readiness": readiness,
+                "status": "insufficient_history",
+                "confidence": 0.0,
+                "method": "VitalChronicle target load requires a usable prior 28-day chronic-load estimate.",
+                "limitations": "Not enough observed chronic-load history; no target is estimated and missing days are not treated as zero.",
+            }
         score = readiness["score"]
         factor = 1.0 if score is None else 0.70 + 0.006 * float(score)
-        centre = chronic * factor
+        centre = float(chronic) * factor
         return {
             "target_weekly_load": {
                 "lower": round(centre * 0.85, 2),
@@ -994,10 +1052,12 @@ class SafeToolExecutor:
             },
             "current_acute_load": load["acute_7d"],
             "readiness": readiness,
+            "status": "available",
             "confidence": round(
-                min(readiness["confidence"], _confidence(load["observed_days"], 35)), 3
+                min(readiness["confidence"], _confidence(load["chronic_observed_days"], 28)), 3
             ),
             "method": "VitalChronicle heuristic: personal chronic load scaled by readiness with ±15% range; not Fitbit Target Load.",
+            "limitations": None,
         }
 
     def _tool_calculate_target_load(self, args, **_):
@@ -1112,28 +1172,79 @@ class SafeToolExecutor:
         )
         load = self._load(right)
         ratio = load["acute_chronic_ratio"]
-        r = float(readiness["score"] if readiness["score"] is not None else 50)
-        s = float(
-            regularity["regularity_score"] if regularity["regularity_score"] is not None else 50
+        r = readiness["score"]
+        s = regularity["regularity_score"]
+        balance = (
+            None
+            if ratio is None
+            else max(0.0, min(100.0, 100 - abs(float(ratio) - 1) * 70))
         )
-        balance = 70 if ratio is None else max(0.0, min(100.0, 100 - abs(float(ratio) - 1) * 70))
+        values = {
+            "readiness": None if r is None else float(r),
+            "sleep_regularity": None if s is None else float(s),
+            "load_balance": balance,
+        }
+        weights = {"readiness": 0.50, "sleep_regularity": 0.25, "load_balance": 0.25}
+        available = {key: value for key, value in values.items() if value is not None}
+        weight_sum = sum(weights[key] for key in available)
+        objective_score = (
+            None
+            if not available
+            else sum(float(value) * weights[key] for key, value in available.items()) / weight_sum
+        )
         subjective = [
             x
             for x in self.agent_store.user_model()
             if "load" in x["key"].lower() or "fatigue" in x["key"].lower()
         ]
         bonus = min(5.0, sum(float(x["confidence"]) * 1.5 for x in subjective))
-        score = max(0.0, min(100.0, 0.50 * r + 0.25 * s + 0.25 * balance + bonus))
+        score = (
+            None
+            if objective_score is None
+            else max(0.0, min(100.0, objective_score + bonus))
+        )
+        load_balance_label = (
+            "unavailable_insufficient_history"
+            if balance is None
+            else "balanced"
+            if balance >= 85
+            else "moderately_unbalanced"
+            if balance >= 50
+            else "unbalanced"
+        )
         return {
-            "score": round(score, 1),
-            "label": "optimal" if score >= 75 else "balanced" if score >= 50 else "low",
+            "score": None if score is None else round(score, 1),
+            "label": None
+            if score is None
+            else ("optimal" if score >= 75 else "balanced" if score >= 50 else "low"),
             "components": {
-                "readiness": round(r, 1),
-                "sleep_regularity": round(s, 1),
-                "load_balance": round(balance, 1),
+                "readiness": None if r is None else round(float(r), 1),
+                "sleep_regularity": None if s is None else round(float(s), 1),
+                "load_balance": None if balance is None else round(balance, 1),
             },
+            "component_status": {
+                "readiness": "available" if r is not None else "unavailable",
+                "sleep_regularity": "available" if s is not None else "unavailable",
+                "load_balance": "available" if balance is not None else load["history_status"],
+            },
+            "load_balance_label": load_balance_label,
+            "load_history": {
+                "acute_observed_days": load["acute_observed_days"],
+                "chronic_observed_days": load["chronic_observed_days"],
+                "acute_coverage": load["acute_coverage"],
+                "chronic_coverage": load["chronic_coverage"],
+                "acute_chronic_ratio": ratio,
+            },
+            "effective_weights": {
+                key: round(weights[key] / weight_sum, 3) for key in available
+            } if weight_sum else {},
             "subjective_personalisation_used": bool(subjective),
-            "method": "VitalChronicle medium-term resilience heuristic; feedback cannot remove objective safety warnings.",
+            "method": "VitalChronicle medium-term resilience heuristic: readiness 50%, sleep regularity 25%, load balance 25%; unavailable components are omitted and remaining weights are renormalized. Feedback cannot remove objective safety warnings.",
+            "limitations": (
+                "Load balance is unavailable because acute/chronic history is insufficient; it is not treated as neutral or zero."
+                if balance is None
+                else None
+            ),
         }
 
     def _tool_calculate_resilience(self, args, **_):
