@@ -123,16 +123,16 @@ class HealthStore:
         if not rows:
             return 0
         with self._connect() as db:
-            if record_kind == "daily_rollup":
+            if record_kind in {"daily_rollup", "five_minute_rollup"}:
                 db.executemany(
                     """
                     DELETE FROM records
-                    WHERE data_type = ? AND record_kind = 'daily_rollup'
+                    WHERE data_type = ? AND record_kind = ?
                       AND COALESCE(start_time, '') = COALESCE(?, '')
                       AND COALESCE(end_time, '') = COALESCE(?, '')
                       AND record_id <> ?
                     """,
-                    [(row[0], row[3], row[4], row[1]) for row in rows],
+                    [(row[0], record_kind, row[3], row[4], row[1]) for row in rows],
                 )
             db.executemany(
                 """
@@ -204,6 +204,40 @@ class HealthStore:
                 """,
                 (key, value),
             )
+
+    def delete_records_by_kind(self, data_type: str, record_kind: str) -> int:
+        """Delete one representation without touching other records for the metric."""
+        with self._connect() as db:
+            cursor = db.execute(
+                "DELETE FROM records WHERE data_type = ? AND record_kind = ?",
+                (data_type, record_kind),
+            )
+            removed = cursor.rowcount
+        return max(0, int(removed if removed is not None else 0))
+
+    def reset_sync_ranges(self, data_type: str) -> None:
+        """Forget downloaded coverage so a representation migration can refetch it."""
+        with self._connect() as db:
+            db.execute("DELETE FROM sync_ranges WHERE data_type = ?", (data_type,))
+
+    def data_type_date_bounds(self, data_type: str) -> tuple[date, date] | None:
+        """Return first/last local calendar dates stored for one data type."""
+        with self._connect() as db:
+            row = db.execute(
+                """
+                SELECT MIN(substr(COALESCE(start_time, end_time), 1, 10)) AS first_day,
+                       MAX(substr(COALESCE(start_time, end_time), 1, 10)) AS last_day
+                FROM records
+                WHERE data_type = ? AND COALESCE(start_time, end_time) IS NOT NULL
+                """,
+                (data_type,),
+            ).fetchone()
+        if not row or not row["first_day"] or not row["last_day"]:
+            return None
+        try:
+            return date.fromisoformat(row["first_day"]), date.fromisoformat(row["last_day"])
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _merge_date_ranges(ranges: list[tuple[date, date]]) -> list[tuple[date, date]]:

@@ -172,7 +172,15 @@ DATA_TYPES = (
         "health",
         "daily",
     ),
-    _spec("heart-rate", _("Heart rate"), _("Health metrics"), "health", "sample"),
+    _spec(
+        "heart-rate",
+        _("Heart rate"),
+        _("Health metrics"),
+        "health",
+        "sample",
+        "five_minute_rollup",
+        None,
+    ),
     _spec(
         "heart-rate-variability",
         _("Heart-rate variability"),

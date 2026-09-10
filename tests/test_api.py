@@ -41,8 +41,8 @@ def test_reference_food_catalogs_are_not_synced_automatically():
 
 
 def test_multiword_sample_and_daily_filters_use_api_snake_case():
-    assert DATA_TYPE_BY_KEY["heart-rate"].filter_field == (
-        "heart_rate.sample_time.physical_time"
+    assert DATA_TYPE_BY_KEY["heart-rate-variability"].filter_field == (
+        "heart_rate_variability.sample_time.physical_time"
     )
     assert DATA_TYPE_BY_KEY["daily-oxygen-saturation"].filter_field == (
         "daily_oxygen_saturation.date"
@@ -73,3 +73,50 @@ def test_daily_rollup_uses_current_rollup_endpoint_and_physical_window():
     assert path.endswith("/dataPoints:rollUp")
     assert kwargs["json_body"]["windowSize"] == "86400s"
     assert "startTime" in kwargs["json_body"]["range"]
+
+
+def test_heart_rate_sync_uses_five_minute_server_rollups():
+    spec = DATA_TYPE_BY_KEY["heart-rate"]
+    assert spec.operation == "five_minute_rollup"
+    assert spec.filter_field is None
+
+    client = GoogleHealthClient(None)
+    calls = []
+
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path, kwargs))
+        return {
+            "rollupDataPoints": [
+                {
+                    "startTime": "2026-09-02T10:00:00+00:00",
+                    "endTime": "2026-09-02T10:05:00+00:00",
+                    "heartRate": {
+                        "beatsPerMinuteAvg": 72.5,
+                        "beatsPerMinuteMin": 68.0,
+                        "beatsPerMinuteMax": 79.0,
+                    },
+                }
+            ]
+        }
+
+    client._request = fake_request
+    pages = list(
+        client.iter_five_minute_heart_rate_rollups(
+            spec,
+            date(2026, 9, 2),
+            date(2026, 9, 2),
+        )
+    )
+
+    method, path, kwargs = calls[0]
+    assert method == "POST"
+    assert path.endswith("/dataPoints:rollUp")
+    assert kwargs["json_body"]["windowSize"] == "300s"
+    point = pages[0][0]
+    assert point["heartRate"]["beatsPerMinuteAvg"] == 72.5
+    assert point["heartRate"]["beatsPerMinuteMin"] == 68.0
+    assert point["heartRate"]["beatsPerMinuteMax"] == 79.0
+    assert point["heartRate"]["beatsPerMinute"] == 72.5
+    assert point["name"] == (
+        "heart-rate:5m:2026-09-02T10:00:00+00:00:2026-09-02T10:05:00+00:00"
+    )
