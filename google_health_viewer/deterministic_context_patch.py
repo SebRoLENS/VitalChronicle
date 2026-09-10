@@ -8,9 +8,10 @@ from datetime import datetime
 from itertools import pairwise
 from typing import Any
 
-_WAKE_STAGES = {"AWAKE", "WAKE", "OUT_OF_BED"}
+_WAKE_STAGES = {"AWAKE", "WAKE", "OUT_OF_BED", "AWAKE_IN_BED"}
 _KNOWN_STAGES = (
     "OUT_OF_BED",
+    "AWAKE_IN_BED",
     "AWAKE",
     "WAKE",
     "DEEP",
@@ -18,6 +19,7 @@ _KNOWN_STAGES = (
     "LIGHT",
     "CORE",
     "ASLEEP",
+    "SLEEPING",
     "SLEEP",
     "RESTLESS",
     "UNKNOWN",
@@ -45,7 +47,27 @@ def _percentile(values: list[float], fraction: float) -> float:
 
 
 def _normalize_stage(value: Any) -> str:
-    text = str(value or "UNKNOWN").strip().upper().replace("-", "_").replace(" ", "_")
+    if value is None or isinstance(value, bool):
+        return "UNKNOWN"
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = None
+    if numeric is not None and math.isfinite(numeric) and numeric.is_integer():
+        health_connect_stages = {
+            0: "UNKNOWN",
+            1: "AWAKE",
+            2: "SLEEPING",
+            3: "OUT_OF_BED",
+            4: "LIGHT",
+            5: "DEEP",
+            6: "REM",
+            7: "AWAKE_IN_BED",
+        }
+        mapped = health_connect_stages.get(int(numeric))
+        if mapped:
+            return mapped
+    text = str(value).strip().upper().replace("-", "_").replace(" ", "_")
     for stage in _KNOWN_STAGES:
         if text == stage or text.endswith(f"_{stage}"):
             return stage
@@ -102,7 +124,8 @@ def _intervals_from_entries(
         end = analysis.parse_timestamp(analysis._find_named_value(entry, {"endtime"}))
         if start is None or end is None or end <= start:
             continue
-        intervals.append((start, end, _normalize_stage(entry.get("type"))))
+        stage_value = analysis._find_named_value(entry, {"type", "stage", "stagetype"})
+        intervals.append((start, end, _normalize_stage(stage_value)))
     return sorted(intervals, key=lambda item: (item[0], item[1]))
 
 
@@ -276,7 +299,9 @@ def _sleep_session_details(record: dict[str, Any], analysis) -> dict[str, Any] |
         "internal_awakenings": len(internal_wake_indices),
         "awake_minutes": _rounded(wake_minutes, 1),
         "short_awakenings_count": len(short_intervals) if short_present else None,
-        "short_awakenings_total_minutes": _rounded(short_total_minutes, 1) if short_present else None,
+        "short_awakenings_total_minutes": _rounded(short_total_minutes, 1)
+        if short_present
+        else None,
         "stage_sequence": " | ".join(encoded),
         "latencies_minutes": {
             "sleep_onset": (
@@ -354,7 +379,9 @@ def _sleep_ai_details(records: list[dict[str, Any]], analysis) -> dict[str, Any]
         return _rounded(statistics.fmean(values), 1) if values else None
 
     internal = [float(item["internal_awakenings"]) for item in sessions]
-    awake_minutes = [float(item["awake_minutes"]) for item in sessions if item["awake_minutes"] is not None]
+    awake_minutes = [
+        float(item["awake_minutes"]) for item in sessions if item["awake_minutes"] is not None
+    ]
     efficiencies = [
         float(item["sleep_efficiency_percent"])
         for item in sessions
@@ -471,9 +498,7 @@ def _record_interval(record: dict[str, Any], analysis) -> tuple[float | None, fl
     return start, end
 
 
-def _heart_rate_points(
-    records: list[dict[str, Any]], analysis
-) -> list[tuple[float, float]]:
+def _heart_rate_points(records: list[dict[str, Any]], analysis) -> list[tuple[float, float]]:
     metrics = analysis.available_metrics(records, "heart-rate") if records else []
     if not metrics:
         return []
@@ -524,8 +549,7 @@ def _heart_rate_activity_context(
         start, end = _record_interval(record, analysis)
         if start is not None and end is not None:
             level = (
-                _find_named_string(record.get("payload") or {}, {"activitylevel"})
-                or "UNSPECIFIED"
+                _find_named_string(record.get("payload") or {}, {"activitylevel"}) or "UNSPECIFIED"
             )
             activity_windows.append((start, end, level.upper()))
     activity_windows.sort()
@@ -547,7 +571,9 @@ def _heart_rate_activity_context(
         recent_sessions.append(
             {
                 "type": category,
-                "start_local": datetime.fromtimestamp(start).astimezone().isoformat(timespec="minutes"),
+                "start_local": datetime.fromtimestamp(start)
+                .astimezone()
+                .isoformat(timespec="minutes"),
                 "end_local": datetime.fromtimestamp(end).astimezone().isoformat(timespec="minutes"),
                 "duration_minutes": _rounded((end - start) / 60.0, 1),
                 **_sample_summary(session_values),
@@ -600,9 +626,9 @@ def _heart_rate_activity_context(
             for level, current in sorted(activity_indexes.items())
             if current
         },
-        "recent_exercise_sessions": sorted(
-            recent_sessions, key=lambda item: item["end_local"]
-        )[-_MAX_RECENT_EXERCISE_SESSIONS:],
+        "recent_exercise_sessions": sorted(recent_sessions, key=lambda item: item["end_local"])[
+            -_MAX_RECENT_EXERCISE_SESSIONS:
+        ],
         "caveat": (
             "Heart-rate samples are linked by temporal overlap with recorded exercise/activity "
             "windows. This contextualizes elevations but does not by itself prove causation."

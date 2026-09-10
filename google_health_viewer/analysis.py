@@ -243,11 +243,7 @@ def duration_hours(record: dict[str, Any]) -> float | None:
     end = parse_timestamp(record.get("end_time"))
     if start is not None and end is not None and end >= start:
         interval_hours = (end - start) / 3600.0
-        is_sleep = any(
-            part.lower() == "sleep"
-            for path in payload
-            for part in path.split(".")
-        )
+        is_sleep = any(part.lower() == "sleep" for path in payload for part in path.split("."))
         if is_sleep:
             explicit_awake_minutes = next(
                 (
@@ -423,9 +419,7 @@ def _heart_rate_sample_points(
             if timestamp is not None and bpm is not None:
                 points.append((timestamp, bpm))
         if not samples:
-            bpm = coerce_number(
-                _find_named_value(record["payload"], {"beatsperminute"})
-            )
+            bpm = coerce_number(_find_named_value(record["payload"], {"beatsperminute"}))
             if fallback is not None and bpm is not None:
                 points.append((fallback, bpm))
     return sorted(points)
@@ -453,6 +447,46 @@ def meaningful_record_count(data_type: str, records: list[dict[str, Any]]) -> in
     return len(records)
 
 
+_HEALTH_CONNECT_SLEEP_STAGE_CODES = {
+    0: "UNKNOWN",
+    1: "AWAKE",
+    2: "SLEEPING",
+    3: "OUT_OF_BED",
+    4: "LIGHT",
+    5: "DEEP",
+    6: "REM",
+    7: "AWAKE_IN_BED",
+}
+
+
+def _normalize_sleep_stage(value: Any) -> str:
+    """Normalize Fitbit/Health Connect sleep-stage values to stable names."""
+
+    if value is None or isinstance(value, bool):
+        return "UNKNOWN"
+    numeric = coerce_number(value)
+    if numeric is not None and float(numeric).is_integer():
+        mapped = _HEALTH_CONNECT_SLEEP_STAGE_CODES.get(int(numeric))
+        if mapped:
+            return mapped
+    normalized = re.sub(r"[^A-Z0-9]+", "_", str(value).upper()).strip("_")
+    if "AWAKE_IN_BED" in normalized:
+        return "AWAKE_IN_BED"
+    if "OUT_OF_BED" in normalized or "AWAKE_OUT_OF_BED" in normalized:
+        return "OUT_OF_BED"
+    if "DEEP" in normalized:
+        return "DEEP"
+    if "REM" in normalized:
+        return "REM"
+    if "LIGHT" in normalized:
+        return "LIGHT"
+    if "AWAKE" in normalized or normalized == "WAKE":
+        return "AWAKE"
+    if "SLEEPING" in normalized or normalized == "SLEEP":
+        return "SLEEPING"
+    return normalized or "UNKNOWN"
+
+
 def _sleep_stage_totals(record: dict[str, Any]) -> dict[str, float]:
     """Return the duration of each sleep stage for one session."""
 
@@ -461,6 +495,15 @@ def _sleep_stage_totals(record: dict[str, Any]) -> dict[str, float]:
             stages = value.get("stagesSummary")
             if isinstance(stages, list):
                 return [item for item in stages if isinstance(item, dict)]
+            if isinstance(stages, dict):
+                rows: list[dict[str, Any]] = []
+                for stage_name, stage_value in stages.items():
+                    if isinstance(stage_value, dict):
+                        rows.append({"type": stage_name, **stage_value})
+                    elif coerce_number(stage_value) is not None:
+                        rows.append({"type": stage_name, "minutes": stage_value})
+                if rows:
+                    return rows
             for child in value.values():
                 found = find_stages(child)
                 if found:
@@ -475,18 +518,18 @@ def _sleep_stage_totals(record: dict[str, Any]) -> dict[str, float]:
     totals: dict[str, float] = defaultdict(float)
     summarized_stages = find_stages(record["payload"])
     for stage in summarized_stages:
-        stage_type = str(stage.get("type", "ALTRO")).upper()
-        minutes = coerce_number(stage.get("minutes"))
+        raw_type = _find_named_value(stage, {"type", "stage", "stagetype"})
+        stage_type = _normalize_sleep_stage(raw_type)
+        minutes = coerce_number(_find_named_value(stage, {"minutes", "durationminutes"}))
         if minutes is not None:
             totals[stage_type] += minutes / 60.0
-    # Some sleep sessions expose only the raw stage intervals. Keep those
-    # sessions available to both the chart and the complete AI analysis.
+    # Health Connect commonly exposes raw Stage objects with `stage`/`stageType`
+    # (integer constants 0..7) plus startTime/endTime rather than Fitbit's `type` field.
     if not summarized_stages:
         for stage in _find_named_list(record["payload"], "stages"):
-            stage_type = str(stage.get("type", "ALTRO")).upper()
-            start = parse_timestamp(
-                _find_named_value(stage, {"starttime", "physicaltime"})
-            )
+            raw_type = _find_named_value(stage, {"type", "stage", "stagetype"})
+            stage_type = _normalize_sleep_stage(raw_type)
+            start = parse_timestamp(_find_named_value(stage, {"starttime", "physicaltime"}))
             end = parse_timestamp(_find_named_value(stage, {"endtime"}))
             if start is not None and end is not None and end > start:
                 totals[stage_type] += (end - start) / 3600.0
@@ -541,9 +584,7 @@ def raw_points(records: list[dict[str, Any]], metric: str) -> list[tuple[float, 
 
 
 def visual_profile(data_type: str, metric: str) -> VisualProfile:
-    chart, aggregation, color, unit = TYPE_VISUALS.get(
-        data_type, ("line", "none", "#1A73E8", "")
-    )
+    chart, aggregation, color, unit = TYPE_VISUALS.get(data_type, ("line", "none", "#1A73E8", ""))
     lowered = metric.lower()
     scale = 1.0
     if metric == "__duration_hours__":
@@ -848,8 +889,7 @@ def daily_progress(
     daily = _daily_map(points, aggregation)
     current = daily.get(reference_day.isoformat())
     previous_days = [
-        (reference_day - timedelta(days=offset)).isoformat()
-        for offset in range(1, window_days + 1)
+        (reference_day - timedelta(days=offset)).isoformat() for offset in range(1, window_days + 1)
     ]
     baseline_values = [daily[day] for day in previous_days if day in daily]
     baseline = statistics.fmean(baseline_values) if baseline_values else None
@@ -914,11 +954,7 @@ def smooth_heart_rate_points(
 
     buckets: dict[int, list[float]] = defaultdict(list)
     for timestamp, value in points:
-        if (
-            math.isfinite(timestamp)
-            and math.isfinite(value)
-            and 20 <= value <= 250
-        ):
+        if math.isfinite(timestamp) and math.isfinite(value) and 20 <= value <= 250:
             buckets[math.floor(timestamp / bin_seconds)].append(value)
     if not buckets:
         return []
@@ -952,9 +988,7 @@ def _same_clock_baseline(
     window_days: int = 7,
 ) -> dict[str, Any]:
     """Compare today's partial total only with earlier days at the same local time."""
-    intraday_records = [
-        record for record in records if record.get("record_kind") != "daily_rollup"
-    ]
+    intraday_records = [record for record in records if record.get("record_kind") != "daily_rollup"]
     points = raw_points(intraday_records, metric)
     if profile.scale != 1.0:
         points = [(timestamp, value * profile.scale) for timestamp, value in points]
@@ -999,11 +1033,7 @@ def _partial_day_context(
     same_clock = _same_clock_baseline(records, metric, profile, local_now)
     same_time_mean = same_clock["same_time_mean"]
     same_time_percent = None
-    if (
-        today_so_far is not None
-        and same_time_mean is not None
-        and abs(same_time_mean) > 1e-12
-    ):
+    if today_so_far is not None and same_time_mean is not None and abs(same_time_mean) > 1e-12:
         same_time_percent = today_so_far / same_time_mean * 100.0
 
     completed_summary = summarize_series(completed_points)
@@ -1036,10 +1066,7 @@ def _generic_enum_details(records: list[dict[str, Any]]) -> dict[str, dict[str, 
             normalized = value.strip().upper()
             if enum_pattern.fullmatch(normalized):
                 counters[path.rsplit(".", 1)[-1]][normalized] += 1
-    return {
-        field: dict(counter.most_common(10))
-        for field, counter in list(counters.items())[:6]
-    }
+    return {field: dict(counter.most_common(10)) for field, counter in list(counters.items())[:6]}
 
 
 def _sleep_ai_details(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1115,9 +1142,7 @@ def _nutrition_ai_details(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _structured_ai_details(
-    data_type: str, records: list[dict[str, Any]]
-) -> dict[str, Any] | None:
+def _structured_ai_details(data_type: str, records: list[dict[str, Any]]) -> dict[str, Any] | None:
     details: dict[str, Any] = {}
     if data_type == "sleep":
         details.update(_sleep_ai_details(records))
@@ -1306,9 +1331,7 @@ def build_daily_progress_snapshot(
                 for point in heart_points
                 if datetime.fromtimestamp(point[0]).date() == heart_day  # noqa: DTZ006
             ]
-            today_points = [
-                point for point in today_points if 20 <= point[1] <= 250
-            ]
+            today_points = [point for point in today_points if 20 <= point[1] <= 250]
             if today_points:
                 values = [value for _timestamp, value in today_points]
                 metrics.append(
@@ -1385,9 +1408,7 @@ def build_health_snapshot(
     truncated_data_types: list[str] = []
     records_considered: dict[str, int] = {}
     for data_type in AI_SNAPSHOT_TYPES:
-        records = store.list_records(
-            data_type, start, end, limit=record_limit, newest=True
-        )
+        records = store.list_records(data_type, start, end, limit=record_limit, newest=True)
         if not records:
             continue
         if meaningful_record_count(data_type, records) == 0:
@@ -1443,8 +1464,7 @@ def build_health_snapshot(
                     "label": DATA_TYPE_BY_KEY[data_type].label,
                     "records_considered": len(records),
                     "summary_scope": "structured_data",
-                    "structured_details": structured_details
-                    or {"records_present": len(records)},
+                    "structured_details": structured_details or {"records_present": len(records)},
                 }
             )
             analyzed_data_types.append(data_type)

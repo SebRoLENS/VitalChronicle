@@ -329,9 +329,7 @@ class GateRefusalRuntime(AgentRuntime):
         if self.turn <= 4:
             return {
                 "content": "",
-                "tool_calls": [
-                    {"function": {"name": "get_available_metrics", "arguments": {}}}
-                ],
+                "tool_calls": [{"function": {"name": "get_available_metrics", "arguments": {}}}],
             }
         if self.turn == 5:
             return {"content": "Non ci sono dati, quindi rispondo subito."}
@@ -458,9 +456,7 @@ class StrictGateHallucinationRuntime(AgentRuntime):
         if self.turn <= 4:
             return {
                 "content": "",
-                "tool_calls": [
-                    {"function": {"name": "get_available_metrics", "arguments": {}}}
-                ],
+                "tool_calls": [{"function": {"name": "get_available_metrics", "arguments": {}}}],
             }
         if self.turn == 5:
             # Reproduce a local model hallucinating a tool that was NOT advertised
@@ -498,9 +494,7 @@ class StrictGateHallucinationRuntime(AgentRuntime):
 
 def test_gate_rejects_hallucinated_tool_not_exposed_by_schema(tmp_path):
     store = AgentStore(tmp_path / "agent.sqlite3")
-    runtime = StrictGateHallucinationRuntime(
-        DummyHealthStore(tmp_path / "health.sqlite3"), store
-    )
+    runtime = StrictGateHallucinationRuntime(DummyHealthStore(tmp_path / "health.sqlite3"), store)
     events: list[str] = []
 
     answer = runtime.analyze(
@@ -522,6 +516,52 @@ def test_gate_rejects_hallucinated_tool_not_exposed_by_schema(tmp_path):
     assert runtime.available_by_turn[4] == {"create_learned_tool"}
     assert runtime.available_by_turn[5] == {"create_learned_tool"}
     assert any("out-of-scope tool call" in event.lower() for event in events)
-    assert not any(
-        event == "Using tool: get_metric_series" for event in events
+    assert not any(event == "Using tool: get_metric_series" for event in events)
+
+
+class SleepStageHealthStore(DummyHealthStore):
+    def list_records(self, data_type, *_args, **_kwargs):
+        if data_type != "sleep":
+            return []
+        return [
+            {
+                "start_time": "2026-08-01T22:00:00+00:00",
+                "end_time": "2026-08-02T06:00:00+00:00",
+                "payload": {
+                    "sleep": {
+                        "stages": [
+                            {
+                                "stage": 5,
+                                "startTime": "2026-08-01T23:00:00+00:00",
+                                "endTime": "2026-08-02T00:30:00+00:00",
+                            },
+                            {
+                                "stage": 6,
+                                "startTime": "2026-08-02T00:30:00+00:00",
+                                "endTime": "2026-08-02T01:30:00+00:00",
+                            },
+                        ]
+                    }
+                },
+            }
+        ]
+
+
+def test_sleep_stage_series_uses_health_connect_codes_and_wakeup_date(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    executor = EnhancedSafeToolExecutor(SleepStageHealthStore(tmp_path / "health.sqlite3"), store)
+    result = executor.execute(
+        "get_sleep_stage_series", {"start": "2026-08-01", "end": "2026-08-02"}
     )
+
+    assert result["sleep_session_records"] == 1
+    assert result["sessions_with_stages"] == 1
+    assert result["daily_stages"][0]["date"] == "2026-08-02"
+    assert result["daily_stages"][0]["deep"] == 1.5
+    assert result["date_semantics"] == "wake_up_date"
+
+
+def test_agent_analysis_budget_is_fifteen_steps():
+    from google_health_viewer import agent_runtime_v2
+
+    assert agent_runtime_v2.MAX_ANALYSIS_STEPS == 15

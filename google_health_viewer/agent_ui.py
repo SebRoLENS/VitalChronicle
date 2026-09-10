@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
@@ -8,6 +9,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QListWidget,
     QMessageBox,
@@ -206,6 +208,85 @@ def _selected_payload(tree: QTreeWidget) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _pretty_detail(value: Any) -> str:
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+    return str(value)
+
+
+def _tool_detail_text(item: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            f"{_('Name')}: {_pretty_detail(item.get('name'))}",
+            f"{_('Kind')}: {_pretty_detail(item.get('kind'))}",
+            f"{_('Version')}: {_pretty_detail(item.get('version'))}",
+            f"{_('Status')}: {_pretty_detail(item.get('status'))}",
+            f"{_('Capability')}: {_pretty_detail(item.get('capability'))}",
+            f"{_('Confidence')}: {float(item.get('confidence') or 0) * 100:.0f}%",
+            f"{_('Uses')}: {_pretty_detail(item.get('use_count'))}",
+            f"{_('Last used')}: {_pretty_detail(item.get('last_used_at'))}",
+            f"{_('Replacement')}: {_pretty_detail(item.get('replacement'))}",
+            "",
+            _("Description"),
+            _pretty_detail(item.get("description")),
+            "",
+            _("Parameters"),
+            _pretty_detail(item.get("parameters")),
+            "",
+            _("Outputs"),
+            _pretty_detail(item.get("outputs")),
+            "",
+            _("Dependencies"),
+            _pretty_detail(item.get("dependencies")),
+            "",
+            _("Pipeline"),
+            _pretty_detail(item.get("pipeline")),
+            "",
+            f"{_('Created')}: {_pretty_detail(item.get('created_at'))}",
+            f"{_('Updated')}: {_pretty_detail(item.get('updated_at'))}",
+        ]
+    )
+
+
+def _user_model_detail_text(item: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            f"{_('Key')}: {_pretty_detail(item.get('key'))}",
+            f"{_('Confidence')}: {float(item.get('confidence') or 0) * 100:.0f}%",
+            f"{_('Evidence')}: {_pretty_detail(item.get('evidence_count'))}",
+            f"{_('Source')}: {_pretty_detail(item.get('source'))}",
+            f"{_('Updated')}: {_pretty_detail(item.get('updated_at'))}",
+            "",
+            _("Learned association"),
+            _pretty_detail(item.get("statement")),
+            "",
+            _("Evidence details"),
+            _pretty_detail(item.get("evidence")),
+        ]
+    )
+
+
+def _show_detail_dialog(parent: QWidget, title: str, text: str) -> None:
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.resize(820, 620)
+    dialog.setMinimumSize(620, 420)
+    layout = QVBoxLayout(dialog)
+    details = QPlainTextEdit()
+    details.setReadOnly(True)
+    details.setPlainText(text)
+    layout.addWidget(details, 1)
+    actions = QHBoxLayout()
+    actions.addStretch()
+    close_button = QPushButton(_("Close"))
+    close_button.clicked.connect(dialog.accept)
+    actions.addWidget(close_button)
+    layout.addLayout(actions)
+    dialog.exec()
+
+
 def refresh_personal_ai_page(window) -> None:
     runtime: AgentRuntime | None = getattr(window, "agent_runtime", None)
     if runtime is None or not hasattr(window, "agent_status_label"):
@@ -245,6 +326,8 @@ def refresh_personal_ai_page(window) -> None:
             ]
         )
         row.setData(0, Qt.UserRole, item)
+        row.setToolTip(0, f"{item['name']}\n{item.get('description', '')}")
+        row.setToolTip(2, str(item.get("capability") or ""))
         window.agent_tools_tree.addTopLevelItem(row)
 
     window.agent_model_tree.clear()
@@ -258,6 +341,7 @@ def refresh_personal_ai_page(window) -> None:
             ]
         )
         row.setData(0, Qt.UserRole, item)
+        row.setToolTip(0, str(item.get("statement") or ""))
         window.agent_model_tree.addTopLevelItem(row)
 
     window.agent_events_list.clear()
@@ -324,9 +408,24 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
         [_("Tool"), _("Kind"), _("Capability"), _("Status"), _("Uses"), _("Replacement")]
     )
     window.agent_tools_tree.setAlternatingRowColors(True)
+    window.agent_tools_tree.setWordWrap(True)
+    window.agent_tools_tree.setTextElideMode(Qt.ElideNone)
+    tools_header = window.agent_tools_tree.header()
+    tools_header.setStretchLastSection(False)
+    tools_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+    tools_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+    tools_header.setSectionResizeMode(2, QHeaderView.Stretch)
+    tools_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+    tools_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+    tools_header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
     tools_layout.addWidget(window.agent_tools_tree, 1)
+    tool_actions = QHBoxLayout()
+    view_tool = QPushButton(_("View selected tool details…"))
     delete_tool = QPushButton(_("Delete selected learned tool"))
-    tools_layout.addWidget(delete_tool)
+    tool_actions.addWidget(view_tool)
+    tool_actions.addStretch()
+    tool_actions.addWidget(delete_tool)
+    tools_layout.addLayout(tool_actions)
     tabs.addTab(tools_page, _("Tool registry"))
 
     model_page = QWidget()
@@ -345,15 +444,28 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
         [_("Learned about you"), _("Confidence"), _("Evidence"), _("Source")]
     )
     window.agent_model_tree.setAlternatingRowColors(True)
+    window.agent_model_tree.setWordWrap(True)
+    window.agent_model_tree.setTextElideMode(Qt.ElideNone)
+    model_header = window.agent_model_tree.header()
+    model_header.setSectionResizeMode(0, QHeaderView.Stretch)
+    model_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+    model_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+    model_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
     model_layout.addWidget(window.agent_model_tree, 1)
+    model_actions = QHBoxLayout()
+    view_model = QPushButton(_("View selected association details…"))
     forget = QPushButton(_("Forget selected personal association"))
-    model_layout.addWidget(forget)
+    model_actions.addWidget(view_model)
+    model_actions.addStretch()
+    model_actions.addWidget(forget)
+    model_layout.addLayout(model_actions)
     tabs.addTab(model_page, _("Learned about you"))
 
     activity_page = QWidget()
     activity_layout = QVBoxLayout(activity_page)
     activity_hint = QLabel(
-        _("Local history of learned-tool creation, reuse, replacement and deletion."))
+        _("Local history of learned-tool creation, reuse, replacement and deletion.")
+    )
     activity_hint.setObjectName("pageSubtitle")
     activity_layout.addWidget(activity_hint)
     window.agent_events_list = QListWidget()
@@ -375,15 +487,34 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
         dialog.exec()
         refresh_personal_ai_page(window)
 
+    def show_selected_tool_details() -> None:
+        item = _selected_payload(window.agent_tools_tree)
+        if not item:
+            return
+        _show_detail_dialog(
+            window,
+            _("Tool details · {name}", name=str(item.get("name") or "")),
+            _tool_detail_text(item),
+        )
+
+    def show_selected_model_details() -> None:
+        item = _selected_payload(window.agent_model_tree)
+        if not item:
+            return
+        _show_detail_dialog(window, _("Learned association details"), _user_model_detail_text(item))
+
     def delete_selected_tool() -> None:
         item = _selected_payload(window.agent_tools_tree)
         if not item or item.get("kind") != "learned":
             return
-        if QMessageBox.question(
-            window,
-            _("Delete learned tool"),
-            _("Delete the learned tool {name}?", name=item["name"]),
-        ) != QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                window,
+                _("Delete learned tool"),
+                _("Delete the learned tool {name}?", name=item["name"]),
+            )
+            != QMessageBox.Yes
+        ):
             return
         runtime.agent_store.delete_learned_tool(str(item["name"]))
         refresh_personal_ai_page(window)
@@ -392,26 +523,32 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
         item = _selected_payload(window.agent_model_tree)
         if not item:
             return
-        if QMessageBox.question(
-            window,
-            _("Forget personal association"),
-            _("Forget this learned personal association?"),
-        ) != QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                window,
+                _("Forget personal association"),
+                _("Forget this learned personal association?"),
+            )
+            != QMessageBox.Yes
+        ):
             return
         runtime.agent_store.forget_user_model(str(item["key"]))
         refresh_personal_ai_page(window)
 
     def reset_personalisation() -> None:
-        if QMessageBox.warning(
-            window,
-            _("Reset personal AI"),
-            _(
-                "This deletes learned tools, feedback and personal associations. Your health "
-                "archive and AI conversations are not deleted. Continue?"
-            ),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        ) != QMessageBox.Yes:
+        if (
+            QMessageBox.warning(
+                window,
+                _("Reset personal AI"),
+                _(
+                    "This deletes learned tools, feedback and personal associations. Your health "
+                    "archive and AI conversations are not deleted. Continue?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            != QMessageBox.Yes
+        ):
             return
         runtime.agent_store.clear()
         runtime.tools = EnhancedSafeToolExecutor(runtime.health_store, runtime.agent_store)
@@ -419,7 +556,15 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
 
     window.agent_enabled_check.toggled.connect(toggle_agent)
     calibrate.clicked.connect(open_calibration)
+    view_tool.clicked.connect(show_selected_tool_details)
+    window.agent_tools_tree.itemDoubleClicked.connect(
+        lambda _item, _column: show_selected_tool_details()
+    )
     delete_tool.clicked.connect(delete_selected_tool)
+    view_model.clicked.connect(show_selected_model_details)
+    window.agent_model_tree.itemDoubleClicked.connect(
+        lambda _item, _column: show_selected_model_details()
+    )
     forget.clicked.connect(forget_selected)
     reset.clicked.connect(reset_personalisation)
     refresh_personal_ai_page(window)
