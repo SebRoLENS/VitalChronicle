@@ -10,6 +10,7 @@ from .local_ai import AIAnalysisCancelled, LocalAIError
 
 MAX_ANALYSIS_STEPS = 10
 MAX_FACTORY_REPAIR_ATTEMPTS = 3
+MAX_FACTORY_GATE_REFUSALS = 2
 MAX_RAW_SERIES_PROBES_BEFORE_FACTORY = 2
 MAX_TOTAL_MODEL_TURNS = MAX_ANALYSIS_STEPS + MAX_FACTORY_REPAIR_ATTEMPTS + 4
 
@@ -35,6 +36,8 @@ Tool Factory decision policy:
 - Tool creation is a means to answer the user's question, not an end in itself.
 - When a runtime Tool Factory gate is active, stop raw-series probing and make the capability decision now.
 - Prefer semantic deterministic tools (for example calculate_cardio_load) over guessing raw metric names.
+- Tool names are NEVER metric identifiers: do not pass calculate_cardio_load, get_sleep_stage_series, or any other function name to get_metric_series/get_data_coverage/get_baseline.
+- When the runtime Tool Factory gate exposes only create_learned_tool, you must call it; do not answer directly before resolving or exhausting that gate.
 """
 
 
@@ -231,6 +234,20 @@ class AgentRuntime(base_rt.AgentRuntime):
             {"role": "user", "content": user_content},
         ]
         schemas = self.tools.tool_schemas()
+        tool_function_names = {
+            str(item.get("function", {}).get("name") or "")
+            for item in schemas
+            if isinstance(item, dict) and isinstance(item.get("function"), dict)
+        }
+        metric_reader_tools = {
+            "get_metric_series",
+            "get_data_coverage",
+            "get_daily_summary",
+            "get_baseline",
+            "get_missing_data",
+            "detect_outliers",
+            "detect_trends",
+        }
         physical_limit = (
             model_context_limit if model_context_limit and model_context_limit > 0 else None
         )
@@ -288,6 +305,7 @@ class AgentRuntime(base_rt.AgentRuntime):
         factory_disabled = False
         factory_gate_required = False
         factory_resolution_seen = False
+        factory_gate_refusals = 0
         raw_series_probes = 0
         tool_result_cache: dict[str, dict[str, Any]] = {}
 
@@ -332,6 +350,45 @@ class AgentRuntime(base_rt.AgentRuntime):
             )
             if not tool_calls:
                 final_answer = str(message.get("content") or "").strip()
+                if factory_gate_required and not factory_disabled:
+                    factory_gate_refusals += 1
+                    if final_answer:
+                        messages.append({"role": "assistant", "content": final_answer})
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "RUNTIME TOOL FACTORY GATE: the direct answer was rejected because the "
+                                "reusable capability gap has not been resolved. Call create_learned_tool "
+                                "now. Tool names such as calculate_cardio_load and get_sleep_stage_series "
+                                "are functions, not metric identifiers, so generic metric readers cannot "
+                                "establish that those capabilities have no data. Build the learned pipeline "
+                                "with call_tool/extract_series/baseline/filter_relative/event_response as "
+                                "needed. Do not claim data are absent until the semantic built-in itself has "
+                                "been executed (directly or by the learned tool)."
+                            ),
+                        }
+                    )
+                    event(
+                        _(
+                            "Direct answer blocked by Tool Factory gate · the reusable capability must be resolved first."
+                        )
+                    )
+                    if factory_gate_refusals <= MAX_FACTORY_GATE_REFUSALS:
+                        continue
+                    factory_gate_required = False
+                    factory_disabled = True
+                    event(_("Tool Factory gate attempt limit reached · finalising without inventing missing data."))
+                    return self._final_answer(
+                        model=model,
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        physical_limit=physical_limit,
+                        think=think,
+                        cancel_callback=cancel_callback,
+                        event=event,
+                        answer_callback=answer_callback,
+                    )
                 if final_answer:
                     if answer_callback:
                         answer_callback(final_answer)
@@ -358,7 +415,36 @@ class AgentRuntime(base_rt.AgentRuntime):
                     event(_("A targeted question could improve personalisation."))
 
                 blocked_for_factory = False
-                if name == "get_metric_series" and factory_candidate and not factory_resolution_seen:
+                metric_argument = str(args.get("metric") or "").strip()
+                if (
+                    name in metric_reader_tools
+                    and metric_argument
+                    and metric_argument in tool_function_names
+                ):
+                    blocked_for_factory = True
+                    factory_gate_required = factory_candidate and not factory_resolution_seen
+                    result = {
+                        "status": "invalid_metric_identifier",
+                        "error": (
+                            f"'{metric_argument}' is a tool/function name, not a raw VitalChronicle "
+                            "metric identifier. Call that semantic tool directly, or compose it inside "
+                            "a learned tool using call_tool. This result does NOT mean the underlying "
+                            "health data are missing."
+                        ),
+                        "tool_name": metric_argument,
+                    }
+                    event(
+                        _(
+                            "Tool name rejected as a raw metric identifier: {metric}",
+                            metric=metric_argument,
+                        )
+                    )
+                if (
+                    not blocked_for_factory
+                    and name == "get_metric_series"
+                    and factory_candidate
+                    and not factory_resolution_seen
+                ):
                     raw_series_probes += 1
                     if raw_series_probes > MAX_RAW_SERIES_PROBES_BEFORE_FACTORY:
                         blocked_for_factory = True

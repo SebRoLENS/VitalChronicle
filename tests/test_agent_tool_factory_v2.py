@@ -310,3 +310,132 @@ def test_complex_query_stops_repeated_raw_metric_probing_and_forces_factory(tmp_
     assert runtime.available_by_turn[3] == {"create_learned_tool"}
     assert any("raw-series probing stopped" in event.lower() for event in events)
     assert any("registry checked" in event.lower() for event in events)
+
+
+class GateRefusalRuntime(AgentRuntime):
+    def __init__(self, health_store, agent_store):
+        super().__init__(health_store, agent_store)
+        self.turn = 0
+        self.available_by_turn: list[set[str]] = []
+
+    def _chat_once(self, **kwargs):
+        self.turn += 1
+        names = {
+            str(item.get("function", {}).get("name") or "")
+            for item in kwargs.get("tools", [])
+            if isinstance(item, dict)
+        }
+        self.available_by_turn.append(names)
+        if self.turn <= 4:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {"function": {"name": "get_available_metrics", "arguments": {}}}
+                ],
+            }
+        if self.turn == 5:
+            return {"content": "Non ci sono dati, quindi rispondo subito."}
+        if self.turn == 6:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "create_learned_tool",
+                            "arguments": {
+                                "name": "gate_resolved_tool",
+                                "description": "Reusable composed temporal analysis",
+                                "capability": "analysis.composed.personal_baseline.temporal_event_response",
+                                "pipeline": [{"op": "return"}],
+                            },
+                        }
+                    }
+                ],
+            }
+        return {"content": "Risposta finale dopo la creazione del tool."}
+
+
+def test_factory_gate_rejects_direct_answer_until_capability_is_resolved(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    runtime = GateRefusalRuntime(DummyHealthStore(tmp_path / "health.sqlite3"), store)
+    events: list[str] = []
+    answer = runtime.analyze(
+        model="test",
+        snapshot={},
+        question=(
+            "Quando il carico supera del 20% la baseline personale, il sonno profondo della notte "
+            "successiva diminuisce e dopo quanti giorni torna al livello abituale?"
+        ),
+        history=[],
+        max_tokens=1024,
+        model_context_limit=None,
+        performance_profile="standard",
+        thread_id="gate-refusal-thread",
+        event_callback=events.append,
+    )
+    assert answer.startswith("Risposta finale dopo")
+    assert runtime.turn == 7
+    assert runtime.available_by_turn[4] == {"create_learned_tool"}
+    assert runtime.available_by_turn[5] == {"create_learned_tool"}
+    assert any("direct answer blocked" in event.lower() for event in events)
+
+
+class ToolNameAsMetricRuntime(AgentRuntime):
+    def __init__(self, health_store, agent_store):
+        super().__init__(health_store, agent_store)
+        self.turn = 0
+
+    def _chat_once(self, **kwargs):
+        self.turn += 1
+        if self.turn == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "get_data_coverage",
+                            "arguments": {"metric": "calculate_cardio_load"},
+                        }
+                    }
+                ],
+            }
+        if self.turn == 2:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "create_learned_tool",
+                            "arguments": {
+                                "name": "semantic_metric_router",
+                                "description": "Use semantic built-ins instead of tool names as metrics",
+                                "capability": "analysis.composed.personal_baseline.temporal_event_response",
+                                "pipeline": [{"op": "return"}],
+                            },
+                        }
+                    }
+                ],
+            }
+        return {"content": "Risposta finale corretta."}
+
+
+def test_tool_name_cannot_be_misused_as_raw_metric_identifier(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    runtime = ToolNameAsMetricRuntime(DummyHealthStore(tmp_path / "health.sqlite3"), store)
+    events: list[str] = []
+    answer = runtime.analyze(
+        model="test",
+        snapshot={},
+        question=(
+            "Quando il carico supera del 20% la baseline personale, il sonno profondo della notte "
+            "successiva diminuisce e dopo quanti giorni torna al livello abituale?"
+        ),
+        history=[],
+        max_tokens=1024,
+        model_context_limit=None,
+        performance_profile="standard",
+        thread_id="tool-name-thread",
+        event_callback=events.append,
+    )
+    assert answer == "Risposta finale corretta."
+    assert any("tool name rejected" in event.lower() for event in events)
