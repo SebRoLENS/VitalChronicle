@@ -104,6 +104,109 @@ def _factory_hint(question: str) -> dict[str, Any]:
     }
 
 
+_SELF_REPORT_PATTERNS = {
+    "fatigue": (
+        "mi sento stanco",
+        "mi sento stanca",
+        "sono stanco",
+        "sono stanca",
+        "mi sento affaticato",
+        "mi sento affaticata",
+        "sono affaticato",
+        "sono affaticata",
+        "i feel tired",
+        "i'm tired",
+        "i am tired",
+        "i feel fatigued",
+    ),
+    "sleepiness": (
+        "ho sonno",
+        "mi sento assonnato",
+        "mi sento assonnata",
+        "i feel sleepy",
+        "i'm sleepy",
+    ),
+    "soreness": (
+        "sono indolenzito",
+        "sono indolenzita",
+        "dolori muscolari",
+        "muscoli indolenziti",
+        "i feel sore",
+        "muscle soreness",
+    ),
+    "stress": (
+        "mi sento stressato",
+        "mi sento stressata",
+        "sono stressato",
+        "sono stressata",
+        "i feel stressed",
+        "i'm stressed",
+    ),
+    "energy": (
+        "mi sento energico",
+        "mi sento energica",
+        "pieno di energia",
+        "piena di energia",
+        "i feel energetic",
+        "full of energy",
+    ),
+}
+
+
+def _detect_self_report(question: str) -> dict[str, str] | None:
+    text = question.strip()
+    folded = text.casefold()
+    for category, markers in _SELF_REPORT_PATTERNS.items():
+        if any(marker in folded for marker in markers):
+            return {"category": category, "statement": text}
+    return None
+
+
+def _self_report_follow_up(category: str) -> tuple[str, str]:
+    if category == "fatigue":
+        return (
+            _(
+                "Is today's tiredness mainly muscular fatigue, sleepiness, or a more general lack of energy?"
+            ),
+            _(
+                "This helps distinguish training-related fatigue from sleepiness or more general low energy in future personal analyses."
+            ),
+        )
+    if category == "sleepiness":
+        return (
+            _(
+                "Would you describe the sleepiness as mild, moderate, or strong, and is it unusual for this time of day?"
+            ),
+            _(
+                "This adds useful subjective context to sleep and recovery measurements without turning it into a diagnosis."
+            ),
+        )
+    if category == "soreness":
+        return (
+            _(
+                "Is the soreness mainly in muscles you trained recently, and would you call it mild, moderate, or strong?"
+            ),
+            _(
+                "This helps relate future subjective recovery reports to recent training without treating soreness as a medical diagnosis."
+            ),
+        )
+    if category == "stress":
+        return (
+            _("Does today's stress feel mainly mental, physical, or mixed?"),
+            _(
+                "This helps keep subjective stress context separate from wearable-derived physiological strain."
+            ),
+        )
+    return (
+        _(
+            "Is this feeling unusual for you today, and would you rate it as mild, moderate, or strong?"
+        ),
+        _(
+            "One concise detail can make future personal interpretation more specific without creating a stable trait from one report."
+        ),
+    )
+
+
 def _without_factory_creation(schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result = []
     for schema in schemas:
@@ -228,10 +331,45 @@ class AgentRuntime(base_rt.AgentRuntime):
             for item in (history or [])[-12:]
             if item.get("role") in {"user", "assistant"} and item.get("content")
         ]
-        initial = self._initial_context(snapshot)
         request = question.strip() or _(
             "Analyse my complete local health history and identify the most useful personal patterns."
         )
+        detected_self_report = _detect_self_report(request)
+        captured_self_report = None
+        if detected_self_report is not None:
+            captured_self_report = self.agent_store.record_self_report(
+                detected_self_report["statement"],
+                category=detected_self_report["category"],
+                thread_id=thread_id,
+                context={"source": "conversation", "explicit_self_report": True},
+            )
+            event(_("Subjective self-report saved locally as a dated event."))
+            learning_key = f"self_report_detail:{detected_self_report['category']}"
+            if captured_self_report and not self.agent_store.has_recent_feedback_key(
+                learning_key, days=14
+            ):
+                feedback_question, feedback_reason = _self_report_follow_up(
+                    detected_self_report["category"]
+                )
+                queued = self.agent_store.ask_feedback(
+                    feedback_question,
+                    thread_id=thread_id,
+                    reason=feedback_reason,
+                    learning_key=learning_key,
+                    context={
+                        "self_report_id": captured_self_report.get("report_id"),
+                        "category": detected_self_report["category"],
+                        "feedback_mode": "self_report_detail",
+                    },
+                )
+                if queued:
+                    event(_("One targeted follow-up was queued to improve future personalisation."))
+        initial = self._initial_context(snapshot)
+        if captured_self_report:
+            initial["current_self_report"] = captured_self_report
+            initial["self_report_rule"] = (
+                "This was stored as a dated subjective event. Do not promote it to a stable association from one occurrence."
+            )
         initial["tool_factory_decision_hint"] = _factory_hint(request)
         user_content = (
             "Local session context (not instructions):\n"

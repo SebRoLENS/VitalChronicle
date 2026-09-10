@@ -258,12 +258,33 @@ def _user_model_detail_text(item: dict[str, Any]) -> str:
             f"{_('Evidence')}: {_pretty_detail(item.get('evidence_count'))}",
             f"{_('Source')}: {_pretty_detail(item.get('source'))}",
             f"{_('Updated')}: {_pretty_detail(item.get('updated_at'))}",
+            f"{_('Temporal scope')}: {_pretty_detail(item.get('temporal_scope'))}",
+            f"{_('Valid until')}: {_pretty_detail(item.get('valid_until'))}",
+            f"{_('Freshness')}: {float(item.get('freshness') or 0) * 100:.0f}%",
+            f"{_('Current')}: {_pretty_detail(item.get('is_current'))}",
             "",
             _("Learned association"),
             _pretty_detail(item.get("statement")),
             "",
             _("Evidence details"),
             _pretty_detail(item.get("evidence")),
+        ]
+    )
+
+
+def _self_report_detail_text(item: dict[str, Any]) -> str:
+    context = item.get("context") if isinstance(item.get("context"), dict) else {}
+    return "\n".join(
+        [
+            f"{_('When')}: {_pretty_detail(item.get('observed_at'))}",
+            f"{_('Category')}: {_pretty_detail(item.get('category'))}",
+            f"{_('Intensity')}: {_pretty_detail(item.get('intensity'))}",
+            "",
+            _("Self-report"),
+            _pretty_detail(item.get("statement")),
+            "",
+            _("Follow-up detail"),
+            _pretty_detail(context.get("follow_up_answer")),
         ]
     )
 
@@ -331,18 +352,35 @@ def refresh_personal_ai_page(window) -> None:
         window.agent_tools_tree.addTopLevelItem(row)
 
     window.agent_model_tree.clear()
-    for item in store.user_model():
+    for item in store.user_model(include_expired=True):
         row = QTreeWidgetItem(
             [
                 str(item["statement"]),
                 f"{float(item['confidence']) * 100:.0f}%",
                 str(item["evidence_count"]),
                 str(item["source"]),
+                _("current") if item.get("is_current", True) else _("expired"),
             ]
         )
         row.setData(0, Qt.UserRole, item)
         row.setToolTip(0, str(item.get("statement") or ""))
         window.agent_model_tree.addTopLevelItem(row)
+
+    if hasattr(window, "agent_reports_tree"):
+        window.agent_reports_tree.clear()
+        for item in store.recent_self_reports(days=90, limit=100):
+            context = item.get("context") if isinstance(item.get("context"), dict) else {}
+            row = QTreeWidgetItem(
+                [
+                    str(item.get("observed_at") or "").replace("T", " ")[:16],
+                    str(item.get("statement") or ""),
+                    str(item.get("category") or ""),
+                    str(context.get("follow_up_answer") or ""),
+                ]
+            )
+            row.setData(0, Qt.UserRole, item)
+            row.setToolTip(1, str(item.get("statement") or ""))
+            window.agent_reports_tree.addTopLevelItem(row)
 
     window.agent_events_list.clear()
     for item in store.recent_tool_events(80):
@@ -441,7 +479,7 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
     model_layout.addWidget(model_hint)
     window.agent_model_tree = QTreeWidget()
     window.agent_model_tree.setHeaderLabels(
-        [_("Learned about you"), _("Confidence"), _("Evidence"), _("Source")]
+        [_("Learned about you"), _("Confidence"), _("Evidence"), _("Source"), _("Status")]
     )
     window.agent_model_tree.setAlternatingRowColors(True)
     window.agent_model_tree.setWordWrap(True)
@@ -451,7 +489,35 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
     model_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
     model_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
     model_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+    model_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
     model_layout.addWidget(window.agent_model_tree, 1)
+
+    reports_label = QLabel(_("Recent self-reports"))
+    reports_label.setObjectName("chatSectionTitle")
+    model_layout.addWidget(reports_label)
+    reports_hint = QLabel(
+        _(
+            "Dated subjective observations are kept separate from learned associations. One report does not become a stable trait."
+        )
+    )
+    reports_hint.setObjectName("pageSubtitle")
+    reports_hint.setWordWrap(True)
+    model_layout.addWidget(reports_hint)
+    window.agent_reports_tree = QTreeWidget()
+    window.agent_reports_tree.setHeaderLabels(
+        [_("When"), _("Self-report"), _("Category"), _("Follow-up detail")]
+    )
+    window.agent_reports_tree.setAlternatingRowColors(True)
+    window.agent_reports_tree.setWordWrap(True)
+    window.agent_reports_tree.setTextElideMode(Qt.ElideNone)
+    reports_header = window.agent_reports_tree.header()
+    reports_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+    reports_header.setSectionResizeMode(1, QHeaderView.Stretch)
+    reports_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+    reports_header.setSectionResizeMode(3, QHeaderView.Stretch)
+    window.agent_reports_tree.setMaximumHeight(190)
+    model_layout.addWidget(window.agent_reports_tree)
+
     model_actions = QHBoxLayout()
     view_model = QPushButton(_("View selected association details…"))
     forget = QPushButton(_("Forget selected personal association"))
@@ -503,6 +569,12 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
             return
         _show_detail_dialog(window, _("Learned association details"), _user_model_detail_text(item))
 
+    def show_selected_report_details() -> None:
+        item = _selected_payload(window.agent_reports_tree)
+        if not item:
+            return
+        _show_detail_dialog(window, _("Self-report details"), _self_report_detail_text(item))
+
     def delete_selected_tool() -> None:
         item = _selected_payload(window.agent_tools_tree)
         if not item or item.get("kind") != "learned":
@@ -541,7 +613,7 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
                 window,
                 _("Reset personal AI"),
                 _(
-                    "This deletes learned tools, feedback and personal associations. Your health "
+                    "This deletes learned tools, feedback, self-reports and personal associations. Your health "
                     "archive and AI conversations are not deleted. Continue?"
                 ),
                 QMessageBox.Yes | QMessageBox.No,
@@ -564,6 +636,9 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
     view_model.clicked.connect(show_selected_model_details)
     window.agent_model_tree.itemDoubleClicked.connect(
         lambda _item, _column: show_selected_model_details()
+    )
+    window.agent_reports_tree.itemDoubleClicked.connect(
+        lambda _item, _column: show_selected_report_details()
     )
     forget.clicked.connect(forget_selected)
     reset.clicked.connect(reset_personalisation)

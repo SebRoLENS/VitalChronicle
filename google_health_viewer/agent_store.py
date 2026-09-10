@@ -4,13 +4,101 @@ import json
 import re
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Iterable
 
-AGENT_SCHEMA_VERSION = 1
+AGENT_SCHEMA_VERSION = 2
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+_TEMPORAL_KEY_TTLS = {
+    "current_training_goal": 90,
+    "sleep_schedule_context": 60,
+    "recent_training_context": 42,
+}
+_TEMPORAL_MARKERS = (
+    "da poco",
+    "recentemente",
+    "in questo periodo",
+    "al momento",
+    "attualmente",
+    "questa settimana",
+    "queste settimane",
+    "ho ricominciato",
+    "recently",
+    "right now",
+    "currently",
+    "these weeks",
+    "this week",
+    "just restarted",
+    "started again",
+)
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _temporal_profile(
+    key: str,
+    statement: str,
+    context: dict[str, Any] | None = None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    context = context or {}
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    explicit_scope = str(context.get("temporal_scope") or "").strip().lower()
+    explicit_ttl = context.get("ttl_days")
+    ttl: int | None = None
+    if explicit_ttl is not None:
+        try:
+            ttl = max(1, min(3650, int(explicit_ttl)))
+        except (TypeError, ValueError):
+            ttl = None
+
+    combined = f"{key} {statement}".casefold()
+    temporary = explicit_scope == "temporary"
+    if explicit_scope == "stable":
+        temporary = False
+    elif (
+        ttl is not None
+        or key in _TEMPORAL_KEY_TTLS
+        or any(marker in combined for marker in _TEMPORAL_MARKERS)
+    ):
+        temporary = True
+
+    if not temporary:
+        return {
+            "scope": "stable",
+            "valid_from": current.isoformat(),
+            "valid_until": None,
+            "ttl_days": None,
+        }
+
+    if ttl is None:
+        ttl = (
+            42
+            if any(marker in combined for marker in _TEMPORAL_MARKERS)
+            else _TEMPORAL_KEY_TTLS.get(key, 60)
+        )
+    valid_from = _parse_datetime(context.get("valid_from")) or current
+    valid_until = _parse_datetime(context.get("valid_until")) or (valid_from + timedelta(days=ttl))
+    return {
+        "scope": "temporary",
+        "valid_from": valid_from.isoformat(),
+        "valid_until": valid_until.isoformat(),
+        "ttl_days": ttl,
+    }
 
 
 def _now() -> str:
@@ -107,6 +195,19 @@ class AgentStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_feedback
                     ON feedback(thread_id, answered_at, created_at);
+                CREATE TABLE IF NOT EXISTS self_reports (
+                    report_id TEXT PRIMARY KEY,
+                    thread_id TEXT,
+                    category TEXT NOT NULL DEFAULT 'wellbeing',
+                    statement TEXT NOT NULL,
+                    intensity REAL,
+                    observed_at TEXT NOT NULL,
+                    context_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_self_reports
+                    ON self_reports(category, observed_at, created_at);
                 CREATE TABLE IF NOT EXISTS tool_events (
                     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at TEXT NOT NULL,
@@ -170,9 +271,7 @@ class AgentStore:
             params.append(kind)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._connect() as db:
-            rows = db.execute(
-                f"SELECT * FROM tools {where} ORDER BY kind,name", params
-            ).fetchall()
+            rows = db.execute(f"SELECT * FROM tools {where} ORDER BY kind,name", params).fetchall()
         return [self._tool_row(row) for row in rows]
 
     def tool(self, name: str) -> dict[str, Any] | None:
@@ -190,8 +289,8 @@ class AgentStore:
         if left_pipeline and right_pipeline and _json(left_pipeline) == _json(right_pipeline):
             return 0.99
         score = _similarity(
-            f"{left_cap} {incoming.get('description','')}",
-            f"{right_cap} {existing.get('description','')}",
+            f"{left_cap} {incoming.get('description', '')}",
+            f"{right_cap} {existing.get('description', '')}",
         )
         if incoming.get("parameters") == existing.get("parameters"):
             score = min(1.0, score + 0.06)
@@ -289,9 +388,7 @@ class AgentStore:
         if not str(candidate.get("name") or "").strip():
             raise ValueError("Learned tools require a name")
         similar = self.find_similar_tools(candidate, limit=6)
-        equivalent = next(
-            (item for item in similar if float(item["similarity"]) >= 0.94), None
-        )
+        equivalent = next((item for item in similar if float(item["similarity"]) >= 0.94), None)
         if equivalent:
             self.log_tool_event(
                 "tool_reused",
@@ -306,7 +403,11 @@ class AgentStore:
             "tool_created",
             f"Created learned tool {candidate['name']}.",
             tool_name=str(candidate["name"]),
-            payload={"similar_tools": [{"name": x["name"], "similarity": x["similarity"]} for x in similar]},
+            payload={
+                "similar_tools": [
+                    {"name": x["name"], "similarity": x["similarity"]} for x in similar
+                ]
+            },
         )
         return {"status": "created", "tool": created, "similar_tools": similar}
 
@@ -364,6 +465,115 @@ class AgentStore:
             for row in reversed(rows)
         ]
 
+    def record_self_report(
+        self,
+        statement: str,
+        *,
+        category: str = "wellbeing",
+        thread_id: str | None = None,
+        observed_at: str | None = None,
+        intensity: float | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        statement = statement.strip()
+        if not statement:
+            raise ValueError("Self-report statement cannot be empty")
+        now = datetime.now(timezone.utc)
+        created_at = now.isoformat()
+        observed = _parse_datetime(observed_at) or now
+        cutoff = (now - timedelta(hours=12)).isoformat()
+        normalized_category = str(category or "wellbeing").strip().lower()[:40] or "wellbeing"
+        with self._connect() as db:
+            duplicate = db.execute(
+                "SELECT report_id FROM self_reports WHERE COALESCE(thread_id,'')=COALESCE(?,'') "
+                "AND category=? AND statement=? AND created_at>=? ORDER BY created_at DESC LIMIT 1",
+                (thread_id, normalized_category, statement, cutoff),
+            ).fetchone()
+            if duplicate:
+                return self.self_report(str(duplicate["report_id"])) or {}
+            report_id = str(uuid.uuid4())
+            db.execute(
+                "INSERT INTO self_reports(report_id,thread_id,category,statement,intensity,observed_at,"
+                "context_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (
+                    report_id,
+                    thread_id,
+                    normalized_category,
+                    statement,
+                    float(intensity) if isinstance(intensity, (int, float)) else None,
+                    observed.isoformat(),
+                    _json(context or {}),
+                    created_at,
+                    created_at,
+                ),
+            )
+        return self.self_report(report_id) or {}
+
+    def self_report(self, report_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM self_reports WHERE report_id=?", (report_id,)
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "report_id": str(row["report_id"]),
+            "thread_id": row["thread_id"],
+            "category": str(row["category"]),
+            "statement": str(row["statement"]),
+            "intensity": row["intensity"],
+            "observed_at": str(row["observed_at"]),
+            "context": _loads(row["context_json"], {}),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    def recent_self_reports(
+        self, *, days: int = 30, limit: int = 50, category: str | None = None
+    ) -> list[dict[str, Any]]:
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=max(1, min(3650, int(days))))
+        ).isoformat()
+        params: list[Any] = [cutoff]
+        category_clause = ""
+        if category:
+            category_clause = "AND category=?"
+            params.append(str(category).strip().lower())
+        params.append(max(1, min(200, int(limit))))
+        with self._connect() as db:
+            rows = db.execute(
+                f"SELECT report_id FROM self_reports WHERE observed_at>=? {category_clause} "
+                "ORDER BY observed_at DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [
+            item for row in rows if (item := self.self_report(str(row["report_id"]))) is not None
+        ]
+
+    def update_self_report_feedback(self, report_id: str, answer: str) -> bool:
+        item = self.self_report(report_id)
+        if not item:
+            return False
+        context = dict(item.get("context") or {})
+        context["follow_up_answer"] = answer.strip()
+        context["follow_up_answered_at"] = _now()
+        with self._connect() as db:
+            cursor = db.execute(
+                "UPDATE self_reports SET context_json=?,updated_at=? WHERE report_id=?",
+                (_json(context), _now(), report_id),
+            )
+        return bool(cursor.rowcount)
+
+    def has_recent_feedback_key(self, learning_key: str, *, days: int = 14) -> bool:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))).isoformat()
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT feedback_id FROM feedback WHERE learning_key=? AND created_at>=? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (learning_key, cutoff),
+            ).fetchone()
+        return row is not None
+
     def ask_feedback(
         self,
         question: str,
@@ -385,13 +595,23 @@ class AgentStore:
             db.execute(
                 "INSERT INTO feedback(feedback_id,thread_id,question,reason,learning_key,context_json,created_at) "
                 "VALUES(?,?,?,?,?,?,?)",
-                (feedback_id, thread_id, question.strip(), reason.strip(), learning_key.strip(), _json(context or {}), _now()),
+                (
+                    feedback_id,
+                    thread_id,
+                    question.strip(),
+                    reason.strip(),
+                    learning_key.strip(),
+                    _json(context or {}),
+                    _now(),
+                ),
             )
         return self.feedback(feedback_id) or {}
 
     def feedback(self, feedback_id: str) -> dict[str, Any] | None:
         with self._connect() as db:
-            row = db.execute("SELECT * FROM feedback WHERE feedback_id=?", (feedback_id,)).fetchone()
+            row = db.execute(
+                "SELECT * FROM feedback WHERE feedback_id=?", (feedback_id,)
+            ).fetchone()
         if not row:
             return None
         return {
@@ -437,8 +657,12 @@ class AgentStore:
                 (answer, _now(), feedback_id),
             )
         key = str(item.get("learning_key") or "").strip()
+        context = item.get("context") or {}
+        self_report_id = str(context.get("self_report_id") or "").strip()
+        if self_report_id:
+            self.update_self_report_feedback(self_report_id, answer)
+            return self.feedback(feedback_id)
         if key:
-            context = item.get("context") or {}
             observation = context.get("observation") or context
             statement = (
                 f"When {observation}, the user reported: {answer}"
@@ -448,7 +672,12 @@ class AgentStore:
             self.learn_user_model(
                 key,
                 statement,
-                evidence={"question": item["question"], "answer": answer, "context": context},
+                evidence={
+                    "question": item["question"],
+                    "answer": answer,
+                    "context": context,
+                    "temporal": _temporal_profile(key, f"{statement} {answer}", context),
+                },
                 source="feedback",
             )
         return self.feedback(feedback_id)
@@ -465,12 +694,15 @@ class AgentStore:
         if not key:
             raise ValueError("User-model key cannot be empty")
         now = _now()
+        evidence_item = dict(evidence or {})
+        if "temporal" not in evidence_item:
+            evidence_item["temporal"] = _temporal_profile(key, statement, evidence_item)
         with self._connect() as db:
             row = db.execute("SELECT * FROM user_model WHERE model_key=?", (key,)).fetchone()
             if row:
                 items = _loads(row["evidence_json"], [])
-                if evidence:
-                    items.append(evidence)
+                if evidence_item:
+                    items.append(evidence_item)
                 count = int(row["evidence_count"]) + 1
                 confidence = min(0.95, 0.35 + 0.08 * count)
                 db.execute(
@@ -482,7 +714,7 @@ class AgentStore:
                 db.execute(
                     "INSERT INTO user_model(model_key,statement,evidence_json,confidence,"
                     "evidence_count,source,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-                    (key, statement, _json([evidence] if evidence else []), 0.43, 1, source, now, now),
+                    (key, statement, _json([evidence_item]), 0.43, 1, source, now, now),
                 )
         return self.user_model_entry(key) or {}
 
@@ -491,17 +723,50 @@ class AgentStore:
             row = db.execute("SELECT * FROM user_model WHERE model_key=?", (key,)).fetchone()
         if not row:
             return None
+        evidence = _loads(row["evidence_json"], [])
+        temporal = {}
+        for candidate in reversed(evidence):
+            if isinstance(candidate, dict) and isinstance(candidate.get("temporal"), dict):
+                temporal = dict(candidate["temporal"])
+                break
+        if not temporal:
+            temporal = _temporal_profile(
+                str(row["model_key"]),
+                str(row["statement"]),
+                {"valid_from": str(row["updated_at"])},
+                now=_parse_datetime(str(row["updated_at"])) or datetime.now(timezone.utc),
+            )
+        now_dt = datetime.now(timezone.utc)
+        valid_from = _parse_datetime(temporal.get("valid_from"))
+        valid_until = _parse_datetime(temporal.get("valid_until"))
+        is_current = valid_until is None or now_dt <= valid_until
+        freshness = 1.0
+        if str(temporal.get("scope") or "stable") == "temporary" and valid_from and valid_until:
+            total = max(1.0, (valid_until - valid_from).total_seconds())
+            remaining = max(0.0, (valid_until - now_dt).total_seconds())
+            freshness = max(0.0, min(1.0, remaining / total))
+        stored_confidence = float(row["confidence"])
+        effective_confidence = (
+            0.0 if not is_current else stored_confidence * (0.35 + 0.65 * freshness)
+        )
         return {
             "key": str(row["model_key"]),
             "statement": str(row["statement"]),
-            "confidence": float(row["confidence"]),
+            "confidence": round(effective_confidence, 4),
+            "stored_confidence": stored_confidence,
             "evidence_count": int(row["evidence_count"]),
             "source": str(row["source"]),
-            "evidence": _loads(row["evidence_json"], []),
+            "evidence": evidence,
             "updated_at": str(row["updated_at"]),
+            "temporal_scope": str(temporal.get("scope") or "stable"),
+            "valid_from": temporal.get("valid_from"),
+            "valid_until": temporal.get("valid_until"),
+            "ttl_days": temporal.get("ttl_days"),
+            "freshness": round(freshness, 4),
+            "is_current": bool(is_current),
         }
 
-    def user_model(self) -> list[dict[str, Any]]:
+    def user_model(self, *, include_expired: bool = False) -> list[dict[str, Any]]:
         with self._connect() as db:
             rows = db.execute(
                 "SELECT model_key FROM user_model ORDER BY confidence DESC,evidence_count DESC,updated_at DESC"
@@ -510,6 +775,7 @@ class AgentStore:
             item
             for row in rows
             if (item := self.user_model_entry(str(row["model_key"]))) is not None
+            and (include_expired or item.get("is_current", True))
         ]
 
     def forget_user_model(self, key: str) -> bool:
@@ -531,6 +797,6 @@ class AgentStore:
         with self._connect() as db:
             db.executescript(
                 "DELETE FROM tools; DELETE FROM user_model; DELETE FROM feedback; "
-                "DELETE FROM tool_events; DELETE FROM agent_meta;"
+                "DELETE FROM self_reports; DELETE FROM tool_events; DELETE FROM agent_meta;"
             )
         self._initialize()

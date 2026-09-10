@@ -36,16 +36,21 @@ Operating rules:
    filesystem, browser, network or database-write access.
 4. Built-in tools take precedence over equivalent learned tools. If a capability is already covered,
    reuse or compose it rather than creating a duplicate.
-5. Subjective user feedback can teach personal tolerance, preferences and associations. It never
-   proves that a physiological state is medically safe and never suppresses objective safety advice.
-6. Ask a targeted feedback question only when the answer would materially reduce uncertainty or
-   improve future personalization. Avoid routine or repetitive questionnaires.
-7. Separate measured observations, deterministic calculations, user-reported context, learned
+5. An explicit current subjective statement such as feeling tired, sore, sleepy, stressed or unusually energetic
+   is a dated self-report event. Store it locally as an event; do not immediately promote one report to a stable trait.
+6. Ask at most one targeted follow-up when it would materially improve interpretation of a new self-report. Avoid
+   routine or repetitive questionnaires. Follow-up details remain attached to that dated report unless repeated evidence
+   later supports a genuine association.
+7. Learned personal context has time semantics. Temporary context such as "recently restarted training", current goals
+   or a short-lived schedule change must lose weight with age and stop being used after its validity window. Never use
+   expired context as if it were current. Stable preferences/associations require repeated evidence or an explicitly
+   stable user statement. Subjective context never proves physiological safety or suppresses objective safety advice.
+8. Separate measured observations, deterministic calculations, user-reported context, learned
    associations and possible explanations. Correlation does not prove causation.
-8. Never diagnose disease, change treatment, or present wearable-derived scores as medical clearance.
-9. Readiness, cardio load, target load, training status and resilience returned by tools are
+9. Never diagnose disease, change treatment, or present wearable-derived scores as medical clearance.
+10. Readiness, cardio load, target load, training status and resilience returned by tools are
    transparent VitalChronicle estimates based on personal baselines, not proprietary Google/Fitbit scores.
-10. When confidence or coverage is low, state that clearly.
+11. When confidence or coverage is low, state that clearly.
 
 The health archive is read-only to the agent. Learned tools, feedback and personal associations are
 stored separately and locally. Use the minimum useful number of tool calls, then answer clearly.
@@ -109,7 +114,10 @@ class AgentRuntime:
         QSettings().setValue("ai/personal_agent_enabled", bool(enabled))
 
     def needs_calibration(self) -> bool:
-        return bool(self.health_store.counts()) and self.agent_store.calibration_version() < CALIBRATION_VERSION
+        return (
+            bool(self.health_store.counts())
+            and self.agent_store.calibration_version() < CALIBRATION_VERSION
+        )
 
     def _initial_context(self, snapshot: dict[str, Any] | None) -> dict[str, Any]:
         snapshot = snapshot or {}
@@ -122,6 +130,7 @@ class AgentRuntime:
             "conversation_scope": snapshot.get("analysis_scope"),
             "requested_interval_coverage": snapshot.get("requested_interval_coverage"),
             "personal_model": self.agent_store.user_model()[:20],
+            "recent_self_reports": self.agent_store.recent_self_reports(days=30, limit=20),
             "safe_tool_count": len(self.tools.tool_schemas()),
             "rule": "Use tools for calculations and respect metric-specific coverage.",
         }
@@ -226,7 +235,9 @@ class AgentRuntime:
             {"role": "user", "content": user_content},
         ]
         schemas = self.tools.tool_schemas()
-        physical_limit = model_context_limit if model_context_limit and model_context_limit > 0 else None
+        physical_limit = (
+            model_context_limit if model_context_limit and model_context_limit > 0 else None
+        )
         max_tokens = max(512, int(max_tokens))
         if physical_limit:
             max_tokens = min(max_tokens, physical_limit)
@@ -264,7 +275,9 @@ class AgentRuntime:
                 think=think,
                 cancel_callback=cancel_callback,
             )
-            tool_calls = message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
+            tool_calls = (
+                message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
+            )
             if not tool_calls:
                 final_answer = str(message.get("content") or "").strip()
                 if final_answer:
@@ -330,7 +343,9 @@ class AgentRuntime:
                     messages = [messages[0], messages[-4], messages[-3], messages[-2], messages[-1]]
                 event(_("Agent context compacted while preserving the latest tool evidence."))
 
-        raise LocalAIError(_("The personal agent reached its maximum tool steps without a final answer."))
+        raise LocalAIError(
+            _("The personal agent reached its maximum tool steps without a final answer.")
+        )
 
     def calibration_snapshot(self) -> dict[str, Any]:
         bounds = self.health_store.data_date_bounds()
@@ -440,7 +455,9 @@ class AgentRuntime:
                         "This can prevent the agent from attributing an irregular schedule to training when another context explains it."
                     ),
                     "learning_key": "sleep_schedule_context",
-                    "context": {"observation": f"sleep regularity score was {float(score):.1f}/100"},
+                    "context": {
+                        "observation": f"sleep regularity score was {float(score):.1f}/100"
+                    },
                 }
             )
         if not questions:
@@ -475,7 +492,9 @@ class AgentRuntime:
         if not context.get("available"):
             return context, fallback
         if event_callback:
-            event_callback(_("Selecting only questions that can materially improve personalisation…"))
+            event_callback(
+                _("Selecting only questions that can materially improve personalisation…")
+            )
         schema = {
             "type": "object",
             "properties": {
@@ -511,9 +530,7 @@ class AgentRuntime:
                 {"role": "system", "content": "Return only valid JSON."},
                 {"role": "user", "content": prompt},
             ]
-            num_ctx, num_predict, _estimated = _request_budget(
-                messages, 1800, model_context_limit
-            )
+            num_ctx, num_predict, _estimated = _request_budget(messages, 1800, model_context_limit)
             response = requests.post(
                 f"{DEFAULT_OLLAMA_URL}/api/chat",
                 json={
@@ -545,9 +562,7 @@ class AgentRuntime:
                     questions.append(
                         {
                             "question": str(item["question"]).strip(),
-                            "reason": str(
-                                item.get("reason") or base.get("reason") or ""
-                            ).strip(),
+                            "reason": str(item.get("reason") or base.get("reason") or "").strip(),
                             "learning_key": key,
                             "context": base.get("context") or {"calibration": True},
                         }
