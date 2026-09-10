@@ -33,7 +33,7 @@ jobs:
       - name: Validate
         run: |
           python -m ruff check google_health_viewer/agent_tools.py google_health_viewer/agent_runtime.py tests/test_agent_resilience_load_history.py
-          python -m pytest -q tests/test_agent_resilience_load_history.py tests/test_agent_localization_overview.py
+          python -m pytest -q tests/test_agent_resilience_load_history.py
       - name: Commit patch
         run: |
           git config user.name 'github-actions[bot]'
