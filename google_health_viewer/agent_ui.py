@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from .agent_runtime import CALIBRATION_VERSION, AgentRuntime, CalibrationThread
-from .agent_tools import SafeToolExecutor
+from .agent_tool_factory import EnhancedSafeToolExecutor
 from .i18n import _
 
 
@@ -414,7 +414,7 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
         ) != QMessageBox.Yes:
             return
         runtime.agent_store.clear()
-        runtime.tools = SafeToolExecutor(runtime.health_store, runtime.agent_store)
+        runtime.tools = EnhancedSafeToolExecutor(runtime.health_store, runtime.agent_store)
         refresh_personal_ai_page(window)
 
     window.agent_enabled_check.toggled.connect(toggle_agent)

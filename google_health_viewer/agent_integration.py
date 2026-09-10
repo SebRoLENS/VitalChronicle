@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
 )
 
-from .agent_runtime import AgentAnalysisThread, AgentRuntime
+from .agent_runtime_v2 import AgentAnalysisThread, AgentRuntime
 from .agent_ui import build_personal_ai_page, refresh_personal_ai_page
 from .ai_hardware import reasoning_value
 from .i18n import _
@@ -50,6 +55,37 @@ def _install_chat_integration(ai_chat_module) -> None:
     original_start_request = AIChatWindow._start_request
     original_analysis_completed = AIChatWindow._analysis_completed
 
+    def render_activity_log(self) -> None:
+        lines = [f"• {message}" for message in self._activity_events]
+        if self._token_usage_text:
+            lines.append(self._token_usage_text)
+        text = "\n".join(lines)
+        if isinstance(self.activity_log, QPlainTextEdit):
+            scrollbar = self.activity_log.verticalScrollBar()
+            at_bottom = scrollbar.value() >= max(0, scrollbar.maximum() - 2)
+            self.activity_log.setPlainText(text)
+            if at_bottom or self._activity_active:
+                scrollbar.setValue(scrollbar.maximum())
+        else:
+            self.activity_log.setText(text)
+
+    def finish_activity(self) -> None:
+        self._activity_active = False
+        self._activity_timer.stop()
+        self._activity_phase = ""
+        if self._activity_events:
+            self.activity_title.setText(_("Agent activity · completed"))
+            self.activity_elapsed.clear()
+            self._render_activity_log()
+            self.activity_panel.setVisible(True)
+        elif self._token_usage_text:
+            self.activity_title.setText("AI · token usage")
+            self.activity_elapsed.clear()
+            self._render_activity_log()
+            self.activity_panel.setVisible(True)
+        else:
+            self.activity_panel.setVisible(False)
+
     def build_ui(self) -> None:
         original_build_ui(self)
         central = self.centralWidget()
@@ -59,6 +95,47 @@ def _install_chat_integration(ai_chat_module) -> None:
         layout = conversation.layout() if conversation is not None else None
         if layout is None:
             return
+
+        # The base chat used a QLabel showing only the last four activity lines. Replace it with
+        # a scrollable, selectable log that keeps the complete current run and remains visible
+        # after completion. This is an operational trace only, not model chain-of-thought.
+        activity_layout = self.activity_panel.layout()
+        old_activity_log = self.activity_log
+        activity_index = activity_layout.indexOf(old_activity_log)
+        self.activity_log = QPlainTextEdit()
+        self.activity_log.setObjectName("activityLog")
+        self.activity_log.setReadOnly(True)
+        self.activity_log.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.activity_log.setMinimumHeight(90)
+        self.activity_log.setMaximumHeight(190)
+        self.activity_log.setPlaceholderText(_("Operational agent activity will appear here."))
+        activity_layout.insertWidget(max(0, activity_index), self.activity_log)
+        old_activity_log.setParent(None)
+        old_activity_log.deleteLater()
+
+        activity_actions = QHBoxLayout()
+        activity_actions.addStretch()
+        self.activity_copy_button = QPushButton(_("Copy activity"))
+        self.activity_save_button = QPushButton(_("Save activity…"))
+        activity_actions.addWidget(self.activity_copy_button)
+        activity_actions.addWidget(self.activity_save_button)
+        activity_layout.insertLayout(max(0, activity_index) + 1, activity_actions)
+
+        def copy_activity() -> None:
+            QApplication.clipboard().setText(self.activity_log.toPlainText())
+
+        def save_activity() -> None:
+            filename, _filter = QFileDialog.getSaveFileName(
+                self,
+                _("Save agent activity"),
+                "vitalchronicle-agent-activity.txt",
+                _("Text files (*.txt);;All files (*)"),
+            )
+            if filename:
+                Path(filename).write_text(self.activity_log.toPlainText(), encoding="utf-8")
+
+        self.activity_copy_button.clicked.connect(copy_activity)
+        self.activity_save_button.clicked.connect(save_activity)
 
         self.agent_feedback_panel = QFrame()
         self.agent_feedback_panel.setObjectName("aiCard")
@@ -209,6 +286,8 @@ def _install_chat_integration(ai_chat_module) -> None:
             refresh_personal_ai_page(host)
 
     AIChatWindow._build_ui = build_ui
+    AIChatWindow._render_activity_log = render_activity_log
+    AIChatWindow._finish_activity = finish_activity
     AIChatWindow._refresh_agent_feedback = refresh_agent_feedback
     AIChatWindow._load_current_thread = load_current_thread
     AIChatWindow._start_request = start_request
