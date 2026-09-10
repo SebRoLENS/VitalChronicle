@@ -220,8 +220,12 @@ def install_personal_agent(main_window_module) -> None:
     """Install the agent as a thin layer over the existing desktop AI pipeline."""
 
     from . import ai_chat as ai_chat_module
+    from .agent_localization import install_agent_language_and_calibration_ui
+    from .agent_overview import install_agent_overview
 
     _install_agent_reasoning_compatibility()
+    install_agent_language_and_calibration_ui()
+    install_agent_overview(main_window_module)
     _install_chat_integration(ai_chat_module)
     MainWindow = main_window_module.MainWindow
     if getattr(MainWindow, "_personal_agent_integration_installed", False):
@@ -251,6 +255,7 @@ def install_personal_agent(main_window_module) -> None:
     def sync_completed(self, success: int, errors: int, automatic: bool = False) -> None:
         original_sync_completed(self, success, errors, automatic)
         refresh_personal_ai_page(self)
+        self.refresh_overview()
 
     MainWindow._build_ai_page = build_ai_page
     MainWindow._ensure_ai_chat_window = ensure_ai_chat_window
