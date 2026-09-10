@@ -85,6 +85,25 @@ jobs:
             tests/test_agent_tool_factory_v2.py \
             tests/test_ai_chat.py \
             tests/test_agent_ui_details.py
+          python - <<'PY'
+          import inspect
+          from google_health_viewer.analysis import _normalize_sleep_stage, _sleep_stage_totals, sleep_stage_points
+
+          record = {
+              "start_time": "2026-08-01T22:00:00+00:00",
+              "end_time": "2026-08-02T06:00:00+00:00",
+              "payload": {"sleep": {"stages": [
+                  {"stage": 4, "startTime": "2026-08-01T22:00:00+00:00", "endTime": "2026-08-01T23:00:00+00:00"},
+                  {"stage": 5, "startTime": "2026-08-01T23:00:00+00:00", "endTime": "2026-08-02T00:30:00+00:00"},
+                  {"stageType": 6, "startTime": "2026-08-02T00:30:00+00:00", "endTime": "2026-08-02T02:00:00+00:00"},
+              ]}},
+          }
+          print("NORMALIZE", _normalize_sleep_stage(4), _normalize_sleep_stage(5), _normalize_sleep_stage(6))
+          print("TOTALS", _sleep_stage_totals(record))
+          print("POINTS", sleep_stage_points([record]))
+          print(inspect.getsource(_normalize_sleep_stage))
+          print(inspect.getsource(_sleep_stage_totals))
+          PY
       - name: Validate focused tests
         env:
           QT_QPA_PLATFORM: offscreen
