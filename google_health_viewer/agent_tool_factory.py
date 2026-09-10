@@ -57,6 +57,74 @@ DSL_REFERENCE = {
     "return": "Return the selected stored result.",
 }
 
+EVENT_RESPONSE_PARAMETERS_EXAMPLE = {
+    "type": "object",
+    "properties": {
+        "start": {"type": "string"},
+        "end": {"type": "string"},
+        "event_percent": {"type": "number", "default": 30},
+        "response_percent": {"type": "number", "default": 20},
+        "recovery_tolerance_percent": {"type": "number", "default": 10},
+    },
+    "required": ["start", "end"],
+}
+
+EVENT_RESPONSE_PIPELINE_EXAMPLE = [
+    {
+        "op": "call_tool",
+        "tool": "calculate_cardio_load",
+        "arguments": {"start": "$start", "end": "$end"},
+        "as": "event_raw",
+    },
+    {
+        "op": "extract_series",
+        "source": "event_raw",
+        "path": "daily_load",
+        "key_field": "date",
+        "value_field": "load",
+        "as": "event_series",
+    },
+    {"op": "baseline", "source": "event_series", "as": "event_baseline"},
+    {
+        "op": "filter_relative",
+        "source": "event_series",
+        "baseline_source": "event_baseline",
+        "baseline_field": "median",
+        "direction": "above",
+        "percent": "$event_percent",
+        "as": "events",
+    },
+    {
+        "op": "call_tool",
+        "tool": "get_sleep_stage_series",
+        "arguments": {"start": "$start", "end": "$end"},
+        "as": "response_raw",
+    },
+    {
+        "op": "extract_series",
+        "source": "response_raw",
+        "path": "daily_stages",
+        "key_field": "date",
+        "value_field": "deep",
+        "as": "response_series",
+    },
+    {"op": "baseline", "source": "response_series", "as": "response_baseline"},
+    {
+        "op": "event_response",
+        "event_source": "events",
+        "response_source": "response_series",
+        "response_baseline_source": "response_baseline",
+        "baseline_field": "median",
+        "response_direction": "below",
+        "response_percent": "$response_percent",
+        "response_offset_days": 1,
+        "recovery_tolerance_percent": "$recovery_tolerance_percent",
+        "max_recovery_days": 14,
+        "as": "analysis",
+    },
+    {"op": "return", "source": "analysis"},
+]
+
 _PIPELINE_STEP_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -135,7 +203,12 @@ CREATE_LEARNED_TOOL_SCHEMA = {
         },
         "parameters": {
             "type": "object",
-            "description": "JSON Schema for reusable user-adjustable inputs.",
+            "description": (
+                "JSON Schema for reusable user-adjustable inputs. Property defaults are applied at "
+                "learned-tool runtime when the caller omits that argument. For event-response tools, "
+                "use the supplied example rather than inventing a parameter shape."
+            ),
+            "examples": [EVENT_RESPONSE_PARAMETERS_EXAMPLE],
         },
         "pipeline": {
             "type": "array",
@@ -144,8 +217,11 @@ CREATE_LEARNED_TOOL_SCHEMA = {
             "items": _PIPELINE_STEP_SCHEMA,
             "description": (
                 "Safe pipeline. Store each intermediate result with 'as' and reference it by name. "
-                "Never invent operations outside the op enum."
+                "Never invent operations outside the op enum. For an event above a personal baseline "
+                "followed by a next-day/night response and recovery-time analysis, copy the supplied "
+                "canonical example structure and change only the semantic tools/fields/thresholds needed."
             ),
+            "examples": [EVENT_RESPONSE_PIPELINE_EXAMPLE],
         },
     },
     "required": ["name", "description", "capability", "pipeline"],
@@ -412,6 +488,8 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                 "error": str(exc),
                 "allowed_operations": sorted(ALLOWED_DSL_OPS),
                 "dsl_reference": DSL_REFERENCE,
+                "canonical_event_response_pipeline": EVENT_RESPONSE_PIPELINE_EXAMPLE,
+                "canonical_event_response_parameters": EVENT_RESPONSE_PARAMETERS_EXAMPLE,
                 "instruction": (
                     "Repair this same reusable tool using only the documented operations; do not "
                     "replace the user's requested metric with a proxy just because validation failed."
@@ -473,6 +551,19 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
 
     def _run_learned(self, item: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
         pipeline = self.validate_pipeline(item["pipeline"])
+        runtime_args = dict(args)
+        parameter_schema = (
+            item.get("parameters") if isinstance(item.get("parameters"), dict) else {}
+        )
+        properties = (
+            parameter_schema.get("properties")
+            if isinstance(parameter_schema.get("properties"), dict)
+            else {}
+        )
+        for key, spec in properties.items():
+            if key not in runtime_args and isinstance(spec, dict) and "default" in spec:
+                runtime_args[str(key)] = spec["default"]
+        args = runtime_args
         env: dict[str, Any] = {}
         last: Any = None
         default_left, default_right = base._bounds(args.get("start"), args.get("end"), 60)

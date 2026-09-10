@@ -54,6 +54,7 @@
   "Agent activity · completed": "Attività agente · completata",
   "Agent context compacted while preserving the latest tool evidence.": "",
   "Agent finished the analysis.": "",
+  "Agent runtime blocked a tool call unavailable in this turn: {tools}": "Il runtime dell’agente ha bloccato una chiamata a un tool non disponibile in questo turno: {tools}",
   "Agent step {step}/{maximum}…": "",
   "Agent: finalising with the evidence already collected…": "Agente: preparo la risposta finale con le evidenze già raccolte…",
   "Agent: selecting the minimum deterministic evidence needed…\n": "",
