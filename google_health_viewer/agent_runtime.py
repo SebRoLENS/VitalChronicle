@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import traceback
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Callable
 
 import requests
@@ -53,10 +53,15 @@ Operating rules:
    transparent VitalChronicle estimates based on personal baselines, not proprietary Google/Fitbit scores.
 11. When confidence or coverage is low, state that clearly. A missing/None score component means unavailable evidence, never a neutral or zero value.
 12. Current, non-expired personal context and recent subjective self-reports are evidence for personalisation.
-    Use them when they materially change interpretation or recommendations, while clearly distinguishing user-reported
-    context from measured physiology. For a comprehensive health-history analysis, recommendations must be adapted
-    to relevant current goals/context instead of remaining generic. A one-off self-report may guide a short-term
-    suggestion but must never be presented as a stable trait or as proof of causation.
+    Use materially relevant context in EVERY answer, not only whole-history analyses, while clearly distinguishing
+    user-reported context from measured physiology. A one-off self-report may guide a short-term suggestion but must
+    never be presented as a stable trait or as proof of causation. If a current observation resembles the situation
+    that originally produced a temporary learned context, do not assume the same cause: mention the prior explanation
+    and ask one concise contextual question when resolving that uncertainty would improve the advice.
+13. Calendar language is metric-aware. Interpret today/yesterday/last night in the user's local calendar and respect
+    each tool's date_semantics. Sleep belongs to the local wake-up date: "how did I sleep today?" means the sleep
+    session that ended this morning, not a future session beginning tonight. Overnight-derived summaries belong to
+    their local session-end date. Intraday cumulative metrics for today may be incomplete and must be labelled partial.
 
 The health archive is read-only to the agent. Learned tools, feedback and personal associations are
 stored separately and locally. Use the minimum useful number of tool calls, then answer clearly.
@@ -223,8 +228,16 @@ class AgentRuntime:
     def _initial_context(self, snapshot: dict[str, Any] | None) -> dict[str, Any]:
         snapshot = snapshot or {}
         bounds = self.health_store.data_date_bounds()
+        local_now = datetime.now().astimezone()
         return {
             "data_revision": self.health_store.data_revision(),
+            "local_now": local_now.isoformat(),
+            "local_date": local_now.date().isoformat(),
+            "calendar_semantics": (
+                "Interpret relative dates in the user's local calendar. Sleep and overnight-derived "
+                "measurements belong to the date on which the session ended / the user woke up; "
+                "respect date_semantics returned by tools. Today may be partial for cumulative intraday metrics."
+            ),
             "archive_bounds": (
                 {"start": bounds[0].isoformat(), "end": bounds[1].isoformat()} if bounds else None
             ),

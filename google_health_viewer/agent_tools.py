@@ -18,6 +18,7 @@ from .analysis import (
     visual_profile,
 )
 from .agent_store import AgentStore
+from .utils import parse_timestamp
 
 MAX_SERIES_POINTS = 360
 MAX_LEARNED_STEPS = 12
@@ -401,6 +402,20 @@ _ALIASES = {
     "vo2max": "daily-vo2-max",
 }
 
+_END_DATE_TYPES = {
+    "sleep",
+    "respiratory-rate-sleep-summary",
+    "daily-sleep-temperature-derivations",
+}
+
+
+def _date_semantics(data_type: str) -> str:
+    if data_type == "sleep":
+        return "wake_up_date"
+    if data_type in _END_DATE_TYPES:
+        return "session_end_date"
+    return "calendar_observation_date"
+
 
 def _parse_date(value: Any) -> date | None:
     if not value:
@@ -422,6 +437,20 @@ def _bounds(start: Any, end: Any, days: int = 28) -> tuple[date, date]:
 
 def _day(ts: float) -> str:
     return datetime.fromtimestamp(ts).astimezone().date().isoformat()
+
+
+def _record_semantic_timestamp(record: dict[str, Any], data_type: str) -> float | None:
+    raw = (
+        record.get("end_time") or record.get("start_time")
+        if data_type in _END_DATE_TYPES
+        else record.get("start_time") or record.get("end_time")
+    )
+    return parse_timestamp(raw)
+
+
+def _semantic_day(record: dict[str, Any], data_type: str) -> str | None:
+    timestamp = _record_semantic_timestamp(record, data_type)
+    return _day(timestamp) if timestamp is not None else None
 
 
 def _daily(points: list[tuple[float, float]], aggregation: str) -> dict[str, float]:
@@ -508,11 +537,25 @@ class SafeToolExecutor:
             limit=200000,
         )
 
+    def _semantic_records(
+        self, data_type: str, left: date, right: date
+    ) -> list[dict[str, Any]]:
+        query_left = left - timedelta(days=1) if data_type in _END_DATE_TYPES else left
+        records = self._records(data_type, query_left, right)
+        if data_type not in _END_DATE_TYPES:
+            return records
+        return [
+            record
+            for record in records
+            if (day := _semantic_day(record, data_type)) is not None
+            and left.isoformat() <= day <= right.isoformat()
+        ]
+
     def _series(self, metric: str, left: date, right: date) -> dict[str, Any]:
         raw = str(metric or "").strip()
         data_type, _, explicit = raw.partition(":")
         data_type = _ALIASES.get(data_type, data_type)
-        records = self._records(data_type, left, right)
+        records = self._semantic_records(data_type, left, right)
         metrics = available_metrics(records, data_type) if records else []
         field = explicit if explicit in metrics else (metrics[0] if metrics else None)
         if field is None:
@@ -525,7 +568,15 @@ class SafeToolExecutor:
                 "aggregation": "none",
             }
         profile = visual_profile(data_type, field)
-        points = display_points(raw_points(records, field), profile)
+        source_points = raw_points(records, field)
+        if data_type in _END_DATE_TYPES:
+            source_points = []
+            for record in records:
+                timestamp = _record_semantic_timestamp(record, data_type)
+                candidate = raw_points([record], field)
+                if timestamp is not None and candidate:
+                    source_points.append((timestamp, float(candidate[-1][1])))
+        points = display_points(source_points, profile)
         return {
             "metric": raw,
             "data_type": data_type,
@@ -535,6 +586,7 @@ class SafeToolExecutor:
             ],
             "unit": profile.unit,
             "aggregation": profile.aggregation,
+            "date_semantics": _date_semantics(data_type),
         }
 
     def _series_info(
@@ -550,6 +602,7 @@ class SafeToolExecutor:
             "data_type": series["data_type"],
             "field": series["field"],
             "unit": series["unit"],
+            "date_semantics": series.get("date_semantics", _date_semantics(series["data_type"])),
             "period": {"start": left.isoformat(), "end": right.isoformat()},
             "observed_days": len(days),
             "expected_days": expected,
@@ -658,7 +711,7 @@ class SafeToolExecutor:
     def _sleep_rows(
         self, left: date, right: date
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        records = self._records("sleep", left, right)
+        records = self._semantic_records("sleep", left, right)
         rows = []
         for record in records:
             hours = duration_hours(record)
@@ -689,6 +742,7 @@ class SafeToolExecutor:
             "sessions_with_stages": len(sleep_stage_points(records)),
             "coverage": round(len({row["date"] for row in rows}) / max(1, expected), 3),
             "confidence": _confidence(len({row["date"] for row in rows}), expected),
+            "date_semantics": "wake_up_date",
         }
 
     def _tool_analyze_sleep_stages(self, args, **_):
