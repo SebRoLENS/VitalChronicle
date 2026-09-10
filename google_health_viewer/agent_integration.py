@@ -73,6 +73,9 @@ def _install_chat_integration(ai_chat_module) -> None:
         self._activity_active = False
         self._activity_timer.stop()
         self._activity_phase = ""
+        self.activity_progress.setRange(0, 1000)
+        self.activity_progress.setValue(1000)
+        self.activity_progress.setTextVisible(False)
         if self._activity_events:
             self.activity_title.setText(_("Agent activity · completed"))
             self.activity_elapsed.clear()
@@ -236,9 +239,7 @@ def _install_chat_integration(ai_chat_module) -> None:
         display_question = question.strip() or _(
             "Analyse my complete health history deeply and explain the strongest useful patterns."
         )
-        history = self.conversations.model_history(
-            thread["id"], exclude_last_user=not persist_user
-        )
+        history = self.conversations.model_history(thread["id"], exclude_last_user=not persist_user)
         if persist_user:
             self.conversations.add_message(thread["id"], "user", display_question)
         self.input.clear()

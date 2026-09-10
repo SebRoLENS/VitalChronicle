@@ -201,9 +201,7 @@ class AIChatWindow(QMainWindow):
         self.activity_elapsed.setObjectName("activityElapsed")
         activity_header.addWidget(self.activity_elapsed)
         activity_layout.addLayout(activity_header)
-        activity_hint = QLabel(
-            _("This may take some time depending on your model and hardware.")
-        )
+        activity_hint = QLabel(_("This may take some time depending on your model and hardware."))
         activity_hint.setObjectName("activityHint")
         activity_hint.setWordWrap(True)
         activity_layout.addWidget(activity_hint)
@@ -582,7 +580,9 @@ class AIChatWindow(QMainWindow):
             self._activity_event(_("The evidence is ready; Ollama is building the analysis…"))
         else:
             self._activity_event(_("The model is retrying with a compact evidence packet…"))
-        self.prompt_view.setPlainText("\n\n" + ("\n\n" + "=" * 72 + "\n\n").join(self._prompt_sections))
+        self.prompt_view.setPlainText(
+            "\n\n" + ("\n\n" + "=" * 72 + "\n\n").join(self._prompt_sections)
+        )
         self.prompt_button.setEnabled(True)
 
     def _update_token_usage(self, payload: dict[str, Any]) -> None:
@@ -871,6 +871,9 @@ class AIChatWindow(QMainWindow):
     def _finish_activity(self) -> None:
         self._activity_active = False
         self._activity_timer.stop()
+        self.activity_progress.setRange(0, 1000)
+        self.activity_progress.setValue(1000)
+        self.activity_progress.setTextVisible(False)
         self._activity_events = []
         self._activity_phase = ""
         if self._token_usage_text:

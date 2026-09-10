@@ -165,6 +165,8 @@ def test_live_token_meter_tracks_context_and_remains_after_completion(tmp_path: 
     assert window.activity_panel.isVisible()
     assert window.activity_title.text() == "AI · token usage"
     assert not window._activity_timer.isActive()
+    assert window.activity_progress.maximum() == 1000
+    assert window.activity_progress.value() == 1000
     window.close()
 
 

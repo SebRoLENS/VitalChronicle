@@ -8,10 +8,11 @@ from .agent_tool_factory import EnhancedSafeToolExecutor
 from .i18n import _
 from .local_ai import AIAnalysisCancelled, LocalAIError
 
-MAX_ANALYSIS_STEPS = 10
+MAX_ANALYSIS_STEPS = 15
 MAX_FACTORY_REPAIR_ATTEMPTS = 3
 MAX_FACTORY_GATE_REFUSALS = 2
 MAX_RAW_SERIES_PROBES_BEFORE_FACTORY = 2
+FACTORY_GATE_AFTER_ANALYSIS_STEPS = 3
 MAX_TOTAL_MODEL_TURNS = MAX_ANALYSIS_STEPS + MAX_FACTORY_REPAIR_ATTEMPTS + 4
 
 _FACTORY_POLICY = """
@@ -38,6 +39,9 @@ Tool Factory decision policy:
 - Prefer semantic deterministic tools (for example calculate_cardio_load) over guessing raw metric names.
 - Tool names are NEVER metric identifiers: do not pass calculate_cardio_load, get_sleep_stage_series, or any other function name to get_metric_series/get_data_coverage/get_baseline.
 - When the runtime Tool Factory gate exposes only create_learned_tool, you must call it; do not answer directly before resolving or exhausting that gate.
+- If a learned tool returns an empty/zero result because a semantic input is unavailable, inspect the relevant semantic built-in directly before claiming the underlying data are absent.
+- Sleep stages must be checked with get_sleep_stage_series/analyze_sleep_stages, not inferred from a missing generic sleep.summary field.
+- Preserve units and method labels returned by deterministic tools; never relabel VitalChronicle cardio-load points as kcal.
 """
 
 
@@ -105,9 +109,7 @@ def _without_factory_creation(schemas: list[dict[str, Any]]) -> list[dict[str, A
     return result
 
 
-def _only_named_tools(
-    schemas: list[dict[str, Any]], names: set[str]
-) -> list[dict[str, Any]]:
+def _only_named_tools(schemas: list[dict[str, Any]], names: set[str]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for schema in schemas:
         function = schema.get("function") if isinstance(schema, dict) else None
@@ -307,6 +309,7 @@ class AgentRuntime(base_rt.AgentRuntime):
         factory_resolution_seen = False
         factory_gate_refusals = 0
         raw_series_probes = 0
+        factory_creation_notice_shown = False
         tool_result_cache: dict[str, dict[str, Any]] = {}
 
         while total_turns < MAX_TOTAL_MODEL_TURNS:
@@ -335,7 +338,11 @@ class AgentRuntime(base_rt.AgentRuntime):
             active_schemas = _without_factory_creation(schemas) if factory_disabled else schemas
             if factory_gate_required and not factory_disabled:
                 active_schemas = _only_named_tools(active_schemas, {"create_learned_tool"})
-                event(_("Tool Factory gate active · the next decision must resolve the reusable capability gap."))
+                event(
+                    _(
+                        "Tool Factory gate active · the next decision must resolve the reusable capability gap."
+                    )
+                )
             message = self._chat_once(
                 model=model,
                 messages=messages,
@@ -348,6 +355,63 @@ class AgentRuntime(base_rt.AgentRuntime):
             tool_calls = (
                 message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
             )
+            gate_active = factory_gate_required and not factory_disabled
+            if gate_active and tool_calls:
+                allowed_gate_calls = [
+                    call
+                    for call in tool_calls
+                    if isinstance(call, dict) and base_rt._tool_name(call) == "create_learned_tool"
+                ]
+                blocked_gate_names = [
+                    base_rt._tool_name(call)
+                    for call in tool_calls
+                    if isinstance(call, dict) and base_rt._tool_name(call) != "create_learned_tool"
+                ]
+                if blocked_gate_names:
+                    event(
+                        _(
+                            "Tool Factory gate blocked an out-of-scope tool call: {tools}",
+                            tools=", ".join(name for name in blocked_gate_names if name),
+                        )
+                    )
+                if allowed_gate_calls:
+                    tool_calls = allowed_gate_calls
+                    message = dict(message)
+                    message["tool_calls"] = tool_calls
+                    factory_gate_refusals = 0
+                else:
+                    factory_gate_refusals += 1
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "RUNTIME TOOL FACTORY GATE ENFORCEMENT: the previous tool call was "
+                                "rejected because only create_learned_tool is allowed while this gate "
+                                "is active. Do not call any raw metric reader or other built-in now. "
+                                "Call create_learned_tool with a safe reusable pipeline, or repair that "
+                                "pipeline if validation returns an error."
+                            ),
+                        }
+                    )
+                    if factory_gate_refusals <= MAX_FACTORY_GATE_REFUSALS:
+                        continue
+                    factory_gate_required = False
+                    factory_disabled = True
+                    event(
+                        _(
+                            "Tool Factory gate attempt limit reached · finalising without executing out-of-scope tools."
+                        )
+                    )
+                    return self._final_answer(
+                        model=model,
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        physical_limit=physical_limit,
+                        think=think,
+                        cancel_callback=cancel_callback,
+                        event=event,
+                        answer_callback=answer_callback,
+                    )
             if not tool_calls:
                 final_answer = str(message.get("content") or "").strip()
                 if factory_gate_required and not factory_disabled:
@@ -378,7 +442,11 @@ class AgentRuntime(base_rt.AgentRuntime):
                         continue
                     factory_gate_required = False
                     factory_disabled = True
-                    event(_("Tool Factory gate attempt limit reached · finalising without inventing missing data."))
+                    event(
+                        _(
+                            "Tool Factory gate attempt limit reached · finalising without inventing missing data."
+                        )
+                    )
                     return self._final_answer(
                         model=model,
                         messages=messages,
@@ -410,6 +478,11 @@ class AgentRuntime(base_rt.AgentRuntime):
                 if name == "search_tool_registry":
                     event(_("Searching existing tools before creating a new capability…"))
                 elif name == "create_learned_tool":
+                    if not factory_creation_notice_shown:
+                        event(
+                            _("The AI is creating a custom tool; this may take longer than usual.")
+                        )
+                        factory_creation_notice_shown = True
                     event(_("Capability gap detected · validating a reusable learned tool…"))
                 elif name == "ask_user_feedback":
                     event(_("A targeted question could improve personalisation."))
@@ -458,12 +531,20 @@ class AgentRuntime(base_rt.AgentRuntime):
                             ),
                             "capability": factory_capability,
                         }
-                        event(_("Repeated raw-series probing stopped · switching to the Tool Factory decision."))
+                        event(
+                            _(
+                                "Repeated raw-series probing stopped · switching to the Tool Factory decision."
+                            )
+                        )
 
                 cache_key = base_rt._json_text({"tool": name, "arguments": args}, 8000)
                 if not blocked_for_factory and cache_key in tool_result_cache:
                     result = tool_result_cache[cache_key]
-                    event(_("Repeated identical tool call reused from this analysis instead of consuming another query."))
+                    event(
+                        _(
+                            "Repeated identical tool call reused from this analysis instead of consuming another query."
+                        )
+                    )
                 elif not blocked_for_factory and factory_disabled and name == "create_learned_tool":
                     result = {
                         "status": "repair_budget_exhausted",
@@ -544,7 +625,7 @@ class AgentRuntime(base_rt.AgentRuntime):
                 factory_candidate
                 and not factory_resolution_seen
                 and not factory_disabled
-                and analysis_steps >= 4
+                and analysis_steps >= FACTORY_GATE_AFTER_ANALYSIS_STEPS
             ):
                 factory_gate_required = True
 

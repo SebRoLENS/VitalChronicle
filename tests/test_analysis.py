@@ -88,9 +88,7 @@ def test_ai_snapshot_compares_partial_steps_with_the_same_time_of_day():
     for offset in range(1, 8):
         day = observed_at.date() - timedelta(days=offset)
         for hour, count in ((8, 3000), (18, 4000)):
-            timestamp = datetime.combine(day, datetime.min.time(), local_zone).replace(
-                hour=hour
-            )
+            timestamp = datetime.combine(day, datetime.min.time(), local_zone).replace(hour=hour)
             records.append(
                 {
                     "record_kind": "data_point",
@@ -113,9 +111,7 @@ def test_ai_snapshot_compares_partial_steps_with_the_same_time_of_day():
         def list_records(self, data_type, *_args, **_kwargs):
             return records if data_type == "steps" else []
 
-    snapshot = build_health_snapshot(
-        FakeStore(), "2026-08-23", "2026-08-31", now=observed_at
-    )
+    snapshot = build_health_snapshot(FakeStore(), "2026-08-23", "2026-08-31", now=observed_at)
     steps = snapshot["metrics"][0]
     context = steps["temporal_context"]
 
@@ -150,11 +146,7 @@ def test_sleep_progress_is_assigned_to_wakeup_day():
                 "start_time": f"2026-08-{day - 1 or 1:02d}T22:00:00+00:00",
                 "end_time": f"2026-08-{day:02d}T06:00:00+00:00",
                 "payload": {
-                    "sleep": {
-                        "sleepSummary": {
-                            "minutesAsleep": "240" if day == 8 else "480"
-                        }
-                    }
+                    "sleep": {"sleepSummary": {"minutesAsleep": "240" if day == 8 else "480"}}
                 },
             }
         )
@@ -299,12 +291,8 @@ def test_complete_ai_snapshot_includes_sleep_stages_and_exercise_types():
     snapshot = build_health_snapshot(FakeStore(), "2026-08-01", "2026-08-05")
     by_type = {item["data_type"]: item for item in snapshot["metrics"]}
 
-    assert by_type["sleep"]["structured_details"]["stages"]["DEEP"][
-        "total_hours"
-    ] == 1.5
-    assert by_type["exercise"]["structured_details"]["by_type"]["RUNNING"][
-        "total_hours"
-    ] == 1.0
+    assert by_type["sleep"]["structured_details"]["stages"]["DEEP"]["total_hours"] == 1.5
+    assert by_type["exercise"]["structured_details"]["by_type"]["RUNNING"]["total_hours"] == 1.0
     assert snapshot["data_coverage"]["analyzed_data_types"] == ["exercise", "sleep"]
 
 
@@ -339,9 +327,10 @@ def test_calories_and_threshold_lists_are_parsed():
             }
         },
     }
-    assert categorical_daily_points([calorie_record], "calories-in-heart-rate-zone")[0][
-        1
-    ] == {"LIGHT": 100.0, "VIGOROUS": 35.0}
+    assert categorical_daily_points([calorie_record], "calories-in-heart-rate-zone")[0][1] == {
+        "LIGHT": 100.0,
+        "VIGOROUS": 35.0,
+    }
 
     threshold_record = {
         "start_time": "2026-08-01T00:00:00+00:00",
@@ -358,9 +347,7 @@ def test_calories_and_threshold_lists_are_parsed():
             }
         },
     }
-    assert heart_rate_zone_thresholds([threshold_record])[0][1] == {
-        "MODERATE": (115.0, 140.0)
-    }
+    assert heart_rate_zone_thresholds([threshold_record])[0][1] == {"MODERATE": (115.0, 140.0)}
 
 
 def test_readable_axis_ignores_single_extreme_outlier():
@@ -459,3 +446,38 @@ def test_long_daily_series_opens_on_latest_thirty_days():
     viewport = initial_x_range(points, "total-calories", profile)
     assert viewport is not None
     assert 30 * day <= viewport[1] - viewport[0] < 31 * day
+
+
+def test_health_connect_numeric_sleep_stage_codes_are_parsed():
+    records = [
+        {
+            "start_time": "2026-08-01T22:00:00+00:00",
+            "end_time": "2026-08-02T06:00:00+00:00",
+            "payload": {
+                "sleep": {
+                    "stages": [
+                        {
+                            "stage": 4,
+                            "startTime": "2026-08-01T22:00:00+00:00",
+                            "endTime": "2026-08-01T23:00:00+00:00",
+                        },
+                        {
+                            "stage": 5,
+                            "startTime": "2026-08-01T23:00:00+00:00",
+                            "endTime": "2026-08-02T00:30:00+00:00",
+                        },
+                        {
+                            "stageType": 6,
+                            "startTime": "2026-08-02T00:30:00+00:00",
+                            "endTime": "2026-08-02T02:00:00+00:00",
+                        },
+                    ]
+                }
+            },
+        }
+    ]
+
+    stages = sleep_stage_points(records)[0][1]
+    assert stages["LIGHT"] == 1.0
+    assert stages["DEEP"] == 1.5
+    assert stages["REM"] == 1.5

@@ -10,8 +10,8 @@ from . import agent_tools as base
 EXTRA_BUILTIN_SPEC = {
     "name": "get_sleep_stage_series",
     "description": (
-        "Return per-night recorded sleep-stage durations (deep, REM, light, awake) as a "
-        "deterministic date series. Missing stages are never inferred."
+        "Return per-night recorded sleep-stage durations (deep, REM, light, awake) keyed by "
+        "wake-up date as a deterministic series. Missing stages are never inferred."
     ),
     "capability": "sleep.stage_series",
     "parameters": base._period(),
@@ -231,12 +231,20 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
     def _tool_get_sleep_stage_series(self, args, **_):
         left, right = base._bounds(args.get("start"), args.get("end"), 60)
         records = self._records("sleep", left, right)
-        stages = base.sleep_stage_points(records)
         by_day: dict[str, dict[str, float]] = {}
-        for ts, values in stages:
+        sessions_with_stages = 0
+        for record in records:
+            stage_points = base.sleep_stage_points([record])
+            if not stage_points:
+                continue
+            values = stage_points[0][1]
             if not isinstance(values, dict):
                 continue
-            day = base._day(float(ts))
+            wake_day = base._parse_date(record.get("end_time") or record.get("start_time"))
+            if wake_day is None:
+                continue
+            sessions_with_stages += 1
+            day = wake_day.isoformat()
             row = by_day.setdefault(day, {"deep": 0.0, "rem": 0.0, "light": 0.0, "awake": 0.0})
             for raw_name, raw_value in values.items():
                 name = str(raw_name).strip().lower().replace("-", "_").replace(" ", "_")
@@ -246,7 +254,7 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                     target = "rem"
                 elif "light" in name:
                     target = "light"
-                elif "awake" in name or "wake" in name:
+                elif "awake" in name or "wake" in name or "out_of_bed" in name:
                     target = "awake"
                 else:
                     continue
@@ -264,12 +272,19 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
         return {
             "period": {"start": left.isoformat(), "end": right.isoformat()},
             "daily_stages": rows,
+            "sleep_session_records": len(records),
+            "sessions_with_stages": sessions_with_stages,
             "observed_nights": len(rows),
             "expected_days": expected,
             "coverage": round(len(rows) / max(1, expected), 3),
             "confidence": base._confidence(len(rows), expected),
-            "method": "Recorded wearable sleep-stage durations grouped by local date.",
-            "limitations": "Missing sleep stages are omitted and never inferred or zero-filled.",
+            "date_semantics": "wake_up_date",
+            "method": "Recorded wearable sleep-stage durations grouped by local wake-up date.",
+            "limitations": (
+                "Missing sleep stages are omitted and never inferred or zero-filled. A nonzero "
+                "sleep_session_records value with zero sessions_with_stages means sessions exist "
+                "but no recognizable stage detail was recorded."
+            ),
         }
 
     @classmethod

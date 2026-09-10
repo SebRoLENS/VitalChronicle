@@ -329,9 +329,7 @@ class GateRefusalRuntime(AgentRuntime):
         if self.turn <= 4:
             return {
                 "content": "",
-                "tool_calls": [
-                    {"function": {"name": "get_available_metrics", "arguments": {}}}
-                ],
+                "tool_calls": [{"function": {"name": "get_available_metrics", "arguments": {}}}],
             }
         if self.turn == 5:
             return {"content": "Non ci sono dati, quindi rispondo subito."}
@@ -439,3 +437,131 @@ def test_tool_name_cannot_be_misused_as_raw_metric_identifier(tmp_path):
     )
     assert answer == "Risposta finale corretta."
     assert any("tool name rejected" in event.lower() for event in events)
+
+
+class StrictGateHallucinationRuntime(AgentRuntime):
+    def __init__(self, health_store, agent_store):
+        super().__init__(health_store, agent_store)
+        self.turn = 0
+        self.available_by_turn: list[set[str]] = []
+
+    def _chat_once(self, **kwargs):
+        self.turn += 1
+        names = {
+            str(item.get("function", {}).get("name") or "")
+            for item in kwargs.get("tools", [])
+            if isinstance(item, dict)
+        }
+        self.available_by_turn.append(names)
+        if self.turn <= 4:
+            return {
+                "content": "",
+                "tool_calls": [{"function": {"name": "get_available_metrics", "arguments": {}}}],
+            }
+        if self.turn == 5:
+            # Reproduce a local model hallucinating a tool that was NOT advertised
+            # while the runtime gate exposed only create_learned_tool.
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "get_metric_series",
+                            "arguments": {"metric": "active-energy-burned"},
+                        }
+                    }
+                ],
+            }
+        if self.turn == 6:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "create_learned_tool",
+                            "arguments": {
+                                "name": "strict_gate_tool",
+                                "description": "Reusable temporal baseline analysis",
+                                "capability": "analysis.composed.personal_baseline.temporal_event_response",
+                                "pipeline": [{"op": "return"}],
+                            },
+                        }
+                    }
+                ],
+            }
+        return {"content": "Risposta finale dopo il gate runtime."}
+
+
+def test_gate_rejects_hallucinated_tool_not_exposed_by_schema(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    runtime = StrictGateHallucinationRuntime(DummyHealthStore(tmp_path / "health.sqlite3"), store)
+    events: list[str] = []
+
+    answer = runtime.analyze(
+        model="test",
+        snapshot={},
+        question=(
+            "Quando il carico supera del 20% la baseline personale, il sonno profondo della notte "
+            "successiva diminuisce e dopo quanti giorni torna al livello abituale?"
+        ),
+        history=[],
+        max_tokens=1024,
+        model_context_limit=None,
+        performance_profile="standard",
+        thread_id="strict-gate-thread",
+        event_callback=events.append,
+    )
+
+    assert answer == "Risposta finale dopo il gate runtime."
+    assert runtime.available_by_turn[4] == {"create_learned_tool"}
+    assert runtime.available_by_turn[5] == {"create_learned_tool"}
+    assert any("out-of-scope tool call" in event.lower() for event in events)
+    assert not any(event == "Using tool: get_metric_series" for event in events)
+
+
+class SleepStageHealthStore(DummyHealthStore):
+    def list_records(self, data_type, *_args, **_kwargs):
+        if data_type != "sleep":
+            return []
+        return [
+            {
+                "start_time": "2026-08-01T22:00:00+00:00",
+                "end_time": "2026-08-02T06:00:00+00:00",
+                "payload": {
+                    "sleep": {
+                        "stages": [
+                            {
+                                "stage": 5,
+                                "startTime": "2026-08-01T23:00:00+00:00",
+                                "endTime": "2026-08-02T00:30:00+00:00",
+                            },
+                            {
+                                "stage": 6,
+                                "startTime": "2026-08-02T00:30:00+00:00",
+                                "endTime": "2026-08-02T01:30:00+00:00",
+                            },
+                        ]
+                    }
+                },
+            }
+        ]
+
+
+def test_sleep_stage_series_uses_health_connect_codes_and_wakeup_date(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    executor = EnhancedSafeToolExecutor(SleepStageHealthStore(tmp_path / "health.sqlite3"), store)
+    result = executor.execute(
+        "get_sleep_stage_series", {"start": "2026-08-01", "end": "2026-08-02"}
+    )
+
+    assert result["sleep_session_records"] == 1
+    assert result["sessions_with_stages"] == 1
+    assert result["daily_stages"][0]["date"] == "2026-08-02"
+    assert result["daily_stages"][0]["deep"] == 1.5
+    assert result["date_semantics"] == "wake_up_date"
+
+
+def test_agent_analysis_budget_is_fifteen_steps():
+    from google_health_viewer import agent_runtime_v2
+
+    assert agent_runtime_v2.MAX_ANALYSIS_STEPS == 15
