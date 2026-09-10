@@ -158,22 +158,27 @@ def hardware_from_settings(settings: QSettings) -> HardwareInfo:
 
 
 def _hardware_summary(hardware: HardwareInfo) -> str:
-    parts = [_("{ram:.1f} GB RAM", ram=hardware.ram_gb)]
-    if hardware.gpu_name:
-        parts.append(hardware.gpu_name)
-    if hardware.vram_gb is not None:
-        parts.append(_("{vram:.1f} GB VRAM", vram=hardware.vram_gb))
-    return " · ".join(parts)
+    gpu = hardware.gpu_name or _("No dedicated GPU detected")
+    vram = (
+        f"{hardware.vram_gb:.1f} GB"
+        if hardware.vram_gb is not None
+        else _("VRAM unknown")
+    )
+    return (
+        f"{_('RAM')}: {hardware.ram_gb:.1f} GB · "
+        f"{_('GPU')}: {gpu} · {_('VRAM')}: {vram}"
+    )
 
 
 def _refresh_hardware_summary(window, hardware: HardwareInfo) -> None:
     label = getattr(window, "ai_hardware_summary", None)
     if label is None:
         return
-    label.setText(
+    label.setText(_hardware_summary(hardware))
+    label.setToolTip(
         _(
-            "Detected hardware: {hardware}. Models that exceed the safe local memory budget are hidden.",
-            hardware=_hardware_summary(hardware),
+            "VitalChronicle can detect this computer automatically, recommend a local model, "
+            "and keep manual controls available. No hardware information is uploaded."
         )
     )
 
@@ -283,8 +288,9 @@ def install_ai_model_selector(main_window_module) -> None:
 
         banner = QLabel(
             _(
-                "Local AI · Health data and conversations stay on this device. Only models "
-                "compatible with the detected hardware are offered; larger known models are hidden."
+                "These are open-source models that fit this computer. Installed Ollama models "
+                "are shown first. To use another model, install it manually with Ollama and it "
+                "will appear here."
             )
         )
         banner.setObjectName("coverageNeutral")
