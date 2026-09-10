@@ -34,7 +34,7 @@ jobs:
         run: |
           ruff check google_health_viewer/agent_runtime.py tests/test_agent_tool_factory_v2.py
           pytest -q tests/test_agent_tool_factory_v2.py tests/test_i18n.py
-          git diff --exit-code --check
+          git diff --check
       - name: Commit
         run: |
           git config user.name 'github-actions[bot]'
