@@ -158,7 +158,7 @@ def hardware_from_settings(settings: QSettings) -> HardwareInfo:
 
 
 def _hardware_summary(hardware: HardwareInfo) -> str:
-    parts = [_ ("{ram:.1f} GB RAM", ram=hardware.ram_gb)]
+    parts = [_("{ram:.1f} GB RAM", ram=hardware.ram_gb)]
     if hardware.gpu_name:
         parts.append(hardware.gpu_name)
     if hardware.vram_gb is not None:
@@ -240,11 +240,26 @@ def install_ai_model_selector(main_window_module) -> None:
         combo.setEditable(False)
         last_used = str(self.settings.value("ai/model", combo.currentText()) or combo.currentText())
         hardware = hardware_from_settings(self.settings)
+        initial_catalog = tuple(
+            combo.itemText(index)
+            for index in range(combo.count())
+            if combo.itemText(index).strip()
+        )
+        choices = list(optimal_model_options(initial_catalog, hardware))
+        if (
+            last_used
+            and model_fits_hardware(last_used, hardware)
+            and not any(_same_model(last_used, item) for item in choices)
+        ):
+            choices.insert(0, last_used)
+
         combo.blockSignals(True)
         combo.clear()
-        if last_used and model_fits_hardware(last_used, hardware):
-            combo.addItem(last_used)
-            combo.setCurrentText(last_used)
+        combo.addItems(choices)
+        if last_used:
+            index = combo.findText(last_used)
+            if index >= 0:
+                combo.setCurrentIndex(index)
         combo.blockSignals(False)
 
         parent = combo.parentWidget()
