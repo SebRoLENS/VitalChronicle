@@ -29,62 +29,7 @@ jobs:
         run: |
           python scripts/_tmp_fix_agent_followup_generator.py
           python scripts/_tmp_patch_agent_followup.py
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('google_health_viewer/deterministic_context_patch.py')
-          text = path.read_text(encoding='utf-8')
-          old_normalize = '''def _normalize_stage(value: Any) -> str:
-              text = str(value or "UNKNOWN").strip().upper().replace("-", "_").replace(" ", "_")
-              for stage in _KNOWN_STAGES:
-                  if text == stage or text.endswith(f"_{stage}"):
-                      return stage
-              return text or "UNKNOWN"
-          '''
-          new_normalize = '''def _normalize_stage(value: Any) -> str:
-              if value is None or isinstance(value, bool):
-                  return "UNKNOWN"
-              try:
-                  numeric = float(value)
-              except (TypeError, ValueError):
-                  numeric = None
-              if numeric is not None and math.isfinite(numeric) and numeric.is_integer():
-                  health_connect_stages = {
-                      0: "UNKNOWN",
-                      1: "AWAKE",
-                      2: "SLEEPING",
-                      3: "OUT_OF_BED",
-                      4: "LIGHT",
-                      5: "DEEP",
-                      6: "REM",
-                      7: "AWAKE_IN_BED",
-                  }
-                  mapped = health_connect_stages.get(int(numeric))
-                  if mapped:
-                      return mapped
-              text = str(value).strip().upper().replace("-", "_").replace(" ", "_")
-              for stage in _KNOWN_STAGES:
-                  if text == stage or text.endswith(f"_{stage}"):
-                      return stage
-              return text or "UNKNOWN"
-          '''
-          old_intervals = '''        intervals.append((start, end, _normalize_stage(entry.get("type"))))
-          '''
-          new_intervals = '''        stage_value = entry.get("type")
-              if stage_value is None:
-                  stage_value = entry.get("stage")
-              if stage_value is None:
-                  stage_value = entry.get("stageType")
-              intervals.append((start, end, _normalize_stage(stage_value)))
-          '''
-          if old_normalize not in text:
-              raise SystemExit('active sleep-stage normalization marker not found')
-          if old_intervals not in text:
-              raise SystemExit('active sleep-stage interval marker not found')
-          text = text.replace(old_normalize, new_normalize, 1)
-          text = text.replace(old_intervals, new_intervals, 1)
-          path.write_text(text, encoding='utf-8')
-          PY
+          python scripts/_tmp_patch_sleep_stage_runtime.py
           python scripts/update_translations.py
           python - <<'PY'
           import json
@@ -147,27 +92,6 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          python - <<'PY'
-          import inspect
-          from google_health_viewer import analysis
-          from google_health_viewer import deterministic_context_patch as patch
-
-          record = {
-              "start_time": "2026-08-01T22:00:00+00:00",
-              "end_time": "2026-08-02T06:00:00+00:00",
-              "payload": {"sleep": {"stages": [
-                  {"stage": 4, "startTime": "2026-08-01T22:00:00+00:00", "endTime": "2026-08-01T23:00:00+00:00"},
-                  {"stage": 5, "startTime": "2026-08-01T23:00:00+00:00", "endTime": "2026-08-02T00:30:00+00:00"},
-                  {"stageType": 6, "startTime": "2026-08-02T00:30:00+00:00", "endTime": "2026-08-02T02:00:00+00:00"},
-              ]}},
-          }
-          print("PATCH_FILE", patch.__file__)
-          print("NORM", patch._normalize_stage(4), patch._normalize_stage(5), patch._normalize_stage(6))
-          print("INTERVALS", patch._stage_intervals(record, analysis))
-          print("PATCH_TOTALS", patch._sleep_stage_totals(record, analysis))
-          print("INSTALLED", analysis.sleep_stage_points([record]))
-          print(inspect.getsource(patch._intervals_from_entries))
-          PY
           python -m ruff check \
             google_health_viewer/agent_runtime_v2.py \
             google_health_viewer/agent_integration.py \
