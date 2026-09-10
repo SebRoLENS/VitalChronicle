@@ -42,7 +42,11 @@ On startup, built-in tools are synchronized with the registry. If a later VitalC
 
 Calibration is data-first. VitalChronicle calculates personal baselines, coverage, recovery/load context, sleep regularity, and workout history before deciding whether any question is useful. Questions are selected only when an answer can materially reduce uncertainty or improve future personalisation.
 
-Answers are explicit user-reported context. They may teach preferences or associations such as subjective tolerance of a recurring workload, but they are never treated as evidence that a physiological state is medically safe. Subjective feedback cannot override safety-oriented language or convert a wearable-derived estimate into medical clearance.
+Answers are explicit user-reported context. Spontaneous statements such as “I feel tired today” are stored first as dated **self-report events**, not immediately promoted to stable traits. VitalChronicle may queue at most one targeted follow-up when one concise detail would materially improve future interpretation. Repeated, concordant observations can later support a learned association.
+
+Personal context carries time semantics. Stable preferences can remain active, while temporary statements such as “I recently restarted the gym”, a current training goal, or a short-lived schedule change receive a validity window and freshness decay. Expired temporary context remains inspectable locally but is not injected into new agent analyses as current information.
+
+Subjective reports and learned associations are never treated as evidence that a physiological state is medically safe. Subjective feedback cannot override safety-oriented language or convert a wearable-derived estimate into medical clearance.
 
 The **Personal AI** panel allows the user to:
 

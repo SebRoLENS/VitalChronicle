@@ -290,6 +290,33 @@ _TOOL_ROWS = (
         ),
     ),
     (
+        "record_self_report",
+        "Store an explicit dated subjective self-report in the local agent store without promoting it to a stable association.",
+        "agent.self_report",
+        _obj(
+            {
+                "statement": {"type": "string"},
+                "category": {"type": "string"},
+                "observed_at": {"type": "string"},
+                "intensity": {"type": "number", "minimum": 0, "maximum": 10},
+                "context": {"type": "object"},
+            },
+            ("statement",),
+        ),
+    ),
+    (
+        "get_recent_self_reports",
+        "Read recent explicit subjective self-reports from the local agent store.",
+        "agent.self_reports",
+        _obj(
+            {
+                "days": {"type": "integer", "minimum": 1, "maximum": 3650},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                "category": {"type": "string"},
+            }
+        ),
+    ),
+    (
         "search_tool_registry",
         "Search existing tools before creating a new capability.",
         "agent.registry_search",
@@ -351,6 +378,8 @@ _TOOL_ROWS = (
                 "key": {"type": "string"},
                 "statement": {"type": "string"},
                 "evidence": {"type": "object"},
+                "temporal_scope": {"type": "string", "enum": ["stable", "temporary"]},
+                "ttl_days": {"type": "integer", "minimum": 1, "maximum": 3650},
             },
             ("key", "statement"),
         ),
@@ -1314,6 +1343,33 @@ class SafeToolExecutor:
             "validation": "safe declarative operations only",
         }
 
+    def _tool_record_self_report(self, args, *, thread_id=None, **_):
+        item = self.agent_store.record_self_report(
+            str(args.get("statement") or ""),
+            category=str(args.get("category") or "wellbeing"),
+            thread_id=thread_id,
+            observed_at=str(args.get("observed_at") or "") or None,
+            intensity=args.get("intensity")
+            if isinstance(args.get("intensity"), (int, float))
+            else None,
+            context=args.get("context") if isinstance(args.get("context"), dict) else {},
+        )
+        return {
+            "stored": bool(item),
+            "report": item,
+            "rule": "A single subjective report is a dated event, not a stable learned association.",
+        }
+
+    def _tool_get_recent_self_reports(self, args, **_):
+        return {
+            "reports": self.agent_store.recent_self_reports(
+                days=max(1, min(3650, int(args.get("days") or 30))),
+                limit=max(1, min(200, int(args.get("limit") or 50))),
+                category=str(args.get("category") or "").strip() or None,
+            ),
+            "rule": "Use recent self-reports as dated subjective context; do not treat them as diagnoses or stable traits.",
+        }
+
     def _tool_get_user_model(self, args, **_):
         return {
             "entries": self.agent_store.user_model(),
@@ -1351,11 +1407,17 @@ class SafeToolExecutor:
             for term in ("medically safe", "safe for you", "no risk", "cannot harm")
         ):
             raise ValueError("Subjective personalisation cannot become a medical safety claim")
+        evidence = dict(args.get("evidence") if isinstance(args.get("evidence"), dict) else {})
+        temporal_scope = str(args.get("temporal_scope") or "").strip().lower()
+        if temporal_scope:
+            evidence["temporal_scope"] = temporal_scope
+        if isinstance(args.get("ttl_days"), int):
+            evidence["ttl_days"] = int(args["ttl_days"])
         return {
             "learned": self.agent_store.learn_user_model(
                 str(args.get("key") or ""),
                 statement,
-                evidence=args.get("evidence") if isinstance(args.get("evidence"), dict) else {},
+                evidence=evidence,
                 source="agent",
             )
         }
