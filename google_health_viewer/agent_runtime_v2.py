@@ -261,6 +261,7 @@ class AgentRuntime(base_rt.AgentRuntime):
         answer_callback: Callable[[str], None] | None,
     ) -> str:
         event(_("Agent: finalising with the evidence already collected…"))
+        self._telemetry_phase = "agent final"
         final_messages = [
             *messages,
             {
@@ -326,6 +327,7 @@ class AgentRuntime(base_rt.AgentRuntime):
             if event_callback:
                 event_callback(text)
 
+        self._reset_agent_telemetry(prompt_callback)
         safe_history = [
             {"role": item["role"], "content": item["content"]}
             for item in (history or [])[-12:]
@@ -485,6 +487,7 @@ class AgentRuntime(base_rt.AgentRuntime):
                 )
             )
             active_schemas = _without_factory_creation(schemas) if factory_disabled else schemas
+            self._telemetry_phase = f"agent step {analysis_steps + 1}"
             if factory_gate_required and not factory_disabled:
                 active_schemas = _only_named_tools(active_schemas, {"create_learned_tool"})
                 event(
@@ -820,13 +823,15 @@ class AgentRuntime(base_rt.AgentRuntime):
                 elif name == "ask_user_feedback" and result.get("queued"):
                     event(_("Targeted feedback question queued for the user."))
 
+                tool_text = base_rt._json_text(result)
                 messages.append(
                     {
                         "role": "tool",
                         "tool_name": name,
-                        "content": base_rt._json_text(result),
+                        "content": tool_text,
                     }
                 )
+                self._emit_agent_trace(name, "Agent", tool_text, kind="tool_result")
 
             if not repair_turn or productive_tool_call:
                 analysis_steps += 1
