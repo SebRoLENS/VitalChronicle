@@ -184,6 +184,11 @@ def test_learned_tool_can_answer_event_response_and_recovery(tmp_path):
     assert answer["response_matches"] == 2
     assert answer["response_rate_percent"] == pytest.approx(100.0)
     assert answer["mean_recovery_days"] == pytest.approx(1.0)
+    assert answer["mean_recovery_days_after_episode"] == pytest.approx(2.0)
+    assert answer["median_recovery_days_after_episode"] == pytest.approx(2.0)
+    assert answer["trigger_episodes"] == 2
+    assert answer["can_estimate_typical_recovery"] is False
+    assert answer["sample_quality"] == "insufficient_for_typical_estimate"
 
 
 def test_complex_question_is_flagged_without_explicit_create_request():
@@ -950,3 +955,12 @@ def test_comprehensive_analysis_forces_personalized_final_synthesis(tmp_path):
     joined = "\n".join(str(item.get("content") or "") for item in runtime.final_messages)
     assert "PERSONALISATION CHECKPOINT" in joined
     assert "cycling commute and strength training" in joined
+
+
+def test_sleep_stage_result_contract_separates_deep_and_total_sleep():
+    executor = StubToolExecutor(DummyHealthStore(Path(".")), AgentStore(Path(":memory:")))
+    result = executor._tool_get_sleep_stage_series({})["daily_stages"]
+    # The stub intentionally models deep only; the production contract documents
+    # total_sleep separately and learned extraction must choose the requested field.
+    assert result[0]["deep"] == 1.5
+    assert "total_sleep" not in result[0]
