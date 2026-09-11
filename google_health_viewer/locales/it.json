@@ -375,6 +375,7 @@
   "Minutes by intensity": "Minuti per intensità",
   "Mistral API key": "Chiave API Mistral",
   "Mistral API key is not configured.": "La chiave API Mistral non è configurata.",
+  "Mistral API key not configured.": "La chiave API Mistral non è configurata.",
   "Mistral online AI": "AI online Mistral",
   "Mistral online AI is ready.": "L'AI online Mistral è pronta.",
   "Mistral request failed: {detail}": "Richiesta Mistral non riuscita: {detail}",
