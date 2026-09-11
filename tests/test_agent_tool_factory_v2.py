@@ -964,3 +964,35 @@ def test_sleep_stage_result_contract_separates_deep_and_total_sleep():
     description = EXTRA_BUILTIN_SPEC["description"]
     assert "deep-sleep duration only" in description
     assert "total_sleep" in description
+
+
+def test_factory_failure_log_contains_pipeline_diagnostics(tmp_path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    runtime = RepairRuntime(DummyHealthStore(tmp_path / "health.sqlite3"), store)
+
+    runtime.analyze(
+        model="test",
+        snapshot={},
+        question=(
+            "Quando un valore supera la baseline del 30%, quanto spesso il giorno successivo "
+            "scende del 20% e quanto impiega a recuperare?"
+        ),
+        history=[],
+        max_tokens=1024,
+        model_context_limit=None,
+        performance_profile="standard",
+        thread_id="diagnostic-thread",
+    )
+
+    failures = [
+        item for item in store.recent_tool_events()
+        if item["event_type"] == "tool_factory_repair"
+    ]
+    assert len(failures) == 3
+    latest = failures[-1]
+    assert latest["payload"]["attempt"] == 3
+    assert latest["payload"]["status"] == "invalid_pipeline"
+    assert latest["payload"]["pipeline_steps"] == 1
+    assert latest["payload"]["pipeline_ops"] == ["invented_filter"]
+    assert "Unsupported learned-tool operation" in latest["payload"]["error"]
+    assert latest["payload"]["allowed_operations"]
