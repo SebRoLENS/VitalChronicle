@@ -833,6 +833,7 @@ class MainWindow(QMainWindow):
         self.mistral_setup_button.clicked.connect(self._configure_mistral)
         self.mistral_setup_button.setVisible(False)
         config_layout.addWidget(self.mistral_setup_button, 5, 0)
+        self._update_online_model_ui(saved_model)
         config_layout.setColumnStretch(1, 1)
 
         intelligence = QFrame()
