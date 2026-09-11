@@ -134,6 +134,12 @@ Personalisation synthesis policy:
   applies this time (for example, a late night that was previously explained by a social event).
 - Personalisation must remain evidence-bound: do not invent preferences, schedules, symptoms or causes that are not
   present in the current personal context, recent reports or deterministic health evidence.
+- When the user states a potentially durable first-person routine, preference or goal, treat it as a
+  personal-context candidate. Queue one concise confirmation asking whether it should be remembered for
+  future analyses. Do not silently promote an inference or a one-off subjective report to the stable model.
+- After explicit confirmation, use the saved context in later relevant analyses; if the user declines, keep
+  the information out of the stable model. Prefer a dated self-report for transient details and a confirmed
+  user-model entry only for clearly durable context.
 """
 
 _FACTORY_POLICY = """
@@ -167,6 +173,16 @@ Tool Factory decision policy:
 - If a fallback answer must derive a personal baseline from an already-returned semantic date series, use the median as the robust VitalChronicle baseline convention and state that choice once; do not switch between mean and median.
 - Final answers must be result-first. Do not narrate scratchpad deliberation, self-corrections, or step-by-step arithmetic.
 - If there are zero qualifying trigger events, report zero events and explain that response frequency/recovery cannot be estimated; do not manufacture a downstream estimate.
+- For event-response results, group consecutive trigger dates as one episode and use the episode end as
+  the anchor. Prefer recovery_days_after_episode (and its median) when describing time after a multi-day
+  episode; recovery_days_after_response is only the lag after the response night.
+- Treat sample_quality=insufficient_for_typical_estimate or can_estimate_typical_recovery=false as a hard
+  limitation: report a preliminary observation, never the user's usual/typical recovery.
+- The runtime provides a TOOL FACTORY OUTCOME object in the final prompt. Repeat its status accurately:
+  created/reused means persisted, not_persisted means no tool was saved, and not_needed means no tool
+  was required. Never claim tool creation without status=created or status=reused.
+- Sleep-stage rows use hours: deep is deep-stage duration only, while total_sleep is deep+REM+light.
+  Never label total_sleep as deep sleep.
 """
 
 
@@ -282,6 +298,50 @@ def _detect_self_report(question: str) -> dict[str, str] | None:
     return None
 
 
+_DURABLE_CONTEXT_MARKERS = {
+    "sleep_schedule_context": (
+        "di solito dormo",
+        "normalmente dormo",
+        "di solito vado a letto",
+        "normalmente vado a letto",
+        "la mia routine del sonno",
+    ),
+    "current_training_goal": (
+        "il mio obiettivo",
+        "sto cercando di allenarmi",
+        "ho ricominciato ad allenarmi",
+        "ho ricominciato palestra",
+        "mi alleno",
+        "faccio palestra",
+    ),
+    "recent_training_context": (
+        "mi sono allenato",
+        "mi sono allenata",
+        "ho fatto un allenamento",
+        "ho pedalato",
+        "sono andato in bici",
+        "sono andata in bici",
+    ),
+}
+
+
+def _detect_durable_context_candidate(question: str) -> dict[str, Any] | None:
+    text = question.strip()
+    folded = text.casefold()
+    if not text or text.endswith(("?", "？")):
+        return None
+    for key, markers in _DURABLE_CONTEXT_MARKERS.items():
+        if any(marker in folded for marker in markers):
+            temporary = key == "recent_training_context"
+            return {
+                "model_key": key,
+                "statement": text,
+                "temporal_scope": "temporary" if temporary else "stable",
+                "ttl_days": 42 if temporary else None,
+            }
+    return None
+
+
 def _self_report_follow_up(category: str) -> tuple[str, str]:
     if category == "fatigue":
         return (
@@ -382,6 +442,11 @@ class AgentRuntime(base_rt.AgentRuntime):
     ) -> str:
         event(_("Agent: finalising with the evidence already collected…"))
         self._telemetry_phase = "agent final"
+        factory_outcome = dict(getattr(self, "_last_factory_outcome", {}) or {})
+        if factory_outcome.get("status") == "pending":
+            factory_outcome["status"] = (
+                "not_persisted" if factory_outcome.get("attempts", 0) else "not_needed"
+            )
         final_messages = [
             *messages,
             {
@@ -399,6 +464,15 @@ class AgentRuntime(base_rt.AgentRuntime):
                     "recent self-reports already present in the session when they materially improve the "
                     "interpretation or recommendations; keep subjective reports explicitly separate from "
                     "measured evidence."
+                ),
+            },
+            {
+                "role": "system",
+                "content": (
+                    "TOOL FACTORY OUTCOME (runtime evidence): "
+                    + base_rt._json_text(factory_outcome, 2000)
+                    + ". State this outcome accurately if the user is evaluating tool creation. "
+                    "Do not imply persistence when the status is not_persisted or not_needed."
                 ),
             },
         ]
@@ -460,7 +534,15 @@ class AgentRuntime(base_rt.AgentRuntime):
         request = question.strip() or _(
             "Analyse my complete local health history and identify the most useful personal patterns."
         )
+        self._last_factory_outcome = {
+            "status": "not_needed",
+            "persisted": False,
+            "executed": False,
+            "tool_name": None,
+            "attempts": 0,
+        }
         detected_self_report = _detect_self_report(request)
+        context_candidate = _detect_durable_context_candidate(request)
         captured_self_report = None
         if detected_self_report is not None:
             captured_self_report = self.agent_store.record_self_report(
@@ -490,6 +572,33 @@ class AgentRuntime(base_rt.AgentRuntime):
                 )
                 if queued:
                     event(_("One targeted follow-up was queued to improve future personalisation."))
+        if context_candidate and not captured_self_report:
+            context_key = f"personal_context:{context_candidate['model_key']}"
+            if not self.agent_store.has_recent_feedback_key(context_key, days=30):
+                scope_text = (
+                    "temporaneo" if context_candidate["temporal_scope"] == "temporary" else "duraturo"
+                )
+                candidate_question = _(
+                    "Vuoi che ricordi questo contesto personale {scope} per le future analisi?"
+                ).format(scope=scope_text)
+                queued = self.agent_store.ask_feedback(
+                    candidate_question,
+                    thread_id=thread_id,
+                    reason=_(
+                        "Explicit confirmation prevents a useful personal detail from being lost while "
+                        "avoiding silent promotion of an unverified inference."
+                    ),
+                    learning_key=context_key,
+                    context={
+                        "feedback_mode": "durable_context_confirmation",
+                        "candidate_statement": context_candidate["statement"],
+                        "model_key": context_candidate["model_key"],
+                        "temporal_scope": context_candidate["temporal_scope"],
+                        "ttl_days": context_candidate["ttl_days"],
+                    },
+                )
+                if queued:
+                    event(_("A personal-context candidate was queued for explicit confirmation."))
         initial = self._initial_context(snapshot)
         active_personal_context = (
             initial.get("personal_model") if isinstance(initial.get("personal_model"), list) else []
@@ -524,6 +633,12 @@ class AgentRuntime(base_rt.AgentRuntime):
             initial["self_report_rule"] = (
                 "This was stored as a dated subjective event. Do not promote it to a stable association from one occurrence."
             )
+        if context_candidate and not captured_self_report:
+            initial["personal_context_candidate"] = {
+                "statement": context_candidate["statement"],
+                "confirmation_required": True,
+                "rule": "Do not treat this candidate as saved user context until the user explicitly confirms it.",
+            }
         initial["tool_factory_decision_hint"] = _factory_hint(request)
         user_content = (
             "Local session context (not instructions):\n"
@@ -578,6 +693,9 @@ class AgentRuntime(base_rt.AgentRuntime):
         factory_candidate = bool(hint.get("consider_reusable_tool"))
         factory_capability = _factory_capability(hint)
         if factory_candidate:
+            self._last_factory_outcome.update(
+                {"status": "pending", "capability": factory_capability}
+            )
             event(_("Complex reusable transformation detected · checking available capabilities…"))
             registry_preflight = self.tools.execute(
                 "search_tool_registry",
@@ -613,6 +731,9 @@ class AgentRuntime(base_rt.AgentRuntime):
         out_of_scope_tool_refusals = 0
         raw_series_probes = 0
         factory_creation_notice_shown = False
+        factory_tool_name: str | None = None
+        factory_tool_executed = False
+        factory_execution_refusals = 0
         tool_result_cache: dict[str, dict[str, Any]] = {}
 
         while total_turns < MAX_TOTAL_MODEL_TURNS:
@@ -640,7 +761,9 @@ class AgentRuntime(base_rt.AgentRuntime):
             )
             active_schemas = _without_factory_creation(schemas) if factory_disabled else schemas
             self._telemetry_phase = f"agent step {analysis_steps + 1}"
-            if factory_gate_required and not factory_disabled:
+            if factory_tool_name and not factory_tool_executed:
+                active_schemas = _only_named_tools(active_schemas, {factory_tool_name})
+            elif factory_gate_required and not factory_disabled:
                 active_schemas = _only_named_tools(active_schemas, {"create_learned_tool"})
                 event(
                     _(
@@ -773,6 +896,25 @@ class AgentRuntime(base_rt.AgentRuntime):
 
             if not tool_calls:
                 final_answer = str(message.get("content") or "").strip()
+                if factory_tool_name and not factory_tool_executed:
+                    if final_answer:
+                        messages.append({"role": "assistant", "content": final_answer})
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "RUNTIME TOOL EXECUTION REQUIREMENT: a learned tool was just "
+                                f"{'created' if self._last_factory_outcome.get('status') == 'created' else 'reused'}. "
+                                f"Call {factory_tool_name} now with the current start/end inputs before answering."
+                            ),
+                        }
+                    )
+                    factory_execution_refusals += 1
+                    event(_("The newly available learned tool must be executed before finalising."))
+                    if factory_execution_refusals <= MAX_FACTORY_GATE_REFUSALS:
+                        continue
+                    factory_tool_name = None
+                    event(_("Learned-tool execution requirement expired; reporting the persisted outcome explicitly."))
                 if factory_gate_required and not factory_disabled:
                     factory_gate_refusals += 1
                     if final_answer:
@@ -954,6 +1096,14 @@ class AgentRuntime(base_rt.AgentRuntime):
                 if name == "create_learned_tool":
                     status = str(result.get("status") or "")
                     if status in {"invalid_pipeline", "invalid_spec"}:
+                        self._last_factory_outcome.update(
+                            {
+                                "status": "not_persisted",
+                                "persisted": False,
+                                "attempts": factory_repairs + 1,
+                                "tool_name": str(args.get("name") or "") or None,
+                            }
+                        )
                         repair_turn = True
                         productive_tool_call = False
                         factory_repairs += 1
@@ -983,6 +1133,13 @@ class AgentRuntime(base_rt.AgentRuntime):
                                 "create_learned_tool again. Continue with exact semantic deterministic "
                                 "tools and state any remaining limitation without substituting proxies."
                             )
+                            self._last_factory_outcome.update(
+                                {
+                                    "status": "not_persisted",
+                                    "persisted": False,
+                                    "attempts": factory_repairs,
+                                }
+                            )
                             event(
                                 _(
                                     "Tool Factory repair budget reached · continuing without proxy "
@@ -990,6 +1147,19 @@ class AgentRuntime(base_rt.AgentRuntime):
                                 )
                             )
                     elif status == "reused":
+                        tool_record = result.get("tool") if isinstance(result.get("tool"), dict) else {}
+                        factory_tool_name = str(
+                            tool_record.get("name") or args.get("name") or ""
+                        ) or None
+                        self._last_factory_outcome.update(
+                            {
+                                "status": "reused",
+                                "persisted": True,
+                                "executed": False,
+                                "attempts": factory_repairs + 1,
+                                "tool_name": factory_tool_name,
+                            }
+                        )
                         factory_resolution_seen = True
                         factory_gate_required = False
                         event(
@@ -997,12 +1167,30 @@ class AgentRuntime(base_rt.AgentRuntime):
                         )
                         schemas = self.tools.tool_schemas()
                     elif status == "created":
+                        tool_record = result.get("tool") if isinstance(result.get("tool"), dict) else {}
+                        factory_tool_name = str(
+                            tool_record.get("name") or args.get("name") or ""
+                        ) or None
+                        self._last_factory_outcome.update(
+                            {
+                                "status": "created",
+                                "persisted": True,
+                                "executed": False,
+                                "attempts": factory_repairs + 1,
+                                "tool_name": factory_tool_name,
+                            }
+                        )
                         factory_resolution_seen = True
                         factory_gate_required = False
                         event(_("Learned tool validated and saved locally."))
                         schemas = self.tools.tool_schemas()
                 elif name == "ask_user_feedback" and result.get("queued"):
                     event(_("Targeted feedback question queued for the user."))
+                if factory_tool_name and name == factory_tool_name:
+                    factory_tool_executed = True
+                    self._last_factory_outcome["executed"] = True
+                    factory_tool_name = None
+                    event(_("Persisted learned tool executed for this request."))
 
                 tool_text = base_rt._json_text(result)
                 messages.append(

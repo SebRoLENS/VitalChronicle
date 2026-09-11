@@ -15,7 +15,10 @@ from google_health_viewer.agent_runtime_v2 import (
     _is_comprehensive_analysis,
 )
 from google_health_viewer.agent_store import AgentStore
-from google_health_viewer.agent_tool_factory import EnhancedSafeToolExecutor
+from google_health_viewer.agent_tool_factory import (
+    EXTRA_BUILTIN_SPEC,
+    EnhancedSafeToolExecutor,
+)
 from google_health_viewer.ai_engine import TOKEN_USAGE_PREFIX
 
 
@@ -184,6 +187,11 @@ def test_learned_tool_can_answer_event_response_and_recovery(tmp_path):
     assert answer["response_matches"] == 2
     assert answer["response_rate_percent"] == pytest.approx(100.0)
     assert answer["mean_recovery_days"] == pytest.approx(1.0)
+    assert answer["mean_recovery_days_after_episode"] == pytest.approx(2.0)
+    assert answer["median_recovery_days_after_episode"] == pytest.approx(2.0)
+    assert answer["trigger_episodes"] == 2
+    assert answer["can_estimate_typical_recovery"] is False
+    assert answer["sample_quality"] == "insufficient_for_typical_estimate"
 
 
 def test_complex_question_is_flagged_without_explicit_create_request():
@@ -292,6 +300,18 @@ class FactoryGateRuntime(AgentRuntime):
                     }
                 ],
             }
+        if self.turn == 5:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "forced_factory_tool",
+                            "arguments": {},
+                        }
+                    }
+                ],
+            }
         return {"content": "Risposta finale dopo la decisione della Tool Factory."}
 
 
@@ -316,8 +336,9 @@ def test_complex_query_stops_repeated_raw_metric_probing_and_forces_factory(tmp_
     )
 
     assert answer.startswith("Risposta finale")
-    assert runtime.turn == 5
+    assert runtime.turn == 6
     assert runtime.available_by_turn[3] == {"create_learned_tool"}
+    assert runtime.available_by_turn[4] == {"forced_factory_tool"}
     assert any("raw-series probing stopped" in event.lower() for event in events)
     assert any("registry checked" in event.lower() for event in events)
 
@@ -360,6 +381,18 @@ class GateRefusalRuntime(AgentRuntime):
                     }
                 ],
             }
+        if self.turn == 7:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "gate_resolved_tool",
+                            "arguments": {},
+                        }
+                    }
+                ],
+            }
         return {"content": "Risposta finale dopo la creazione del tool."}
 
 
@@ -382,9 +415,10 @@ def test_factory_gate_rejects_direct_answer_until_capability_is_resolved(tmp_pat
         event_callback=events.append,
     )
     assert answer.startswith("Risposta finale dopo")
-    assert runtime.turn == 7
+    assert runtime.turn == 8
     assert runtime.available_by_turn[4] == {"create_learned_tool"}
     assert runtime.available_by_turn[5] == {"create_learned_tool"}
+    assert runtime.available_by_turn[6] == {"gate_resolved_tool"}
     assert any("direct answer blocked" in event.lower() for event in events)
 
 
@@ -420,6 +454,18 @@ class ToolNameAsMetricRuntime(AgentRuntime):
                                 "capability": "analysis.composed.personal_baseline.temporal_event_response",
                                 "pipeline": [{"op": "return"}],
                             },
+                        }
+                    }
+                ],
+            }
+        if self.turn == 3:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "semantic_metric_router",
+                            "arguments": {},
                         }
                     }
                 ],
@@ -912,3 +958,9 @@ def test_comprehensive_analysis_forces_personalized_final_synthesis(tmp_path):
     joined = "\n".join(str(item.get("content") or "") for item in runtime.final_messages)
     assert "PERSONALISATION CHECKPOINT" in joined
     assert "cycling commute and strength training" in joined
+
+
+def test_sleep_stage_result_contract_separates_deep_and_total_sleep():
+    description = EXTRA_BUILTIN_SPEC["description"]
+    assert "deep-sleep duration only" in description
+    assert "total_sleep" in description

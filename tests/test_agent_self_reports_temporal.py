@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from google_health_viewer.agent_runtime_v2 import _detect_self_report
+from google_health_viewer.agent_runtime_v2 import (
+    _detect_durable_context_candidate,
+    _detect_self_report,
+)
 from google_health_viewer.agent_store import AgentStore
 
 
@@ -81,3 +84,40 @@ def test_feedback_key_antispam(tmp_path: Path):
     assert store.has_recent_feedback_key("self_report_detail:fatigue") is False
     store.ask_feedback("Che tipo di stanchezza?", learning_key="self_report_detail:fatigue")
     assert store.has_recent_feedback_key("self_report_detail:fatigue") is True
+
+
+def test_durable_context_is_saved_only_after_explicit_confirmation(tmp_path: Path):
+    candidate = _detect_durable_context_candidate("Di solito vado a letto alle 23")
+    assert candidate is not None
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    feedback = store.ask_feedback(
+        "Vuoi che ricordi questo contesto personale duraturo?",
+        learning_key="personal_context:sleep_schedule_context",
+        context={
+            "feedback_mode": "durable_context_confirmation",
+            "candidate_statement": candidate["statement"],
+            "model_key": candidate["model_key"],
+            "temporal_scope": candidate["temporal_scope"],
+        },
+    )
+    store.answer_feedback(feedback["feedback_id"], "sì")
+    model = store.user_model()
+    assert len(model) == 1
+    assert model[0]["key"] == "sleep_schedule_context"
+    assert model[0]["statement"] == "Di solito vado a letto alle 23"
+
+
+def test_durable_context_decline_does_not_enter_user_model(tmp_path: Path):
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    feedback = store.ask_feedback(
+        "Vuoi che ricordi questo contesto personale duraturo?",
+        learning_key="personal_context:sleep_schedule_context",
+        context={
+            "feedback_mode": "durable_context_confirmation",
+            "candidate_statement": "Di solito vado a letto alle 23",
+            "model_key": "sleep_schedule_context",
+            "temporal_scope": "stable",
+        },
+    )
+    store.answer_feedback(feedback["feedback_id"], "no")
+    assert store.user_model() == []
