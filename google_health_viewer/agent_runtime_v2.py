@@ -321,17 +321,24 @@ def _detect_durable_context_candidate(question: str) -> dict[str, Any] | None:
         folded = sentence.casefold()
         if sentence.endswith(("?", "？")):
             continue
-        for key, markers in _DURABLE_CONTEXT_MARKERS.items():
-            if any(marker in folded for marker in markers):
-                spec = PERSONAL_CONTEXT_KEY_SPECS.get(key, {})
-                scope = str(spec.get("default_scope") or "stable")
-                ttl_days = spec.get("ttl_days") if scope == "temporary" else None
-                return {
-                    "model_key": key,
-                    "statement": sentence,
-                    "temporal_scope": scope,
-                    "ttl_days": ttl_days,
-                }
+        matches = [
+            (len(marker), key)
+            for key, markers in _DURABLE_CONTEXT_MARKERS.items()
+            for marker in markers
+            if marker in folded
+        ]
+        if not matches:
+            continue
+        _, key = max(matches)
+        spec = PERSONAL_CONTEXT_KEY_SPECS.get(key, {})
+        scope = str(spec.get("default_scope") or "stable")
+        ttl_days = spec.get("ttl_days") if scope == "temporary" else None
+        return {
+            "model_key": key,
+            "statement": sentence,
+            "temporal_scope": scope,
+            "ttl_days": ttl_days,
+        }
     return None
 
 
@@ -593,6 +600,16 @@ class AgentRuntime(base_rt.AgentRuntime):
                 if queued:
                     event(_("A personal-context candidate was queued for explicit confirmation."))
         initial = self._initial_context(snapshot)
+        initial["personal_context_key_catalogue"] = [
+            {
+                "key": key,
+                "description": str(spec.get("description") or ""),
+                "topics": list(spec.get("topics") or ()),
+                "default_scope": str(spec.get("default_scope") or "stable"),
+                "requires_explicit_confirmation": True,
+            }
+            for key, spec in PERSONAL_CONTEXT_KEY_SPECS.items()
+        ]
         active_personal_context = (
             initial.get("personal_model") if isinstance(initial.get("personal_model"), list) else []
         )
