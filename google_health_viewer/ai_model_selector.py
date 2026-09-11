@@ -224,6 +224,7 @@ def _rebuild_combo(window, status) -> None:
     window._known_ai_models = set(status.models)
     window._refresh_ai_model_styles()
     selected = combo.currentText().strip()
+    window._update_online_model_ui(selected)
     if selected:
         window._update_ai_model_hint(selected)
         window.pull_button.setEnabled(not window._ai_model_is_installed(selected))
@@ -267,6 +268,7 @@ def install_ai_model_selector(main_window_module) -> None:
             if index >= 0:
                 combo.setCurrentIndex(index)
         combo.blockSignals(False)
+        self._update_online_model_ui(combo.currentText())
 
         parent = combo.parentWidget()
         layout = parent.layout() if parent is not None else None
@@ -313,6 +315,7 @@ def install_ai_model_selector(main_window_module) -> None:
         original_model_changed(self, model)
         if model.strip() and hasattr(self, "pull_button"):
             self.pull_button.setEnabled(not self._ai_model_is_installed(model))
+        self._update_online_model_ui(model)
 
     def ai_status_ready(self, status) -> None:
         original_status_ready(self, status)
