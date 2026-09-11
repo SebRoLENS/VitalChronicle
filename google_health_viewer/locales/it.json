@@ -773,5 +773,12 @@
   "☕ Support development": "☕ Sostieni lo sviluppo",
   "✓ A valid OAuth client is already stored. Select a JSON only to replace it.": "✓ È già memorizzato un client OAuth valido. Seleziona un JSON solo per sostituirlo.",
   "✓ Valid OAuth client. The redirect URI is correct.": "✓ Client OAuth valido. L'URI di reindirizzamento è corretto.",
-  "✕ This JSON cannot be used: {error}": "✕ Questo JSON non può essere utilizzato: {error}"
+  "✕ This JSON cannot be used: {error}": "✕ Questo JSON non può essere utilizzato: {error}",
+  "Personal context question": "Domanda sul contesto personale",
+  "ACTION REQUIRED": "AZIONE RICHIESTA",
+  "Question": "Domanda",
+  "Write your answer in the field below. This question is separate from the analysis above.": "Scrivi la risposta nel campo sottostante. Questa domanda è separata dall'analisi riportata sopra.",
+  "Your answer": "La tua risposta",
+  "Save answer": "Salva risposta",
+  "Skip question": "Salta domanda"
 }
