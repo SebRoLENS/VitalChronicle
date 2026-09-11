@@ -747,7 +747,6 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                 offset = int(step.get("response_offset_days") or 1)
                 max_days = int(step.get("max_recovery_days") or 14)
                 evaluated = 0
-                matches: list[dict[str, Any]] = []
                 if baseline is not None:
                     threshold = (
                         baseline * (1 + response_percent / 100)
