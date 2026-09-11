@@ -46,6 +46,13 @@ from .ai_conversations import ConversationStore
 from .ai_insights import build_ai_ready_snapshot
 from .ai_model_catalog import model_description
 from .ai_setup import AISetupDialog
+from .online_ai import (
+    MISTRAL_MODEL,
+    MistralSetupDialog,
+    has_mistral_consent,
+    is_mistral_model,
+    mistral_api_key,
+)
 from .analysis import (
     available_metrics,
     build_daily_progress_snapshot,
@@ -774,6 +781,7 @@ class MainWindow(QMainWindow):
         config_layout.addWidget(QLabel(_("Local model")), 2, 0)
         self.ai_model_combo = QComboBox()
         self.ai_model_combo.setEditable(True)
+        self.ai_model_combo.addItem(MISTRAL_MODEL)
         self.ai_model_combo.addItems(MODEL_OPTIONS)
         saved_model = str(
             self.settings.value("ai/model", recommended_model(saved_profile))
@@ -1490,6 +1498,15 @@ class MainWindow(QMainWindow):
         snapshot["analysis_scope"] = "selected_interval"
         return snapshot, resolved_period
 
+    def _prepare_online_ai_request(self) -> bool:
+        """Show the Mistral key guide and data-sharing consent before online use."""
+        if not is_mistral_model(self.ai_model_combo.currentText()):
+            return True
+        if mistral_api_key() and has_mistral_consent():
+            return True
+        dialog = MistralSetupDialog(self)
+        return dialog.exec() == dialog.DialogCode.Accepted
+
     def _ensure_ai_chat_window(self) -> AIChatWindow:
         if self.ai_chat_window is None:
             self.ai_chat_window = AIChatWindow(
@@ -1500,6 +1517,7 @@ class MainWindow(QMainWindow):
                 model_provider=lambda: self.ai_model_combo.currentText(),
                 tokens_provider=self._selected_ai_tokens,
                 context_limit_provider=lambda: self._model_token_limit,
+                online_prepare_provider=self._prepare_online_ai_request,
                 parent=self,
             )
             self.ai_chat_window.threads_changed.connect(self.refresh_ai_recent_threads)
