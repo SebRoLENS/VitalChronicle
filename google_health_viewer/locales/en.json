@@ -773,5 +773,12 @@
   "☕ Support development": "☕ Support development",
   "✓ A valid OAuth client is already stored. Select a JSON only to replace it.": "✓ A valid OAuth client is already stored. Select a JSON only to replace it.",
   "✓ Valid OAuth client. The redirect URI is correct.": "✓ Valid OAuth client. The redirect URI is correct.",
-  "✕ This JSON cannot be used: {error}": "✕ This JSON cannot be used: {error}"
+  "✕ This JSON cannot be used: {error}": "✕ This JSON cannot be used: {error}",
+  "Personal context question": "Personal context question",
+  "ACTION REQUIRED": "ACTION REQUIRED",
+  "Question": "Question",
+  "Write your answer in the field below. This question is separate from the analysis above.": "Write your answer in the field below. This question is separate from the analysis above.",
+  "Your answer": "Your answer",
+  "Save answer": "Save answer",
+  "Skip question": "Skip question"
 }
