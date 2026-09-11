@@ -11,8 +11,8 @@ from .api import ApiError, GoogleHealthClient
 from .constants import DATA_TYPES
 from .i18n import _
 from .local_ai import AIAnalysisCancelled, LocalAIError, OllamaClient
-from .online_ai import MistralClient, is_mistral_model, mistral_api_key
 from .oauth import CredentialStore, OAuthError, authenticate
+from .online_ai import MistralClient, is_mistral_model, mistral_api_key
 from .self_update import UpdateTarget, install_update
 from .storage import HealthStore
 from .updates import fetch_latest_release
@@ -220,11 +220,9 @@ class AIStatusThread(QThread):
 
     def run(self) -> None:
         self.completed.emit(
-            (
-                MistralClient(model=self.model, api_key=mistral_api_key()).status()
-                if is_mistral_model(self.model)
-                else OllamaClient(model=self.model, hardware_profile=self.hardware_profile).status()
-            )
+            MistralClient(model=self.model, api_key=mistral_api_key()).status()
+            if is_mistral_model(self.model)
+            else OllamaClient(model=self.model, hardware_profile=self.hardware_profile).status()
         )
 
 
