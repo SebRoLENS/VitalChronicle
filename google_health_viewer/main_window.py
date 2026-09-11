@@ -47,13 +47,6 @@ from .ai_conversations import ConversationStore
 from .ai_insights import build_ai_ready_snapshot
 from .ai_model_catalog import model_description
 from .ai_setup import AISetupDialog
-from .online_ai import (
-    MISTRAL_MODEL,
-    MistralSetupDialog,
-    has_mistral_consent,
-    is_mistral_model,
-    mistral_api_key,
-)
 from .analysis import (
     available_metrics,
     build_daily_progress_snapshot,
@@ -102,6 +95,13 @@ from .local_ai import (
     system_prompt,
 )
 from .oauth import CredentialStore
+from .online_ai import (
+    MISTRAL_MODEL,
+    MistralSetupDialog,
+    has_mistral_consent,
+    is_mistral_model,
+    mistral_api_key,
+)
 from .self_update import launch_windows_helper, select_update_target
 from .setup_wizard import AuthorizationHelpDialog, SetupWizard
 from .storage import HealthStore
