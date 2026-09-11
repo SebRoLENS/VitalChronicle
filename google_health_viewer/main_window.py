@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDateEdit,
+    QDialog,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -1505,7 +1506,7 @@ class MainWindow(QMainWindow):
         if mistral_api_key() and has_mistral_consent():
             return True
         dialog = MistralSetupDialog(self)
-        return dialog.exec() == dialog.DialogCode.Accepted
+        return dialog.exec() == QDialog.DialogCode.Accepted
 
     def _ensure_ai_chat_window(self) -> AIChatWindow:
         if self.ai_chat_window is None:
