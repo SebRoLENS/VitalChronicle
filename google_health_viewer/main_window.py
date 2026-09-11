@@ -789,6 +789,7 @@ class MainWindow(QMainWindow):
         )
         self.ai_model_combo.setCurrentText(saved_model)
         self.ai_model_combo.currentTextChanged.connect(self._ai_model_changed)
+        self.ai_model_combo.currentTextChanged.connect(self._update_online_model_ui)
         config_layout.addWidget(self.ai_model_combo, 2, 1)
         check = QPushButton(_("Check"))
         check.clicked.connect(self.check_ai_status)
@@ -800,6 +801,16 @@ class MainWindow(QMainWindow):
         config_layout.addWidget(self.ai_model_hint, 3, 1, 1, 2)
         self._update_ai_model_hint(saved_model)
         self.ai_profile_combo.currentIndexChanged.connect(self._ai_profile_changed)
+        self.ai_online_banner = QLabel()
+        self.ai_online_banner.setWordWrap(True)
+        self.ai_online_banner.setMinimumHeight(54)
+        self.ai_online_banner.setObjectName("onlineAiBanner")
+        self.ai_online_banner.setStyleSheet(
+            "background: #FFF4CC; border: 1px solid #D6A700; border-radius: 6px; "
+            "padding: 8px; color: #5F4500; font-weight: 600;"
+        )
+        config_layout.addWidget(self.ai_online_banner, 7, 0, 1, 3)
+        self.ai_online_banner.setVisible(False)
         setup = QPushButton(_("Local installation guide"))
         setup.clicked.connect(self.show_ai_setup)
         config_layout.addWidget(setup, 4, 0)
@@ -815,6 +826,13 @@ class MainWindow(QMainWindow):
         self.model_update_button.clicked.connect(self._apply_model_update)
         self.model_update_button.setVisible(False)
         config_layout.addWidget(self.model_update_button, 5, 1, 1, 2)
+        self.mistral_setup_button = QPushButton(_("Mistral online AI"))
+        self.mistral_setup_button.setToolTip(
+            _("Open the Mistral key guide and review online data sharing.")
+        )
+        self.mistral_setup_button.clicked.connect(self._configure_mistral)
+        self.mistral_setup_button.setVisible(False)
+        config_layout.addWidget(self.mistral_setup_button, 5, 0)
         config_layout.setColumnStretch(1, 1)
 
         intelligence = QFrame()
@@ -1499,6 +1517,53 @@ class MainWindow(QMainWindow):
         snapshot["analysis_scope"] = "selected_interval"
         return snapshot, resolved_period
 
+    def _update_online_model_ui(self, model: str = "") -> None:
+        """Make online-provider setup visible as soon as Mistral is selected."""
+        if not hasattr(self, "ai_online_banner"):
+            return
+        selected = model.strip() or self.ai_model_combo.currentText().strip()
+        online = is_mistral_model(selected)
+        self.mistral_setup_button.setVisible(online)
+        self.ai_online_banner.setVisible(online)
+        if not online:
+            self.ai_online_banner.clear()
+            return
+        configured = bool(mistral_api_key() and has_mistral_consent())
+        state = (
+            _("Mistral online AI is ready.")
+            if configured
+            else _("Mistral API key not configured.")
+        )
+        self.ai_online_banner.setText(
+            _("Mistral online AI")
+            + " · "
+            + state
+            + "\\n"
+            + _(
+                "Mistral will receive the question and the minimum deterministic health "
+                "evidence needed for the answer. This information leaves your computer."
+            )
+            + "\\n"
+            + _(
+                "Use the button below to create or paste an API key before starting the "
+                "analysis."
+            )
+        )
+        self.ai_online_banner.setStyleSheet(
+            "background: #E8F0FE; border: 1px solid #5B8DEF; border-radius: 6px; "
+            "padding: 8px; color: #174EA6; font-weight: 600;"
+            if configured
+            else
+            "background: #FFF4CC; border: 1px solid #D6A700; border-radius: 6px; "
+            "padding: 8px; color: #5F4500; font-weight: 600;"
+        )
+
+    def _configure_mistral(self, _checked: bool = False) -> None:
+        dialog = MistralSetupDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._update_online_model_ui()
+            self.check_ai_status()
+
     def _prepare_online_ai_request(self) -> bool:
         """Show the Mistral key guide and data-sharing consent before online use."""
         thread = (
@@ -1516,7 +1581,9 @@ class MainWindow(QMainWindow):
         if mistral_api_key() and has_mistral_consent():
             return True
         dialog = MistralSetupDialog(self)
-        return dialog.exec() == QDialog.DialogCode.Accepted
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        self._update_online_model_ui(model)
+        return accepted
 
     def _ensure_ai_chat_window(self) -> AIChatWindow:
         if self.ai_chat_window is None:
