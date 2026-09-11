@@ -202,6 +202,8 @@ def test_richer_context_markers_are_classified_by_semantic_key():
         "Ho un infortunio al ginocchio e devo evitare la corsa": "training_constraints",
         "Sono in viaggio e ho il jet lag": "travel_context",
         "Preferisco spiegazioni brevi": "coaching_preferences",
+        "Di solito dormo bene": "sleep_quality_context",
+        "Mi alleno cinque giorni a settimana": "training_frequency_context",
     }
     for statement, expected_key in examples.items():
         candidate = _detect_durable_context_candidate(statement)
