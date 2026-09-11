@@ -7,7 +7,7 @@ from google_health_viewer.agent_runtime_v2 import (
     _detect_durable_context_candidate,
     _detect_self_report,
 )
-from google_health_viewer.agent_store import AgentStore
+from google_health_viewer.agent_store import PERSONAL_CONTEXT_KEY_SPECS, AgentStore
 
 
 def test_explicit_fatigue_statement_is_detected():
@@ -161,3 +161,51 @@ def test_legacy_polluted_training_context_is_migrated(tmp_path: Path):
         "Di solito mi alleno in bicicletta cinque giorni a settimana"
     )
     assert migrated.recent_tool_events()[-1]["event_type"] == "personal_context_migrated"
+
+
+def test_personal_context_catalogue_is_rich_and_typed():
+    expected = {
+        "sleep_schedule_context",
+        "sleep_quality_context",
+        "subjective_sleep_need_context",
+        "training_routine_context",
+        "training_frequency_context",
+        "current_training_goal",
+        "training_preferences",
+        "training_constraints",
+        "subjective_recovery_baseline",
+        "high_load_subjective_tolerance",
+        "usual_energy_level",
+        "usual_fatigue_response",
+        "stress_context",
+        "work_schedule_context",
+        "nutrition_context",
+        "stimulant_context",
+        "illness_context",
+        "medication_context",
+        "travel_context",
+        "personal_analysis_preferences",
+        "coaching_preferences",
+        "primary_health_coaching_goal",
+    }
+    assert expected <= set(PERSONAL_CONTEXT_KEY_SPECS)
+    for key in expected:
+        spec = PERSONAL_CONTEXT_KEY_SPECS[key]
+        assert spec["topics"]
+        assert spec["markers"]
+        assert spec["default_scope"] in {"stable", "temporary"}
+
+
+def test_richer_context_markers_are_classified_by_semantic_key():
+    examples = {
+        "Sono spesso sotto stress per il lavoro": "stress_context",
+        "Ho un infortunio al ginocchio e devo evitare la corsa": "training_constraints",
+        "Sono in viaggio e ho il jet lag": "travel_context",
+        "Preferisco spiegazioni brevi": "coaching_preferences",
+        "Di solito dormo bene": "sleep_quality_context",
+        "Mi alleno cinque giorni a settimana": "training_frequency_context",
+    }
+    for statement, expected_key in examples.items():
+        candidate = _detect_durable_context_candidate(statement)
+        assert candidate is not None
+        assert candidate["model_key"] == expected_key
