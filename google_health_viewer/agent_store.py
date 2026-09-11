@@ -9,7 +9,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Iterable
 
-AGENT_SCHEMA_VERSION = 2
+AGENT_SCHEMA_VERSION = 3
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _CONFIRMATION_MARKERS = (
     "si",
@@ -240,11 +240,90 @@ class AgentStore:
                 );
                 """
             )
+            self._migrate_legacy_personal_context(db)
             db.execute(
                 "INSERT INTO agent_meta(key,value) VALUES('schema_version',?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (str(AGENT_SCHEMA_VERSION),),
             )
+
+    @staticmethod
+    def _legacy_context_statement(statement: str) -> str | None:
+        markers = (
+            "di solito mi alleno",
+            "normalmente mi alleno",
+            "mi alleno in bici",
+            "mi alleno in bicicletta",
+            "la mia routine di allenamento",
+        )
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+|(?<=;)\s+", statement.strip()):
+            clean = sentence.strip(" \t\n.;")
+            if clean and any(marker in clean.casefold() for marker in markers):
+                if not clean.endswith(("?", "？")):
+                    return clean
+        return None
+
+    @classmethod
+    def _scrub_legacy_candidate(cls, value: Any, statement: str) -> Any:
+        if isinstance(value, dict):
+            return {
+                str(key): (
+                    statement
+                    if key == "candidate_statement"
+                    else cls._scrub_legacy_candidate(item, statement)
+                )
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [cls._scrub_legacy_candidate(item, statement) for item in value]
+        return value
+
+    def _migrate_legacy_personal_context(self, db: sqlite3.Connection) -> None:
+        row = db.execute(
+            "SELECT * FROM user_model WHERE model_key='current_training_goal'"
+        ).fetchone()
+        if not row:
+            return
+        statement = self._legacy_context_statement(str(row["statement"]))
+        if not statement:
+            return
+        evidence = self._scrub_legacy_candidate(
+            _loads(row["evidence_json"], []), statement
+        )
+        target = db.execute(
+            "SELECT model_key FROM user_model WHERE model_key='training_routine_context'"
+        ).fetchone()
+        if target:
+            db.execute("DELETE FROM user_model WHERE model_key='current_training_goal'")
+        else:
+            db.execute(
+                "UPDATE user_model SET model_key=?,statement=?,evidence_json=?,updated_at=? "
+                "WHERE model_key='current_training_goal'",
+                (
+                    "training_routine_context",
+                    statement,
+                    _json(evidence),
+                    _now(),
+                ),
+            )
+        db.execute(
+            "INSERT INTO tool_events(created_at,event_type,tool_name,message,payload_json) "
+            "VALUES(?,?,?,?,?)",
+            (
+                _now(),
+                "personal_context_migrated",
+                None,
+                "Migrated a legacy training routine from current_training_goal.",
+                _json(
+                    {
+                        "from_key": "current_training_goal",
+                        "to_key": "training_routine_context",
+                        "statement": statement,
+                        "scrubbed_full_request": True,
+                    }
+                ),
+            ),
+        )
 
     def get_meta(self, key: str, default: str | None = None) -> str | None:
         with self._connect() as db:
