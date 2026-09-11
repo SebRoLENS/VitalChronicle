@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -55,6 +56,7 @@ _TOPIC_MARKERS = {
 _CONTEXT_KEY_TOPICS = {
     "sleep_schedule_context": {"sleep"},
     "subjective_sleep_need_context": {"sleep", "recovery"},
+    "training_routine_context": {"training", "recovery"},
     "current_training_goal": {"training"},
     "recent_training_context": {"training", "recovery"},
 }
@@ -306,13 +308,18 @@ _DURABLE_CONTEXT_MARKERS = {
         "normalmente vado a letto",
         "la mia routine del sonno",
     ),
+    "training_routine_context": (
+        "di solito mi alleno",
+        "normalmente mi alleno",
+        "mi alleno in bici",
+        "mi alleno in bicicletta",
+        "la mia routine di allenamento",
+    ),
     "current_training_goal": (
         "il mio obiettivo",
         "sto cercando di allenarmi",
         "ho ricominciato ad allenarmi",
         "ho ricominciato palestra",
-        "mi alleno",
-        "faccio palestra",
     ),
     "recent_training_context": (
         "mi sono allenato",
@@ -325,20 +332,34 @@ _DURABLE_CONTEXT_MARKERS = {
 }
 
 
+def _context_sentences(text: str) -> list[str]:
+    return [
+        part.strip(" 	
+.;")
+        for part in re.split(r"(?<=[.!?])s+|[
+]+|(?<=;)s+", text.strip())
+        if part.strip(" 	
+.;")
+    ]
+
+
 def _detect_durable_context_candidate(question: str) -> dict[str, Any] | None:
     text = question.strip()
-    folded = text.casefold()
-    if not text or text.endswith(("?", "？")):
+    if not text:
         return None
-    for key, markers in _DURABLE_CONTEXT_MARKERS.items():
-        if any(marker in folded for marker in markers):
-            temporary = key == "recent_training_context"
-            return {
-                "model_key": key,
-                "statement": text,
-                "temporal_scope": "temporary" if temporary else "stable",
-                "ttl_days": 42 if temporary else None,
-            }
+    for sentence in _context_sentences(text):
+        folded = sentence.casefold()
+        if sentence.endswith(("?", "？")):
+            continue
+        for key, markers in _DURABLE_CONTEXT_MARKERS.items():
+            if any(marker in folded for marker in markers):
+                temporary = key == "recent_training_context"
+                return {
+                    "model_key": key,
+                    "statement": sentence,
+                    "temporal_scope": "temporary" if temporary else "stable",
+                    "ttl_days": 42 if temporary else None,
+                }
     return None
 
 
@@ -1096,12 +1117,34 @@ class AgentRuntime(base_rt.AgentRuntime):
                 if name == "create_learned_tool":
                     status = str(result.get("status") or "")
                     if status in {"invalid_pipeline", "invalid_spec"}:
+                        factory_attempt = factory_repairs + 1
+                        pipeline = args.get("pipeline")
+                        pipeline_steps = pipeline if isinstance(pipeline, list) else []
+                        factory_error = str(
+                            result.get("error") or "Learned-tool validation failed."
+                        )
+                        failure_payload = {
+                            "attempt": factory_attempt,
+                            "status": status,
+                            "error": factory_error,
+                            "requested_tool_name": str(args.get("name") or "") or None,
+                            "capability": str(args.get("capability") or "") or None,
+                            "pipeline_steps": len(pipeline_steps),
+                            "pipeline_ops": [
+                                str(step.get("op") or "<missing>")
+                                for step in pipeline_steps
+                                if isinstance(step, dict)
+                            ],
+                            "allowed_operations": result.get("allowed_operations", []),
+                        }
                         self._last_factory_outcome.update(
                             {
                                 "status": "not_persisted",
                                 "persisted": False,
-                                "attempts": factory_repairs + 1,
+                                "attempts": factory_attempt,
                                 "tool_name": str(args.get("name") or "") or None,
+                                "last_error": factory_error,
+                                "last_error_status": status,
                             }
                         )
                         repair_turn = True
@@ -1117,9 +1160,9 @@ class AgentRuntime(base_rt.AgentRuntime):
                         )
                         self.agent_store.log_tool_event(
                             "tool_factory_repair",
-                            str(result.get("error") or "Learned-tool validation failed."),
+                            factory_error,
                             tool_name=str(args.get("name") or "") or None,
-                            payload={"attempt": factory_repairs, "status": status},
+                            payload=failure_payload,
                         )
                         if factory_repairs >= MAX_FACTORY_REPAIR_ATTEMPTS:
                             factory_disabled = True
@@ -1184,6 +1227,44 @@ class AgentRuntime(base_rt.AgentRuntime):
                         factory_gate_required = False
                         event(_("Learned tool validated and saved locally."))
                         schemas = self.tools.tool_schemas()
+                    else:
+                        factory_error = str(
+                            result.get("error")
+                            or f"Unexpected Tool Factory status: {status or '<missing>'}"
+                        )
+                        failure_payload = {
+                            "attempt": factory_repairs + 1,
+                            "status": status or "missing_status",
+                            "error": factory_error,
+                            "requested_tool_name": str(args.get("name") or "") or None,
+                            "capability": str(args.get("capability") or "") or None,
+                            "pipeline_steps": (
+                                len(args.get("pipeline"))
+                                if isinstance(args.get("pipeline"), list)
+                                else 0
+                            ),
+                            "pipeline_ops": [
+                                str(step.get("op") or "<missing>")
+                                for step in args.get("pipeline", [])
+                                if isinstance(step, dict)
+                            ],
+                        }
+                        self._last_factory_outcome.update(
+                            {
+                                "status": "not_persisted",
+                                "persisted": False,
+                                "attempts": factory_repairs + 1,
+                                "tool_name": str(args.get("name") or "") or None,
+                                "last_error": factory_error,
+                                "last_error_status": status or "missing_status",
+                            }
+                        )
+                        self.agent_store.log_tool_event(
+                            "tool_factory_failure",
+                            factory_error,
+                            tool_name=str(args.get("name") or "") or None,
+                            payload=failure_payload,
+                        )
                 elif name == "ask_user_feedback" and result.get("queued"):
                     event(_("Targeted feedback question queued for the user."))
                 if factory_tool_name and name == factory_tool_name:
