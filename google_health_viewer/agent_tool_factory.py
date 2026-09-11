@@ -10,8 +10,9 @@ from . import agent_tools as base
 EXTRA_BUILTIN_SPEC = {
     "name": "get_sleep_stage_series",
     "description": (
-        "Return per-night recorded sleep-stage durations (deep, REM, light, awake) keyed by "
-        "wake-up date as a deterministic series. Missing stages are never inferred."
+        "Return per-night recorded sleep-stage DURATIONS in hours (deep, REM, light, awake) "
+        "keyed by wake-up date. The 'deep' field is deep-sleep duration only; 'total_sleep' is "
+        "deep+REM+light and must never be called deep sleep. Missing stages are never inferred."
     ),
     "capability": "sleep.stage_series",
     "parameters": base._period(),
@@ -164,7 +165,10 @@ _PIPELINE_STEP_SCHEMA: dict[str, Any] = {
         "key_field": {"type": "string", "description": "Date field in extract_series rows."},
         "value_field": {
             "type": "string",
-            "description": "Numeric field in extract_series rows.",
+            "description": (
+                "Numeric field in extract_series rows. For get_sleep_stage_series use 'deep' "
+                "only for deep-sleep duration; use 'total_sleep' for total sleep."
+            ),
         },
         "baseline_source": {
             "type": "string",
@@ -187,6 +191,11 @@ _PIPELINE_STEP_SCHEMA: dict[str, Any] = {
         "response_offset_days": {"type": "integer", "minimum": -7, "maximum": 7},
         "recovery_tolerance_percent": {},
         "max_recovery_days": {"type": "integer", "minimum": 1, "maximum": 60},
+        "episode_mode": {
+            "type": "string",
+            "enum": ["contiguous"],
+            "description": "Group consecutive trigger dates into one episode and anchor recovery to its last date.",
+        },
     },
     "required": ["op"],
 }
@@ -340,10 +349,13 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                 if math.isfinite(hours):
                     row[target] += hours
         expected = (right - left).days + 1
-        rows = [
-            {"date": day, **{key: round(value, 4) for key, value in values.items()}}
-            for day, values in sorted(by_day.items())
-        ]
+        rows = []
+        for day, values in sorted(by_day.items()):
+            rounded = {key: round(value, 4) for key, value in values.items()}
+            rounded["total_sleep"] = round(
+                rounded["deep"] + rounded["rem"] + rounded["light"], 4
+            )
+            rows.append({"date": day, **rounded})
         return {
             "period": {"start": left.isoformat(), "end": right.isoformat()},
             "daily_stages": rows,
@@ -354,7 +366,17 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
             "coverage": round(len(rows) / max(1, expected), 3),
             "confidence": base._confidence(len(rows), expected),
             "date_semantics": "wake_up_date",
-            "method": "Recorded wearable sleep-stage durations grouped by local wake-up date.",
+            "semantics": {
+                "deep": "deep_sleep_duration_hours",
+                "rem": "rem_sleep_duration_hours",
+                "light": "light_sleep_duration_hours",
+                "awake": "awake_duration_hours",
+                "total_sleep": "deep_plus_rem_plus_light_duration_hours",
+            },
+            "method": (
+                "Recorded wearable sleep-stage durations grouped by local wake-up date. "
+                "total_sleep is a derived sum; deep remains deep-stage duration only."
+            ),
             "limitations": (
                 "Missing sleep stages are omitted and never inferred or zero-filled. A nonzero "
                 "sleep_session_records value with zero sessions_with_stages means sessions exist "
@@ -732,8 +754,22 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                         if direction == "above"
                         else baseline * (1 - response_percent / 100)
                     )
-                    for event_day in sorted(event_series):
-                        response_day = date.fromisoformat(event_day) + timedelta(days=offset)
+                    trigger_days = sorted(event_series)
+                    episodes: list[list[str]] = []
+                    for event_day in trigger_days:
+                        if (
+                            episodes
+                            and date.fromisoformat(event_day)
+                            == date.fromisoformat(episodes[-1][-1]) + timedelta(days=1)
+                        ):
+                            episodes[-1].append(event_day)
+                        else:
+                            episodes.append([event_day])
+                    episode_matches: list[dict[str, Any]] = []
+                    for episode in episodes:
+                        episode_start = episode[0]
+                        episode_end = episode[-1]
+                        response_day = date.fromisoformat(episode_end) + timedelta(days=offset)
                         response_key = response_day.isoformat()
                         if response_key not in response_series:
                             continue
@@ -746,7 +782,8 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                         )
                         if not is_match:
                             continue
-                        recovery_days = None
+                        recovery_days_after_response = None
+                        recovery_date = None
                         for delta_days in range(1, max_days + 1):
                             candidate = (response_day + timedelta(days=delta_days)).isoformat()
                             if candidate not in response_series:
@@ -758,33 +795,84 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                                 else value >= baseline * (1 - tolerance / 100)
                             )
                             if recovered:
-                                recovery_days = delta_days
+                                recovery_days_after_response = delta_days
+                                recovery_date = candidate
                                 break
-                        matches.append(
+                        recovery_days_after_episode = (
+                            (date.fromisoformat(recovery_date) - date.fromisoformat(episode_end)).days
+                            if recovery_date
+                            else None
+                        )
+                        episode_matches.append(
                             {
-                                "event_date": event_day,
+                                "event_date": episode_end,
+                                "event_episode_start": episode_start,
+                                "event_episode_end": episode_end,
+                                "event_dates": episode,
                                 "response_date": response_key,
                                 "response_value": response_value,
-                                "recovery_days": recovery_days,
+                                "recovery_date": recovery_date,
+                                "recovery_days": recovery_days_after_response,
+                                "recovery_days_after_response": recovery_days_after_response,
+                                "recovery_days_after_episode": recovery_days_after_episode,
                             }
                         )
-                    recovered = [
-                        float(row["recovery_days"])
-                        for row in matches
-                        if row.get("recovery_days") is not None
+                    recovered_after_response = [
+                        float(row["recovery_days_after_response"])
+                        for row in episode_matches
+                        if row.get("recovery_days_after_response") is not None
                     ]
+                    recovered_after_episode = [
+                        float(row["recovery_days_after_episode"])
+                        for row in episode_matches
+                        if row.get("recovery_days_after_episode") is not None
+                    ]
+                    sample_quality = (
+                        "insufficient_for_typical_estimate"
+                        if len(episodes) < 3
+                        else "preliminary"
+                        if len(episodes) < 5
+                        else "adequate"
+                    )
                     last = {
                         "trigger_events": len(event_series),
+                        "trigger_episodes": len(episodes),
                         "evaluable_events": evaluated,
-                        "response_matches": len(matches),
+                        "evaluable_episodes": evaluated,
+                        "response_matches": len(episode_matches),
                         "response_rate_percent": (
-                            round(len(matches) / evaluated * 100, 2) if evaluated else None
+                            round(len(episode_matches) / evaluated * 100, 2) if evaluated else None
                         ),
                         "mean_recovery_days": (
-                            round(statistics.fmean(recovered), 2) if recovered else None
+                            round(statistics.fmean(recovered_after_response), 2)
+                            if recovered_after_response
+                            else None
                         ),
-                        "recovered_events": len(recovered),
-                        "unrecovered_events": len(matches) - len(recovered),
+                        "median_recovery_days": (
+                            round(statistics.median(recovered_after_response), 2)
+                            if recovered_after_response
+                            else None
+                        ),
+                        "mean_recovery_days_after_episode": (
+                            round(statistics.fmean(recovered_after_episode), 2)
+                            if recovered_after_episode
+                            else None
+                        ),
+                        "median_recovery_days_after_episode": (
+                            round(statistics.median(recovered_after_episode), 2)
+                            if recovered_after_episode
+                            else None
+                        ),
+                        "recovered_events": len(recovered_after_episode),
+                        "unrecovered_events": len(episode_matches) - len(recovered_after_episode),
+                        "sample_quality": sample_quality,
+                        "can_estimate_typical_recovery": len(episodes) >= 3,
+                        "generalization_note": (
+                            "Only one or two trigger episodes are available; recovery is preliminary "
+                            "and must not be described as the user's usual or typical response."
+                            if len(episodes) < 3
+                            else "Estimate is based on multiple trigger episodes; still observational, not causal."
+                        ),
                         "response_baseline": baseline,
                         "response_threshold": threshold,
                         "response_direction": direction,
@@ -792,20 +880,27 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                         "response_offset_days": offset,
                         "recovery_tolerance_percent": tolerance,
                         "max_recovery_days": max_days,
-                        "matched_events": matches[:120],
+                        "matched_events": episode_matches[:120],
                         "method": (
-                            "Event-conditioned deterministic analysis. Missing dates are skipped, "
-                            "never treated as zero. Recovery means returning within the configured "
-                            "percentage of the personal baseline."
+                            "Event-conditioned deterministic analysis with consecutive trigger dates "
+                            "grouped into episodes. Recovery is reported both from the response night "
+                            "and, explicitly, from the episode's last trigger date. Missing dates are "
+                            "skipped, never treated as zero. Recovery means returning within the "
+                            "configured percentage of the personal baseline."
                         ),
                     }
                 else:
                     last = {
                         "trigger_events": len(event_series),
+                        "trigger_episodes": 0,
                         "evaluable_events": 0,
+                        "evaluable_episodes": 0,
                         "response_matches": 0,
                         "response_rate_percent": None,
                         "mean_recovery_days": None,
+                        "mean_recovery_days_after_episode": None,
+                        "sample_quality": "insufficient_for_typical_estimate",
+                        "can_estimate_typical_recovery": False,
                         "error": "Response baseline is unavailable.",
                     }
             elif op == "return":
