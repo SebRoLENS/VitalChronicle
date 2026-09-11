@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from . import agent_runtime as base_rt
+from .agent_store import PERSONAL_CONTEXT_KEY_SPECS
 from .agent_tool_factory import EnhancedSafeToolExecutor
 from .i18n import _
 from .local_ai import AIAnalysisCancelled, LocalAIError
@@ -54,11 +55,8 @@ _TOPIC_MARKERS = {
 }
 
 _CONTEXT_KEY_TOPICS = {
-    "sleep_schedule_context": {"sleep"},
-    "subjective_sleep_need_context": {"sleep", "recovery"},
-    "training_routine_context": {"training", "recovery"},
-    "current_training_goal": {"training"},
-    "recent_training_context": {"training", "recovery"},
+    key: set(spec.get("topics") or ())
+    for key, spec in PERSONAL_CONTEXT_KEY_SPECS.items()
 }
 
 _SELF_REPORT_CATEGORY_TOPICS = {
@@ -301,34 +299,8 @@ def _detect_self_report(question: str) -> dict[str, str] | None:
 
 
 _DURABLE_CONTEXT_MARKERS = {
-    "sleep_schedule_context": (
-        "di solito dormo",
-        "normalmente dormo",
-        "di solito vado a letto",
-        "normalmente vado a letto",
-        "la mia routine del sonno",
-    ),
-    "training_routine_context": (
-        "di solito mi alleno",
-        "normalmente mi alleno",
-        "mi alleno in bici",
-        "mi alleno in bicicletta",
-        "la mia routine di allenamento",
-    ),
-    "current_training_goal": (
-        "il mio obiettivo",
-        "sto cercando di allenarmi",
-        "ho ricominciato ad allenarmi",
-        "ho ricominciato palestra",
-    ),
-    "recent_training_context": (
-        "mi sono allenato",
-        "mi sono allenata",
-        "ho fatto un allenamento",
-        "ho pedalato",
-        "sono andato in bici",
-        "sono andata in bici",
-    ),
+    key: tuple(spec.get("markers") or ())
+    for key, spec in PERSONAL_CONTEXT_KEY_SPECS.items()
 }
 
 
@@ -351,12 +323,14 @@ def _detect_durable_context_candidate(question: str) -> dict[str, Any] | None:
             continue
         for key, markers in _DURABLE_CONTEXT_MARKERS.items():
             if any(marker in folded for marker in markers):
-                temporary = key == "recent_training_context"
+                spec = PERSONAL_CONTEXT_KEY_SPECS.get(key, {})
+                scope = str(spec.get("default_scope") or "stable")
+                ttl_days = spec.get("ttl_days") if scope == "temporary" else None
                 return {
                     "model_key": key,
                     "statement": sentence,
-                    "temporal_scope": "temporary" if temporary else "stable",
-                    "ttl_days": 42 if temporary else None,
+                    "temporal_scope": scope,
+                    "ttl_days": ttl_days,
                 }
     return None
 
