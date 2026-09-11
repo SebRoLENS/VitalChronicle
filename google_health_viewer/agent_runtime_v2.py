@@ -334,14 +334,10 @@ _DURABLE_CONTEXT_MARKERS = {
 
 def _context_sentences(text: str) -> list[str]:
     return [
-        part.strip(" 	
-.;")
-        for part in re.split(r"(?<=[.!?])s+|[
-]+|(?<=;)s+", text.strip())
-        if part.strip(" 	
-.;")
+        part.strip(" \\t\\n.;")
+        for part in re.split(r"(?<=[.!?])\\s+|[\\r\\n]+|(?<=;)\\s+", text.strip())
+        if part.strip(" \\t\\n.;")
     ]
-
 
 def _detect_durable_context_candidate(question: str) -> dict[str, Any] | None:
     text = question.strip()
