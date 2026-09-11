@@ -333,11 +333,13 @@ _DURABLE_CONTEXT_MARKERS = {
 
 
 def _context_sentences(text: str) -> list[str]:
-    return [
-        part.strip(" \\t\\n.;")
-        for part in re.split(r"(?<=[.!?])\\s+|[\\r\\n]+|(?<=;)\\s+", text.strip())
-        if part.strip(" \\t\\n.;")
-    ]
+    sentences = re.split(r"(?<=[.!?])\s+|[\r\n]+|(?<=;)\s+", text.strip())
+    result: list[str] = []
+    for sentence in sentences:
+        clean = re.sub(r"^[ \t\n.;]+|[ \t\n.;]+$", "", sentence)
+        if clean:
+            result.append(clean)
+    return result
 
 def _detect_durable_context_candidate(question: str) -> dict[str, Any] | None:
     text = question.strip()
