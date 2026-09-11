@@ -149,41 +149,66 @@ def _install_chat_integration(ai_chat_module) -> None:
         self._agent_exchange_events = []
 
         self.agent_feedback_panel = QFrame()
-        self.agent_feedback_panel.setObjectName("aiCard")
+        self.agent_feedback_panel.setObjectName("agentFeedbackPanel")
         panel_layout = QVBoxLayout(self.agent_feedback_panel)
-        panel_layout.setContentsMargins(14, 11, 14, 11)
-        self.agent_feedback_title = QLabel(_("A question that can improve personalisation"))
-        self.agent_feedback_title.setObjectName("chatSectionTitle")
-        panel_layout.addWidget(self.agent_feedback_title)
+        panel_layout.setContentsMargins(16, 14, 16, 14)
+        panel_layout.setSpacing(7)
+
+        feedback_header = QHBoxLayout()
+        self.agent_feedback_badge = QLabel(_("ACTION REQUIRED"))
+        self.agent_feedback_badge.setObjectName("agentFeedbackBadge")
+        feedback_header.addWidget(self.agent_feedback_badge)
+        self.agent_feedback_title = QLabel(_("Personal context question"))
+        self.agent_feedback_title.setObjectName("agentFeedbackTitle")
+        feedback_header.addWidget(self.agent_feedback_title, 1)
+        panel_layout.addLayout(feedback_header)
+
+        self.agent_feedback_question_heading = QLabel(_("Question"))
+        self.agent_feedback_question_heading.setObjectName("agentFeedbackQuestionHeading")
+        panel_layout.addWidget(self.agent_feedback_question_heading)
         self.agent_feedback_question = QLabel()
+        self.agent_feedback_question.setObjectName("agentFeedbackQuestion")
         self.agent_feedback_question.setWordWrap(True)
         panel_layout.addWidget(self.agent_feedback_question)
+
         self.agent_feedback_reason = QLabel()
-        self.agent_feedback_reason.setObjectName("pageSubtitle")
+        self.agent_feedback_reason.setObjectName("agentFeedbackReason")
         self.agent_feedback_reason.setWordWrap(True)
         panel_layout.addWidget(self.agent_feedback_reason)
-        answer_row = QHBoxLayout()
-        self.agent_feedback_answer = QLineEdit()
-        self.agent_feedback_answer.setPlaceholderText(
-            _("Optional subjective context; stored only on this computer")
+
+        self.agent_feedback_instruction = QLabel(
+            _("Write your answer in the field below. This question is separate from the analysis above.")
         )
-        answer_row.addWidget(self.agent_feedback_answer, 1)
-        self.agent_feedback_save = QPushButton(_("Save feedback"))
+        self.agent_feedback_instruction.setObjectName("agentFeedbackInstruction")
+        self.agent_feedback_instruction.setWordWrap(True)
+        panel_layout.addWidget(self.agent_feedback_instruction)
+
+        self.agent_feedback_answer = QPlainTextEdit()
+        self.agent_feedback_answer.setObjectName("agentFeedbackAnswer")
+        self.agent_feedback_answer.setPlaceholderText(_("Your answer"))
+        self.agent_feedback_answer.setMinimumHeight(62)
+        self.agent_feedback_answer.setMaximumHeight(110)
+        panel_layout.addWidget(self.agent_feedback_answer)
+
+        answer_row = QHBoxLayout()
+        answer_row.addStretch()
+        self.agent_feedback_save = QPushButton(_("Save answer"))
         self.agent_feedback_save.setObjectName("primaryButton")
         answer_row.addWidget(self.agent_feedback_save)
-        self.agent_feedback_skip = QPushButton(_("Skip"))
+        self.agent_feedback_skip = QPushButton(_("Skip question"))
         answer_row.addWidget(self.agent_feedback_skip)
         panel_layout.addLayout(answer_row)
         self.agent_feedback_panel.setVisible(False)
         self._agent_pending_feedback_id = None
 
-        insert_at = max(0, layout.count() - 1)
+        coverage_index = layout.indexOf(self.coverage_label)
+        insert_at = coverage_index + 1 if coverage_index >= 0 else 0
         layout.insertWidget(insert_at, self.agent_feedback_panel)
 
         def save_feedback() -> None:
             runtime = getattr(self, "agent_runtime", None)
             feedback_id = getattr(self, "_agent_pending_feedback_id", None)
-            answer = self.agent_feedback_answer.text().strip()
+            answer = self.agent_feedback_answer.toPlainText().strip()
             if runtime is None or not feedback_id or not answer:
                 return
             runtime.agent_store.answer_feedback(str(feedback_id), answer)
