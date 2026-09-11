@@ -130,7 +130,7 @@ def test_context_candidate_extracts_only_personal_sentence_from_compound_request
     )
     assert candidate is not None
     assert candidate["model_key"] == "training_routine_context"
-    assert candidate["statement"] == "Di solito mi alleno in bicicletta cinque giorni a settimana."
+    assert candidate["statement"] == "Di solito mi alleno in bicicletta cinque giorni a settimana"
 
 
 def test_legacy_polluted_training_context_is_migrated(tmp_path: Path):
