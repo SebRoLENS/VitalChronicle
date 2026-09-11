@@ -436,6 +436,7 @@
   "Open official Google guide": "Open official Google guide",
   "Open project selector": "Open project selector",
   "Open release page": "Open release page",
+  "Open the Mistral key guide and review online data sharing.": "Open the Mistral key guide and review online data sharing.",
   "OpenAI open-weight reasoning model · about 14 GB · 128K context": "OpenAI open-weight reasoning model · about 14 GB · 128K context",
   "Opening the browser for sign-in…": "Opening the browser for sign-in…",
   "Operation cancelled.": "Operation cancelled.",
@@ -677,6 +678,7 @@
   "Use Mistral online": "Use Mistral online",
   "Use and download": "Use and download",
   "Use recommended model": "Use recommended model",
+  "Use the button below to create or paste an API key before starting the analysis.": "Use the button below to create or paste an API key before starting the analysis.",
   "Use the displayed 'ollama pull' command to download the recommended model.": "Use the displayed 'ollama pull' command to download the recommended model.",
   "Use updated model": "Use updated model",
   "User manual": "User manual",
@@ -789,7 +791,5 @@
   "☕ Support development": "☕ Support development",
   "✓ A valid OAuth client is already stored. Select a JSON only to replace it.": "✓ A valid OAuth client is already stored. Select a JSON only to replace it.",
   "✓ Valid OAuth client. The redirect URI is correct.": "✓ Valid OAuth client. The redirect URI is correct.",
-  "✕ This JSON cannot be used: {error}": "✕ This JSON cannot be used: {error}",
-  "Open the Mistral key guide and review online data sharing.": "Open the Mistral key guide and review online data sharing.",
-  "Use the button below to create or paste an API key before starting the analysis.": "Use the button below to create or paste an API key before starting the analysis."
+  "✕ This JSON cannot be used: {error}": "✕ This JSON cannot be used: {error}"
 }
