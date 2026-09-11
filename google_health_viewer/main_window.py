@@ -1501,7 +1501,17 @@ class MainWindow(QMainWindow):
 
     def _prepare_online_ai_request(self) -> bool:
         """Show the Mistral key guide and data-sharing consent before online use."""
-        if not is_mistral_model(self.ai_model_combo.currentText()):
+        thread = (
+            self.ai_chat_window._current_thread()
+            if self.ai_chat_window is not None
+            else None
+        )
+        model = (
+            str(thread.get("model", ""))
+            if thread is not None
+            else self.ai_model_combo.currentText()
+        )
+        if not is_mistral_model(model):
             return True
         if mistral_api_key() and has_mistral_consent():
             return True
