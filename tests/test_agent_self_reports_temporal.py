@@ -121,3 +121,43 @@ def test_durable_context_decline_does_not_enter_user_model(tmp_path: Path):
     )
     store.answer_feedback(feedback["feedback_id"], "no")
     assert store.user_model() == []
+
+
+def test_context_candidate_extracts_only_personal_sentence_from_compound_request():
+    candidate = _detect_durable_context_candidate(
+        "Di solito mi alleno in bicicletta cinque giorni a settimana. "
+        "Nei 17 giorni disponibili, quanto spesso il sonno diminuisce?"
+    )
+    assert candidate is not None
+    assert candidate["model_key"] == "training_routine_context"
+    assert candidate["statement"] == "Di solito mi alleno in bicicletta cinque giorni a settimana."
+
+
+def test_legacy_polluted_training_context_is_migrated(tmp_path: Path):
+    path = tmp_path / "agent.sqlite3"
+    store = AgentStore(path)
+    store.learn_user_model(
+        "current_training_goal",
+        (
+            "Di solito mi alleno in bicicletta cinque giorni a settimana. "
+            "Nei 17 giorni disponibili, quanto spesso il sonno diminuisce?"
+        ),
+        evidence={
+            "context": {
+                "candidate_statement": (
+                    "Di solito mi alleno in bicicletta cinque giorni a settimana. "
+                    "Nei 17 giorni disponibili, quanto spesso il sonno diminuisce?"
+                )
+            }
+        },
+        source="explicit_user_confirmation",
+    )
+
+    migrated = AgentStore(path)
+    model = migrated.user_model()
+    assert len(model) == 1
+    assert model[0]["key"] == "training_routine_context"
+    assert model[0]["statement"] == (
+        "Di solito mi alleno in bicicletta cinque giorni a settimana"
+    )
+    assert migrated.recent_tool_events()[-1]["event_type"] == "personal_context_migrated"
