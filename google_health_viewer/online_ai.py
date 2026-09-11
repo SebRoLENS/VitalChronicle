@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+
 import requests
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
