@@ -11,6 +11,28 @@ from typing import Any, Iterable
 
 AGENT_SCHEMA_VERSION = 2
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+_CONFIRMATION_MARKERS = (
+    "si",
+    "sì",
+    "yes",
+    "esatto",
+    "esatto,",
+    "corretto",
+    "confermo",
+    "va bene",
+    "ok",
+    "okay",
+    "certo",
+    "giusto",
+)
+
+
+def _is_explicit_confirmation(answer: str) -> bool:
+    normalized = re.sub(r"[^a-zàèéìòù0-9 ]+", " ", answer.casefold())
+    normalized = " ".join(normalized.split())
+    return normalized in _CONFIRMATION_MARKERS or normalized.startswith(
+        ("si ", "sì ", "yes ", "esatto ", "corretto ", "confermo ")
+    )
 
 _TEMPORAL_KEY_TTLS = {
     "current_training_goal": 90,
@@ -658,6 +680,25 @@ class AgentStore:
             )
         key = str(item.get("learning_key") or "").strip()
         context = item.get("context") or {}
+        if context.get("feedback_mode") == "durable_context_confirmation":
+            candidate_statement = str(context.get("candidate_statement") or "").strip()
+            model_key = str(context.get("model_key") or key).strip()
+            if candidate_statement and _is_explicit_confirmation(answer):
+                self.learn_user_model(
+                    model_key,
+                    candidate_statement,
+                    evidence={
+                        "question": item["question"],
+                        "answer": answer,
+                        "context": context,
+                        "confirmation": "explicit_user_confirmation",
+                        "temporal": _temporal_profile(
+                            model_key, candidate_statement, context
+                        ),
+                    },
+                    source="explicit_user_confirmation",
+                )
+            return self.feedback(feedback_id)
         self_report_id = str(context.get("self_report_id") or "").strip()
         if self_report_id:
             self.update_self_report_feedback(self_report_id, answer)
