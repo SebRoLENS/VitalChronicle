@@ -23,7 +23,7 @@ from .local_ai import LocalAIError, OllamaStatus
 
 MISTRAL_MODEL = "mistral-small-latest"
 MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
-MISTRAL_KEYS_URL = "https://console.mistral.ai/api-keys/"
+MISTRAL_KEYS_URL = "https://console.mistral.ai/home"
 MISTRAL_API_KEY_SETTING = "ai/mistral_api_key"
 MISTRAL_CONSENT_SETTING = "ai/mistral_online_consent"
 
@@ -77,7 +77,7 @@ class MistralSetupDialog(QDialog):
         root.addWidget(steps)
 
         links = QHBoxLayout()
-        docs = QPushButton(_("Open Mistral API keys"))
+        docs = QPushButton(_("Open Mistral Studio"))
         docs.clicked.connect(lambda: open_external_url(MISTRAL_KEYS_URL))
         links.addWidget(docs)
         links.addStretch()
