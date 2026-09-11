@@ -17,6 +17,7 @@ from .local_ai import (
     DEFAULT_OLLAMA_URL,
     LocalAIError,
 )
+from .online_ai import MISTRAL_API_URL, MistralClient, is_mistral_model, mistral_api_key
 
 MAX_AGENT_STEPS = 10
 MAX_TOOL_RESULT_CHARS = 24000
@@ -249,6 +250,87 @@ class AgentRuntime:
             "rule": "Use tools for calculations and respect metric-specific coverage.",
         }
 
+    @staticmethod
+    def _mistral_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Convert the Ollama-shaped tool transcript to the Mistral format."""
+        converted: list[dict[str, Any]] = []
+        for message in messages:
+            item = dict(message)
+            if item.get("role") == "tool" and "tool_name" in item:
+                item["tool_call_id"] = str(item.pop("tool_name"))
+            converted.append(item)
+        return converted
+
+    def _mistral_chat_once(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        num_ctx: int,
+        num_predict: int,
+        cancel_callback: Callable[[], bool] | None,
+    ) -> dict[str, Any]:
+        if not mistral_api_key():
+            raise LocalAIError(_("Mistral API key is not configured."))
+        try:
+            response = requests.post(
+                MISTRAL_API_URL,
+                headers={
+                    "Authorization": f"Bearer {mistral_api_key()}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": self._mistral_messages(messages),
+                    "tools": tools,
+                    "tool_choice": "auto",
+                    "stream": False,
+                    "max_tokens": num_predict,
+                    "temperature": 0.15,
+                },
+                timeout=(15, 900),
+            )
+        except requests.RequestException as exc:
+            raise LocalAIError(_("Mistral agent request failed: {error}", error=exc)) from exc
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise LocalAIError(_("Mistral returned invalid agent JSON.")) from exc
+        if response.status_code >= 400:
+            error = payload.get("message")
+            if not error and isinstance(payload.get("error"), dict):
+                error = payload["error"].get("message") or payload["error"].get("type")
+            raise LocalAIError(
+                _("Mistral agent request failed: {error}", error=error or response.reason)
+            )
+        choices = payload.get("choices") or []
+        message = choices[0].get("message") if choices and isinstance(choices[0], dict) else None
+        if not isinstance(message, dict):
+            raise LocalAIError(_("Mistral returned no agent message."))
+        usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+        telemetry = {
+            "prompt_eval_count": usage.get("prompt_tokens"),
+            "eval_count": usage.get("completion_tokens"),
+            "eval_duration": 0,
+        }
+        self._emit_agent_usage(telemetry, num_ctx=num_ctx, num_predict=num_predict)
+        assistant_content = str(message.get("content") or "").strip()
+        if assistant_content:
+            self._emit_agent_trace("Agent", "Runtime", assistant_content, kind="assistant")
+        tool_calls = message.get("tool_calls") if isinstance(message.get("tool_calls"), list) else []
+        for call in tool_calls[:6]:
+            if not isinstance(call, dict):
+                continue
+            name = _tool_name(call) or "tool"
+            self._emit_agent_trace(
+                "Agent",
+                name,
+                _json_text(_tool_arguments(call), 6000),
+                kind="tool_call",
+            )
+        return message
+
     def _chat_once(
         self,
         *,
@@ -260,6 +342,17 @@ class AgentRuntime:
         think: bool,
         cancel_callback: Callable[[], bool] | None,
     ) -> dict[str, Any]:
+        if is_mistral_model(model):
+            if cancel_callback and cancel_callback():
+                raise AIAnalysisCancelled(_("Analysis stopped."))
+            return self._mistral_chat_once(
+                model=model,
+                messages=messages,
+                tools=tools,
+                num_ctx=num_ctx,
+                num_predict=num_predict,
+                cancel_callback=cancel_callback,
+            )
         if cancel_callback and cancel_callback():
             raise AIAnalysisCancelled(_("Analysis stopped."))
         try:
@@ -453,13 +546,15 @@ class AgentRuntime:
                     elif name == "ask_user_feedback" and result.get("queued"):
                         event(_("Targeted feedback question queued for the user."))
                 tool_text = _json_text(result)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_name": name,
-                        "content": tool_text,
-                    }
-                )
+                tool_message: dict[str, Any] = {
+                    "role": "tool",
+                    "content": tool_text,
+                }
+                if is_mistral_model(model):
+                    tool_message["tool_call_id"] = str(call.get("id") or name)
+                else:
+                    tool_message["tool_name"] = name
+                messages.append(tool_message)
                 self._emit_agent_trace(name, "Agent", tool_text, kind="tool_result")
 
             simple_messages = [
@@ -754,7 +849,15 @@ class AgentAnalysisThread(QThread):
             )
         )
         profile = str(QSettings().value("ai/performance_profile", "standard") or "standard")
-        client = OptimizedOllamaClient(model=self.model, performance_profile=profile)
+        client = (
+            MistralClient(
+                model=self.model,
+                api_key=mistral_api_key(),
+                performance_profile=profile,
+            )
+            if is_mistral_model(self.model)
+            else OptimizedOllamaClient(model=self.model, performance_profile=profile)
+        )
         return client.analyze_stream(
             self.snapshot,
             self.question,
