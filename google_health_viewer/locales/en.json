@@ -789,5 +789,7 @@
   "☕ Support development": "☕ Support development",
   "✓ A valid OAuth client is already stored. Select a JSON only to replace it.": "✓ A valid OAuth client is already stored. Select a JSON only to replace it.",
   "✓ Valid OAuth client. The redirect URI is correct.": "✓ Valid OAuth client. The redirect URI is correct.",
-  "✕ This JSON cannot be used: {error}": "✕ This JSON cannot be used: {error}"
+  "✕ This JSON cannot be used: {error}": "✕ This JSON cannot be used: {error}",
+  "Open the Mistral key guide and review online data sharing.": "Open the Mistral key guide and review online data sharing.",
+  "Use the button below to create or paste an API key before starting the analysis.": "Use the button below to create or paste an API key before starting the analysis."
 }
