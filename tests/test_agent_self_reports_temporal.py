@@ -7,7 +7,7 @@ from google_health_viewer.agent_runtime_v2 import (
     _detect_durable_context_candidate,
     _detect_self_report,
 )
-from google_health_viewer.agent_store import AgentStore, PERSONAL_CONTEXT_KEY_SPECS
+from google_health_viewer.agent_store import PERSONAL_CONTEXT_KEY_SPECS, AgentStore
 
 
 def test_explicit_fatigue_statement_is_detected():
