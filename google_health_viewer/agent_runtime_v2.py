@@ -134,6 +134,12 @@ Personalisation synthesis policy:
   applies this time (for example, a late night that was previously explained by a social event).
 - Personalisation must remain evidence-bound: do not invent preferences, schedules, symptoms or causes that are not
   present in the current personal context, recent reports or deterministic health evidence.
+- When the user states a potentially durable first-person routine, preference or goal, treat it as a
+  personal-context candidate. Queue one concise confirmation asking whether it should be remembered for
+  future analyses. Do not silently promote an inference or a one-off subjective report to the stable model.
+- After explicit confirmation, use the saved context in later relevant analyses; if the user declines, keep
+  the information out of the stable model. Prefer a dated self-report for transient details and a confirmed
+  user-model entry only for clearly durable context.
 """
 
 _FACTORY_POLICY = """
@@ -167,6 +173,16 @@ Tool Factory decision policy:
 - If a fallback answer must derive a personal baseline from an already-returned semantic date series, use the median as the robust VitalChronicle baseline convention and state that choice once; do not switch between mean and median.
 - Final answers must be result-first. Do not narrate scratchpad deliberation, self-corrections, or step-by-step arithmetic.
 - If there are zero qualifying trigger events, report zero events and explain that response frequency/recovery cannot be estimated; do not manufacture a downstream estimate.
+- For event-response results, group consecutive trigger dates as one episode and use the episode end as
+  the anchor. Prefer recovery_days_after_episode (and its median) when describing time after a multi-day
+  episode; recovery_days_after_response is only the lag after the response night.
+- Treat sample_quality=insufficient_for_typical_estimate or can_estimate_typical_recovery=false as a hard
+  limitation: report a preliminary observation, never the user's usual/typical recovery.
+- The runtime provides a TOOL FACTORY OUTCOME object in the final prompt. Repeat its status accurately:
+  created/reused means persisted, not_persisted means no tool was saved, and not_needed means no tool
+  was required. Never claim tool creation without status=created or status=reused.
+- Sleep-stage rows use hours: deep is deep-stage duration only, while total_sleep is deep+REM+light.
+  Never label total_sleep as deep sleep.
 """
 
 
@@ -282,6 +298,50 @@ def _detect_self_report(question: str) -> dict[str, str] | None:
     return None
 
 
+_DURABLE_CONTEXT_MARKERS = {
+    "sleep_schedule_context": (
+        "di solito dormo",
+        "normalmente dormo",
+        "di solito vado a letto",
+        "normalmente vado a letto",
+        "la mia routine del sonno",
+    ),
+    "current_training_goal": (
+        "il mio obiettivo",
+        "sto cercando di allenarmi",
+        "ho ricominciato ad allenarmi",
+        "ho ricominciato palestra",
+        "mi alleno",
+        "faccio palestra",
+    ),
+    "recent_training_context": (
+        "mi sono allenato",
+        "mi sono allenata",
+        "ho fatto un allenamento",
+        "ho pedalato",
+        "sono andato in bici",
+        "sono andata in bici",
+    ),
+}
+
+
+def _detect_durable_context_candidate(question: str) -> dict[str, Any] | None:
+    text = question.strip()
+    folded = text.casefold()
+    if not text or text.endswith(("?", "？")):
+        return None
+    for key, markers in _DURABLE_CONTEXT_MARKERS.items():
+        if any(marker in folded for marker in markers):
+            temporary = key == "recent_training_context"
+            return {
+                "model_key": key,
+                "statement": text,
+                "temporal_scope": "temporary" if temporary else "stable",
+                "ttl_days": 42 if temporary else None,
+            }
+    return None
+
+
 def _self_report_follow_up(category: str) -> tuple[str, str]:
     if category == "fatigue":
         return (
@@ -382,6 +442,11 @@ class AgentRuntime(base_rt.AgentRuntime):
     ) -> str:
         event(_("Agent: finalising with the evidence already collected…"))
         self._telemetry_phase = "agent final"
+        factory_outcome = dict(getattr(self, "_last_factory_outcome", {}) or {})
+        if factory_outcome.get("status") == "pending":
+            factory_outcome["status"] = (
+                "not_persisted" if factory_outcome.get("attempts", 0) else "not_needed"
+            )
         final_messages = [
             *messages,
             {
@@ -399,6 +464,16 @@ class AgentRuntime(base_rt.AgentRuntime):
                     "recent self-reports already present in the session when they materially improve the "
                     "interpretation or recommendations; keep subjective reports explicitly separate from "
                     "measured evidence."
+                ),
+            },
+        ]
+            {
+                "role": "system",
+                "content": (
+                    "TOOL FACTORY OUTCOME (runtime evidence): "
+                    + base_rt._json_text(factory_outcome, 2000)
+                    + ". State this outcome accurately if the user is evaluating tool creation. "
+                    "Do not imply persistence when the status is not_persisted or not_needed."
                 ),
             },
         ]
