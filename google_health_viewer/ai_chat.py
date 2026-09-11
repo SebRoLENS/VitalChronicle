@@ -39,6 +39,7 @@ from .ai_conversations import ConversationStore
 from .ai_engine import TOKEN_USAGE_PREFIX
 from .branding import APP_NAME
 from .i18n import _
+from .online_ai import is_mistral_model
 from .workers import AIAnalysisThread
 
 
@@ -80,6 +81,7 @@ class AIChatWindow(QMainWindow):
         model_provider: Callable[[], str],
         tokens_provider: Callable[[], int],
         context_limit_provider: Callable[[], int | None],
+        online_prepare_provider: Callable[[], bool] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -93,6 +95,7 @@ class AIChatWindow(QMainWindow):
         self.model_provider = model_provider
         self.tokens_provider = tokens_provider
         self.context_limit_provider = context_limit_provider
+        self.online_prepare_provider = online_prepare_provider
         self.current_thread_id: str | None = None
         self.analysis_thread: AIAnalysisThread | None = None
         self.snapshot_thread: SnapshotBuildThread | None = None
@@ -507,6 +510,13 @@ class AIChatWindow(QMainWindow):
             return
         thread = self._current_thread()
         if not thread:
+            return
+        selected_model = str(thread.get("model") or self.model_provider()).strip()
+        if (
+            is_mistral_model(selected_model)
+            and self.online_prepare_provider is not None
+            and not self.online_prepare_provider()
+        ):
             return
         display_question = question.strip() or _(
             "Analyse my complete health history deeply and explain the strongest useful patterns."

@@ -18,6 +18,7 @@ from .ai_model_catalog import is_cloud_model, model_memory_gb
 from .i18n import _
 
 MAX_SUGGESTED_MODELS = 10
+MISTRAL_MODEL = "mistral-small-latest"
 
 
 def _model_key(model: str) -> str:
@@ -111,7 +112,7 @@ def ordered_model_choices(
         for model in _unique_models(installed)
         if model_fits_hardware(model, hardware)
     ]
-    suggestions = list(optimal_model_options(catalog, hardware))
+    suggestions = [MISTRAL_MODEL, *optimal_model_options(catalog, hardware)]
     result = list(installed_models)
 
     last = last_used.strip()
@@ -250,7 +251,7 @@ def install_ai_model_selector(main_window_module) -> None:
             for index in range(combo.count())
             if combo.itemText(index).strip()
         )
-        choices = list(optimal_model_options(initial_catalog, hardware))
+        choices = [MISTRAL_MODEL, *optimal_model_options(initial_catalog, hardware)]
         if (
             last_used
             and model_fits_hardware(last_used, hardware)
