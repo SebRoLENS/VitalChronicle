@@ -133,6 +133,50 @@ QFrame#aiActivityPanel {
     border: 1px solid #AECBFA;
     border-radius: 12px;
 }
+QFrame#agentFeedbackPanel {
+    background: #FFF8E1;
+    border: 2px solid #F2C779;
+    border-radius: 14px;
+}
+QLabel#agentFeedbackBadge {
+    color: #8A4B08;
+    background: #FCE8B2;
+    border-radius: 8px;
+    padding: 5px 9px;
+    font-size: 8.8pt;
+    font-weight: 800;
+}
+QLabel#agentFeedbackTitle {
+    color: #8A4B08;
+    font-size: 12pt;
+    font-weight: 800;
+}
+QLabel#agentFeedbackQuestionHeading {
+    color: #5F6368;
+    font-size: 9.5pt;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+QLabel#agentFeedbackQuestion {
+    color: #202124;
+    background: #FFFFFF;
+    border: 1px solid #F2C779;
+    border-radius: 9px;
+    padding: 11px 13px;
+    font-size: 12pt;
+    font-weight: 700;
+}
+QLabel#agentFeedbackReason, QLabel#agentFeedbackInstruction {
+    color: #5F6368;
+    font-size: 9.5pt;
+}
+QPlainTextEdit#agentFeedbackAnswer {
+    background: #FFFFFF;
+    border: 2px solid #AECBFA;
+    border-radius: 9px;
+    padding: 8px;
+    min-height: 54px;
+}
 QLabel#activityTitle { color: #174EA6; font-weight: 700; font-size: 10.5pt; }
 QLabel#activityElapsed { color: #174EA6; font-weight: 700; }
 QLabel#activityHint { color: #5F6368; }
