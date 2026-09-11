@@ -11,6 +11,7 @@ from .api import ApiError, GoogleHealthClient
 from .constants import DATA_TYPES
 from .i18n import _
 from .local_ai import AIAnalysisCancelled, LocalAIError, OllamaClient
+from .online_ai import MistralClient, is_mistral_model, mistral_api_key
 from .oauth import CredentialStore, OAuthError, authenticate
 from .self_update import UpdateTarget, install_update
 from .storage import HealthStore
@@ -219,7 +220,11 @@ class AIStatusThread(QThread):
 
     def run(self) -> None:
         self.completed.emit(
-            OllamaClient(model=self.model, hardware_profile=self.hardware_profile).status()
+            (
+                MistralClient(model=self.model, api_key=mistral_api_key()).status()
+                if is_mistral_model(self.model)
+                else OllamaClient(model=self.model, hardware_profile=self.hardware_profile).status()
+            )
         )
 
 
@@ -310,9 +315,17 @@ class AIAnalysisThread(QThread):
         try:
             profile = str(QSettings().value("ai/performance_profile", "standard") or "standard")
             configured_reasoning = reasoning_value(self.model, profile)
-            client = OptimizedOllamaClient(
-                model=self.model,
-                performance_profile=profile,
+            client = (
+                MistralClient(
+                    model=self.model,
+                    api_key=mistral_api_key(),
+                    performance_profile=profile,
+                )
+                if is_mistral_model(self.model)
+                else OptimizedOllamaClient(
+                    model=self.model,
+                    performance_profile=profile,
+                )
             )
             original_chat_stream = client._chat_stream
 
