@@ -292,6 +292,18 @@ class FactoryGateRuntime(AgentRuntime):
                     }
                 ],
             }
+        if self.turn == 5:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "forced_factory_tool",
+                            "arguments": {},
+                        }
+                    }
+                ],
+            }
         return {"content": "Risposta finale dopo la decisione della Tool Factory."}
 
 
@@ -316,8 +328,9 @@ def test_complex_query_stops_repeated_raw_metric_probing_and_forces_factory(tmp_
     )
 
     assert answer.startswith("Risposta finale")
-    assert runtime.turn == 5
+    assert runtime.turn == 6
     assert runtime.available_by_turn[3] == {"create_learned_tool"}
+    assert runtime.available_by_turn[4] == {"forced_factory_tool"}
     assert any("raw-series probing stopped" in event.lower() for event in events)
     assert any("registry checked" in event.lower() for event in events)
 
@@ -360,6 +373,18 @@ class GateRefusalRuntime(AgentRuntime):
                     }
                 ],
             }
+        if self.turn == 7:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "gate_resolved_tool",
+                            "arguments": {},
+                        }
+                    }
+                ],
+            }
         return {"content": "Risposta finale dopo la creazione del tool."}
 
 
@@ -382,9 +407,10 @@ def test_factory_gate_rejects_direct_answer_until_capability_is_resolved(tmp_pat
         event_callback=events.append,
     )
     assert answer.startswith("Risposta finale dopo")
-    assert runtime.turn == 7
+    assert runtime.turn == 8
     assert runtime.available_by_turn[4] == {"create_learned_tool"}
     assert runtime.available_by_turn[5] == {"create_learned_tool"}
+    assert runtime.available_by_turn[6] == {"gate_resolved_tool"}
     assert any("direct answer blocked" in event.lower() for event in events)
 
 
@@ -420,6 +446,18 @@ class ToolNameAsMetricRuntime(AgentRuntime):
                                 "capability": "analysis.composed.personal_baseline.temporal_event_response",
                                 "pipeline": [{"op": "return"}],
                             },
+                        }
+                    }
+                ],
+            }
+        if self.turn == 3:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "semantic_metric_router",
+                            "arguments": {},
                         }
                     }
                 ],
