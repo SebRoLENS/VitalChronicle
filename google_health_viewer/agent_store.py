@@ -71,7 +71,7 @@ PERSONAL_CONTEXT_KEY_SPECS: dict[str, dict[str, Any]] = {
         "markers": (
             "mi bastano",
             "ho bisogno di",
-            "con .* ore di sonno sto bene",
+            "ore di sonno sto bene",
             "mi sento riposato con",
             "mi sento riposata con",
         ),
@@ -300,7 +300,6 @@ PERSONAL_CONTEXT_KEY_SPECS: dict[str, dict[str, Any]] = {
             "preferisco vedere",
             "voglio che l'analisi",
             "mi interessa soprattutto",
-            "mostrami",
             "considera sempre",
         ),
     },
