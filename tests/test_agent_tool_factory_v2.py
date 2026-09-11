@@ -15,7 +15,10 @@ from google_health_viewer.agent_runtime_v2 import (
     _is_comprehensive_analysis,
 )
 from google_health_viewer.agent_store import AgentStore
-from google_health_viewer.agent_tool_factory import EnhancedSafeToolExecutor
+from google_health_viewer.agent_tool_factory import (
+    EXTRA_BUILTIN_SPEC,
+    EnhancedSafeToolExecutor,
+)
 from google_health_viewer.ai_engine import TOKEN_USAGE_PREFIX
 
 
@@ -958,9 +961,6 @@ def test_comprehensive_analysis_forces_personalized_final_synthesis(tmp_path):
 
 
 def test_sleep_stage_result_contract_separates_deep_and_total_sleep():
-    executor = StubToolExecutor(DummyHealthStore(Path(".")), AgentStore(Path(":memory:")))
-    result = executor._tool_get_sleep_stage_series({})["daily_stages"]
-    # The stub intentionally models deep only; the production contract documents
-    # total_sleep separately and learned extraction must choose the requested field.
-    assert result[0]["deep"] == 1.5
-    assert "total_sleep" not in result[0]
+    description = EXTRA_BUILTIN_SPEC["description"]
+    assert "deep-sleep duration only" in description
+    assert "total_sleep" in description
