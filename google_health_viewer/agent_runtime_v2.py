@@ -466,7 +466,6 @@ class AgentRuntime(base_rt.AgentRuntime):
                     "measured evidence."
                 ),
             },
-        ]
             {
                 "role": "system",
                 "content": (
