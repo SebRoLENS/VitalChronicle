@@ -202,7 +202,7 @@ PERSONAL_CONTEXT_KEY_SPECS: dict[str, dict[str, Any]] = {
         "default_scope": "temporary",
         "ttl_days": 42,
         "markers": (
-            "sono sotto stress",
+            "sotto stress",
             "periodo stressante",
             "il lavoro mi stressa",
             "sto vivendo un periodo difficile",
