@@ -41,6 +41,15 @@ _ITALIAN_METADATA_TOKENS = {
     "valori",
 }
 
+_CANONICAL_ENGLISH_NAMES = {
+    "analysis.composed.training_context.recovery_comparison": (
+        "consecutive_vs_rest_recovery_comparison"
+    ),
+    "analysis.composed.training_context.sleep_conditioned_return_comparison": (
+        "compare_consecutive_training_recovery_by_following_sleep"
+    ),
+}
+
 
 def _words(value: Any) -> set[str]:
     return {
@@ -63,6 +72,15 @@ def _metadata_language_errors(args: dict[str, Any]) -> list[str]:
                 + ", ".join(italian[:6])
             )
     return errors
+
+
+def _canonicalize_known_english_metadata(prepared: dict[str, Any]) -> dict[str, Any]:
+    result = dict(prepared)
+    capability = str(result.get("capability") or "").strip()
+    canonical_name = _CANONICAL_ENGLISH_NAMES.get(capability)
+    if canonical_name:
+        result["name"] = canonical_name
+    return result
 
 
 def install_tool_factory_english_patch() -> None:
@@ -102,6 +120,7 @@ def install_tool_factory_english_patch() -> None:
         prepared, meta = original_prepare(executor, args, run_dry=run_dry)
         if prepared is None:
             return prepared, meta
+        prepared = _canonicalize_known_english_metadata(prepared)
         errors = _metadata_language_errors(prepared)
         if not errors:
             return prepared, meta
