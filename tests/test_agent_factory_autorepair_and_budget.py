@@ -57,8 +57,14 @@ def test_threshold_factory_failure_is_rewritten_to_canonical_deterministic_tool(
                     "percent": 30,
                     "as": "giorni_sovraccarico",
                 },
-                {"op": "load_series", "arguments": {"metric": "daily-heart-rate-variability"}},
-                {"op": "load_series", "arguments": {"metric": "daily-resting-heart-rate"}},
+                {
+                    "op": "load_series",
+                    "arguments": {"metric": "daily-heart-rate-variability"},
+                },
+                {
+                    "op": "load_series",
+                    "arguments": {"metric": "daily-resting-heart-rate"},
+                },
             ],
         }
     )
@@ -84,10 +90,12 @@ def test_threshold_primitive_is_present_in_dsl_tool_enum():
 
 
 def test_agent_context_and_schema_budgets_are_bounded():
+    reliability._install_runtime_budget()
+
     assert runtime_v2.MAX_EVIDENCE_ENTRIES == 5
-    assert runtime_v2.MAX_EVIDENCE_LIST_ITEMS == 12
-    assert runtime_v2.MAX_EVIDENCE_ENTRY_CHARS == 3600
-    assert runtime_v2.MAX_EVIDENCE_LEDGER_CHARS == 8500
+    assert runtime_v2.MAX_EVIDENCE_LIST_ITEMS == 10
+    assert runtime_v2.MAX_EVIDENCE_ENTRY_CHARS == 3200
+    assert runtime_v2.MAX_EVIDENCE_LEDGER_CHARS == 7600
 
     schemas = [
         {
@@ -105,6 +113,8 @@ def test_agent_context_and_schema_budgets_are_bounded():
 
 
 def test_large_json_evidence_is_hard_capped():
+    reliability._install_runtime_budget()
+
     text = base_rt._json_text({"values": list(range(5000))}, 20000)
-    assert len(text) <= 6100
+    assert len(text) <= 5100
     assert "truncated" in text
