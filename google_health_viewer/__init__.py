@@ -1,6 +1,12 @@
 """VitalChronicle: a local-first Google Health dashboard."""
 
 from . import analysis as _analysis
+from .agent_factory_request_preserve_patch import (
+    install_factory_request_preserve_patch as _install_factory_request_preserve_patch,
+)
+from .agent_hard_query_lazy_patch import (
+    install_hard_query_lazy_patch as _install_hard_query_lazy_patch,
+)
 from .agent_runtime_adaptive_patch import (
     install_agent_runtime_adaptive_patch as _install_agent_runtime_adaptive_patch,
 )
@@ -9,6 +15,9 @@ from .agent_runtime_efficiency_patch import (
 )
 from .agent_tool_factory_compat_patch import (
     install_tool_factory_compat_patch as _install_tool_factory_compat_patch,
+)
+from .agent_tool_factory_english_patch import (
+    install_tool_factory_english_patch as _install_tool_factory_english_patch,
 )
 from .agent_tool_factory_reliability_patch import (
     install_agent_tool_factory_reliability_patch as _install_agent_tool_factory_reliability_patch,
@@ -52,3 +61,6 @@ _install_semantic_tool_factory_guard()
 _install_semantic_tool_factory_compat_patch()
 _install_agent_runtime_efficiency_patch()
 _install_agent_runtime_adaptive_patch()
+_install_hard_query_lazy_patch()
+_install_factory_request_preserve_patch()
+_install_tool_factory_english_patch()

@@ -29,10 +29,12 @@ def test_composite_tool_is_required_for_threshold_and_recovery_questions():
     assert "analyze_post_event_recovery" in recovery
 
 
-def test_agent_output_budget_is_hard_capped_by_context_and_phase():
+def test_agent_output_budget_scales_with_context_for_tool_turns():
     assert efficiency._agent_predict_cap(8192, True) == 640
-    assert efficiency._agent_predict_cap(16384, True) == 900
-    assert efficiency._agent_predict_cap(32768, True) == 1100
+    assert efficiency._agent_predict_cap(16384, True) == 1200
+    assert efficiency._agent_predict_cap(32768, True) == 2200
+    assert efficiency._agent_predict_cap(65536, True) == 2800
+    assert efficiency._agent_predict_cap(131072, True) == 3200
     assert efficiency._agent_predict_cap(8192, False) == 1600
     assert efficiency._agent_predict_cap(16384, False) == 2200
     assert efficiency._agent_predict_cap(32768, False) == 2800

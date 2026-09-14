@@ -10,7 +10,15 @@ _RUNTIME_INSTALLED = False
 def _agent_predict_cap(num_ctx: int, has_tools: bool) -> int:
     context = max(1, int(num_ctx))
     if has_tools:
-        return 640 if context <= 8192 else 900 if context <= 16384 else 1100
+        if context <= 8192:
+            return 640
+        if context <= 16384:
+            return 1200
+        if context <= 32768:
+            return 2200
+        if context <= 65536:
+            return 2800
+        return 3200
     return 1600 if context <= 8192 else 2200 if context <= 16384 else 2800
 
 
