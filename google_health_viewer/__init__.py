@@ -1,8 +1,17 @@
 """VitalChronicle: a local-first Google Health dashboard."""
 
 from . import analysis as _analysis
+from .agent_runtime_efficiency_patch import (
+    install_agent_runtime_efficiency_patch as _install_agent_runtime_efficiency_patch,
+)
+from .agent_tool_factory_compat_patch import (
+    install_tool_factory_compat_patch as _install_tool_factory_compat_patch,
+)
 from .agent_tool_factory_reliability_patch import (
     install_agent_tool_factory_reliability_patch as _install_agent_tool_factory_reliability_patch,
+)
+from .agent_tool_factory_schema_guard import (
+    install_schema_aware_tool_factory as _install_schema_aware_tool_factory,
 )
 from .ai_query_semantics import install_ai_query_semantics as _install_ai_query_semantics
 from .deterministic_context_patch import (
@@ -51,3 +60,17 @@ _install_ai_query_semantics()
 # agent runtime. Runtime token/resource limits are installed lazily when the
 # personal agent executor is actually created.
 _install_agent_tool_factory_reliability_patch()
+
+# Compile learned tools against the schemas they call and against the live metric
+# catalogue. Existing broken learned tools are repaired or disabled before reuse,
+# and new tools must pass a bounded dry-run before they can be persisted as active.
+_install_schema_aware_tool_factory()
+
+# Preserve established Tool Factory error/repair contracts and lightweight unit
+# construction while layering schema-aware compilation on top.
+_install_tool_factory_compat_patch()
+
+# Reuse deterministic evidence already prepared for the conversation, recognise
+# personal-median requests as factory candidates, and enforce the local-agent token
+# cap on the concrete runtime even when the desktop reasoning wrapper is installed first.
+_install_agent_runtime_efficiency_patch()

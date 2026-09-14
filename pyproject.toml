@@ -59,6 +59,7 @@ target-version = "py310"
 "google_health_viewer/agent_tools.py" = ["I001"]
 "google_health_viewer/agent_localization.py" = ["I001", "UP035", "F401"]
 "google_health_viewer/agent_overview.py" = ["I001", "F401"]
+"google_health_viewer/agent_tool_factory_schema_guard.py" = ["B010", "SIM102"]
 "google_health_viewer/ai_query_planner.py" = ["RUF100", "TRY004", "F401", "I001"]
 "google_health_viewer/ai_query_planner_core.py" = ["RUF100", "TRY004"]
 "tests/test_ai_query_planner.py" = ["RUF100"]
