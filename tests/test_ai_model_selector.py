@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from google_health_viewer.ai_hardware import HardwareInfo
 from google_health_viewer.ai_model_selector import (
+    _status_is_online_provider,
     optimal_model_options,
     ordered_model_choices,
 )
+from google_health_viewer.online_ai import MISTRAL_MODEL
 
 
 def _cpu_hardware(ram_gb: float) -> HardwareInfo:
@@ -86,3 +90,17 @@ def test_midrange_machine_does_not_offer_very_large_catalog_models():
     assert "qwen3.5:9b" in models
     assert "qwen3.8" not in models
     assert "gpt-oss:120b" not in models
+
+
+def test_online_provider_status_is_not_treated_as_local_ollama_inventory():
+    online_status = SimpleNamespace(
+        models=(MISTRAL_MODEL,),
+        catalog_models=(MISTRAL_MODEL,),
+    )
+    local_status = SimpleNamespace(
+        models=("qwen3:8b",),
+        catalog_models=("qwen3:8b", "qwen3.8"),
+    )
+
+    assert _status_is_online_provider(online_status)
+    assert not _status_is_online_provider(local_status)
