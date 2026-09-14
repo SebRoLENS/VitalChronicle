@@ -1,6 +1,9 @@
 """VitalChronicle: a local-first Google Health dashboard."""
 
 from . import analysis as _analysis
+from .agent_runtime_efficiency_patch import (
+    install_agent_runtime_efficiency_patch as _install_agent_runtime_efficiency_patch,
+)
 from .agent_tool_factory_reliability_patch import (
     install_agent_tool_factory_reliability_patch as _install_agent_tool_factory_reliability_patch,
 )
@@ -59,3 +62,8 @@ _install_agent_tool_factory_reliability_patch()
 # catalogue. Existing broken learned tools are repaired or disabled before reuse,
 # and new tools must pass a bounded dry-run before they can be persisted as active.
 _install_schema_aware_tool_factory()
+
+# Reuse deterministic evidence already prepared for the conversation, recognise
+# personal-median requests as factory candidates, and enforce the local-agent token
+# cap on the concrete runtime even when the desktop reasoning wrapper is installed first.
+_install_agent_runtime_efficiency_patch()
