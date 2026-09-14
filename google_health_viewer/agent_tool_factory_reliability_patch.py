@@ -414,13 +414,13 @@ def _install_runtime_budget() -> None:
     def compact_history(
         history: list[dict[str, str]] | None,
         *,
-        maximum: int = 3,
-        message_limit: int = 700,
+        maximum: int = 4,
+        message_limit: int = 600,
     ) -> list[dict[str, str]]:
         return original_history(
             history,
-            maximum=min(3, max(1, int(maximum))),
-            message_limit=min(700, max(200, int(message_limit))),
+            maximum=min(4, max(1, int(maximum))),
+            message_limit=min(600, max(200, int(message_limit))),
         )
 
     def budgeted_chat(
@@ -584,6 +584,10 @@ def install_agent_tool_factory_reliability_patch() -> None:
         if result.get("status") in {"invalid_pipeline", "invalid_spec"}:
             result["canonical_threshold_response_pipeline"] = (
                 _THRESHOLD_PIPELINE_EXAMPLE
+            )
+            result["threshold_response_instruction"] = (
+                "For personal-baseline threshold response analyses, rebuild the learned tool with "
+                f"{_BUILTIN_NAME} using the canonical pipeline instead of manually joining raw series."
             )
         return result
 
