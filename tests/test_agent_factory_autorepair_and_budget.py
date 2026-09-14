@@ -97,6 +97,14 @@ def test_agent_context_and_schema_budgets_are_bounded():
     assert runtime_v2.MAX_EVIDENCE_ENTRY_CHARS == 3200
     assert runtime_v2.MAX_EVIDENCE_LEDGER_CHARS == 7600
 
+    history = [
+        {"role": "user", "content": "x" * 2000},
+        {"role": "assistant", "content": "y" * 2000},
+    ] * 4
+    compacted = base_rt.compact_agent_history(history, maximum=20, message_limit=2000)
+    assert len(compacted) == 4
+    assert all(len(item["content"]) <= 600 for item in compacted)
+
     schemas = [
         {
             "type": "function",
