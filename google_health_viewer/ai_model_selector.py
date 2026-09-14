@@ -19,6 +19,8 @@ from .i18n import _
 from .online_ai import ONLINE_MODELS, is_online_model
 
 MAX_SUGGESTED_MODELS = 10
+
+
 def _model_key(model: str) -> str:
     value = model.strip().lower()
     return value.removesuffix(":latest")
@@ -182,6 +184,21 @@ def _refresh_hardware_summary(window, hardware: HardwareInfo) -> None:
     )
 
 
+def _status_is_online_provider(status) -> bool:
+    """Return True when a status payload describes a remote provider, not Ollama.
+
+    Online provider status objects reuse ``OllamaStatus`` for the shared UI, so their
+    ``models`` field must never be interpreted as the set of locally installed models.
+    """
+
+    models = tuple(str(model).strip() for model in status.models if str(model).strip())
+    catalog = tuple(
+        str(model).strip() for model in status.catalog_models if str(model).strip()
+    )
+    candidates = (*models, *catalog)
+    return bool(candidates) and all(is_online_model(model) for model in candidates)
+
+
 def _rebuild_combo(window, status) -> None:
     combo = window.ai_model_combo
     last_used = str(window.settings.value("ai/model", combo.currentText()) or combo.currentText())
@@ -319,6 +336,18 @@ def install_ai_model_selector(main_window_module) -> None:
         self._update_online_model_ui(model)
 
     def ai_status_ready(self, status) -> None:
+        if _status_is_online_provider(status):
+            # The shared legacy handler is still useful for its provider-ready/error
+            # message, but it temporarily treats ``status.models`` as Ollama models.
+            # Preserve the actual local installation cache and, crucially, do not
+            # rebuild the combo from the remote provider's catalogue.
+            known_local_models = set(getattr(self, "_known_ai_models", set()))
+            original_status_ready(self, status)
+            self._known_ai_models = known_local_models
+            self._refresh_ai_model_styles()
+            self._update_online_model_ui(self.ai_model_combo.currentText())
+            return
+
         original_status_ready(self, status)
         if status.online:
             _rebuild_combo(self, status)
