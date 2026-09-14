@@ -1,6 +1,9 @@
 """VitalChronicle: a local-first Google Health dashboard."""
 
 from . import analysis as _analysis
+from .agent_tool_factory_reliability_patch import (
+    install_agent_tool_factory_reliability_patch as _install_agent_tool_factory_reliability_patch,
+)
 from .ai_query_semantics import install_ai_query_semantics as _install_ai_query_semantics
 from .deterministic_context_patch import (
     install_deterministic_context_patch as _install_deterministic_context_patch,
@@ -43,3 +46,8 @@ _install_scientific_context_preserve_core()
 # Keep pure definitions separate from personal-data analysis and ensure Google
 # Health Daily records are never mistaken for partial intraday measurements.
 _install_ai_query_semantics()
+
+# Register Tool Factory validation/repair hooks without importing the Qt-heavy
+# agent runtime. Runtime token/resource limits are installed lazily when the
+# personal agent executor is actually created.
+_install_agent_tool_factory_reliability_patch()
