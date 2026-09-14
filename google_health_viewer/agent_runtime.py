@@ -36,6 +36,7 @@ CALIBRATION_VERSION = 1
 AGENT_SYSTEM_PROMPT = """You are VitalChronicle's read-only personal health agent.
 Use deterministic tools for calculations and check coverage; missing values are unavailable, not zero. Preserve units and date semantics (sleep belongs to wake/session-end date; today may be partial).
 Reuse exact tools. Learned tools are declarative only: no code, shell, files, network, browser, or health-data writes.
+Persistent check-ins are monitoring rules, not learned tools; they run only while VitalChronicle is open.
 Keep measurements, user reports, context, and explanations distinct; correlation is not causation. State material uncertainty. Never diagnose or change treatment.
 Use the fewest useful calls and answer result-first without exposing scratchpad reasoning.
 """
@@ -126,6 +127,13 @@ def online_tool_subset(
         "ask_user_feedback",
     }
     always.update(required_names or ())
+    if any(
+        marker in text
+        for marker in ("monitor", "ricord", "segnal", "promemoria", "track", "remind", "check-in")
+    ):
+        always.update(
+            {"create_monitoring_rule", "record_monitoring_observation", "list_monitoring_rules"}
+        )
     domain_terms = {
         "sleep.": ("sleep", "sonno", "notte", "dorm", "rem", "profondo", "risvegl"),
         "training.": (

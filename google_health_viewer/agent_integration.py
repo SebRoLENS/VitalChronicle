@@ -244,6 +244,7 @@ def _install_chat_integration(ai_chat_module) -> None:
                 panel.setVisible(False)
             self._agent_pending_feedback_id = None
             return
+        runtime.agent_store.queue_due_monitoring_feedback(self.current_thread_id)
         item = runtime.agent_store.pending_feedback(self.current_thread_id)
         if not item:
             panel.setVisible(False)

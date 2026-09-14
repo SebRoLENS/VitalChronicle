@@ -9,7 +9,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Iterable
 
-AGENT_SCHEMA_VERSION = 3
+AGENT_SCHEMA_VERSION = 4
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _CONFIRMATION_MARKERS = (
     "si",
@@ -33,6 +33,35 @@ def _is_explicit_confirmation(answer: str) -> bool:
     return normalized in _CONFIRMATION_MARKERS or normalized.startswith(
         ("si ", "sì ", "yes ", "esatto ", "corretto ", "confermo ")
     )
+
+
+_SELF_REPORT_OPERATIONAL_MARKERS = (
+    "vorrei monitor",
+    "voglio monitor",
+    "ricordami",
+    "ricordamelo",
+    "prepariamo un template",
+    "tracciare questi dati",
+    "i want to monitor",
+    "remind me",
+    "track this",
+    "prepare a template",
+)
+
+
+def normalize_self_report_statement(statement: str) -> str:
+    """Keep the personal observation while removing trailing workflow requests."""
+    text = statement.strip()
+    if not text:
+        return text
+    sentences = re.split(r"(?<=[.!?])\s+|[\r\n]+", text)
+    kept = [
+        sentence.strip()
+        for sentence in sentences
+        if sentence.strip()
+        and not any(marker in sentence.casefold() for marker in _SELF_REPORT_OPERATIONAL_MARKERS)
+    ]
+    return " ".join(kept).strip() or text
 
 PERSONAL_CONTEXT_KEY_SPECS: dict[str, dict[str, Any]] = {
     "sleep_schedule_context": {
@@ -527,6 +556,32 @@ class AgentStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_self_reports
                     ON self_reports(category, observed_at, created_at);
+                CREATE TABLE IF NOT EXISTS monitoring_rules (
+                    monitor_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    question TEXT NOT NULL,
+                    cadence_days INTEGER NOT NULL DEFAULT 1,
+                    keywords_json TEXT NOT NULL DEFAULT '[]',
+                    fields_json TEXT NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_prompted_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_monitoring_rules_status
+                    ON monitoring_rules(status, updated_at);
+                CREATE TABLE IF NOT EXISTS monitoring_observations (
+                    observation_id TEXT PRIMARY KEY,
+                    monitor_id TEXT NOT NULL,
+                    statement TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    context_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_monitoring_observations
+                    ON monitoring_observations(monitor_id, observed_at, created_at);
                 CREATE TABLE IF NOT EXISTS tool_events (
                     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at TEXT NOT NULL,
@@ -538,6 +593,7 @@ class AgentStore:
                 """
             )
             self._migrate_legacy_personal_context(db)
+            self._migrate_self_report_statements(db)
             db.execute(
                 "INSERT INTO agent_meta(key,value) VALUES('schema_version',?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -559,6 +615,17 @@ class AgentStore:
                 if not clean.endswith(("?", "？")):
                     return clean
         return None
+
+    @staticmethod
+    def _migrate_self_report_statements(db: sqlite3.Connection) -> None:
+        rows = db.execute("SELECT report_id,statement FROM self_reports").fetchall()
+        for row in rows:
+            normalized = normalize_self_report_statement(str(row["statement"] or ""))
+            if normalized and normalized != row["statement"]:
+                db.execute(
+                    "UPDATE self_reports SET statement=?,updated_at=? WHERE report_id=?",
+                    (normalized, _now(), row["report_id"]),
+                )
 
     @classmethod
     def _scrub_legacy_candidate(cls, value: Any, statement: str) -> Any:
@@ -832,6 +899,206 @@ class AgentStore:
                 (now, now, name),
             )
 
+    @staticmethod
+    def _monitor_row(row: sqlite3.Row) -> dict[str, Any]:
+        keys = set(row.keys())
+        return {
+            "monitor_id": str(row["monitor_id"]),
+            "name": str(row["name"]),
+            "title": str(row["title"]),
+            "description": str(row["description"]),
+            "question": str(row["question"]),
+            "cadence_days": int(row["cadence_days"]),
+            "keywords": _loads(row["keywords_json"], []),
+            "fields": _loads(row["fields_json"], []),
+            "status": str(row["status"]),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+            "last_prompted_at": row["last_prompted_at"],
+            "observation_count": int(row["observation_count"] or 0)
+            if "observation_count" in keys
+            else 0,
+            "last_observed_at": row["last_observed_at"]
+            if "last_observed_at" in keys
+            else None,
+        }
+
+    def list_monitoring_rules(self, *, include_inactive: bool = False) -> list[dict[str, Any]]:
+        where = "" if include_inactive else "WHERE r.status='active'"
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT r.*,COUNT(o.observation_id) AS observation_count,"
+                "MAX(o.observed_at) AS last_observed_at FROM monitoring_rules r "
+                "LEFT JOIN monitoring_observations o ON o.monitor_id=r.monitor_id "
+                f"{where} GROUP BY r.monitor_id ORDER BY r.name"
+            ).fetchall()
+        return [self._monitor_row(row) for row in rows]
+
+    def monitoring_rule(self, name: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT r.*,COUNT(o.observation_id) AS observation_count,"
+                "MAX(o.observed_at) AS last_observed_at FROM monitoring_rules r "
+                "LEFT JOIN monitoring_observations o ON o.monitor_id=r.monitor_id "
+                "WHERE r.name=? GROUP BY r.monitor_id",
+                (name,),
+            ).fetchone()
+        return self._monitor_row(row) if row else None
+
+    def create_monitoring_rule(self, spec: dict[str, Any]) -> dict[str, Any]:
+        name = str(spec.get("name") or "").strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9_]{2,63}", name):
+            raise ValueError("Monitoring-rule name must be snake_case")
+        question = str(spec.get("question") or "").strip()
+        if not question:
+            raise ValueError("Monitoring rules require a reminder question")
+        keywords = [
+            str(item).strip().casefold()[:80]
+            for item in (spec.get("keywords") or [])
+            if str(item).strip()
+        ][:12]
+        fields = [str(item).strip()[:80] for item in (spec.get("fields") or []) if str(item).strip()][
+            :8
+        ]
+        cadence = max(1, min(30, int(spec.get("cadence_days") or 1)))
+        now = _now()
+        existing = self.monitoring_rule(name)
+        monitor_id = str(existing.get("monitor_id")) if existing else str(uuid.uuid4())
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO monitoring_rules(monitor_id,name,title,description,question,cadence_days,"
+                "keywords_json,fields_json,status,created_at,updated_at,last_prompted_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET "
+                "title=excluded.title,description=excluded.description,question=excluded.question,"
+                "cadence_days=excluded.cadence_days,keywords_json=excluded.keywords_json,"
+                "fields_json=excluded.fields_json,status='active',updated_at=excluded.updated_at",
+                (
+                    monitor_id,
+                    name,
+                    str(spec.get("title") or name).strip()[:160],
+                    str(spec.get("description") or "").strip()[:1000],
+                    question[:1000],
+                    cadence,
+                    _json(keywords),
+                    _json(fields),
+                    "active",
+                    str(existing.get("created_at")) if existing else now,
+                    now,
+                    str(existing.get("last_prompted_at") or now) if existing else now,
+                ),
+            )
+        result = self.monitoring_rule(name) or {}
+        status = "updated" if existing else "created"
+        self.log_tool_event(
+            f"monitoring_rule_{status}",
+            f"Monitoring rule {name} {status}.",
+            payload={"monitor_id": monitor_id, "cadence_days": cadence, "keywords": keywords},
+        )
+        return {"status": status, "monitor": result}
+
+    def delete_monitoring_rule(self, name: str) -> bool:
+        with self._connect() as db:
+            row = db.execute("SELECT monitor_id FROM monitoring_rules WHERE name=?", (name,)).fetchone()
+            if row:
+                db.execute(
+                    "DELETE FROM monitoring_observations WHERE monitor_id=?",
+                    (row["monitor_id"],),
+                )
+            cursor = db.execute("DELETE FROM monitoring_rules WHERE name=?", (name,))
+        return bool(cursor.rowcount)
+
+    def record_monitoring_observation(
+        self,
+        name: str,
+        statement: str,
+        *,
+        observed_at: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        monitor = self.monitoring_rule(name)
+        statement = statement.strip()
+        if not monitor or monitor.get("status") != "active":
+            raise ValueError(f"Unknown or inactive monitoring rule: {name}")
+        if not statement:
+            raise ValueError("Monitoring observation cannot be empty")
+        now = datetime.now(timezone.utc)
+        observed = _parse_datetime(observed_at) or now
+        cutoff = (now - timedelta(hours=12)).isoformat()
+        with self._connect() as db:
+            duplicate = db.execute(
+                "SELECT observation_id FROM monitoring_observations WHERE monitor_id=? "
+                "AND statement=? AND created_at>=? ORDER BY created_at DESC LIMIT 1",
+                (monitor["monitor_id"], statement, cutoff),
+            ).fetchone()
+            if duplicate:
+                observation_id = str(duplicate["observation_id"])
+            else:
+                observation_id = str(uuid.uuid4())
+                db.execute(
+                    "INSERT INTO monitoring_observations(observation_id,monitor_id,statement,"
+                    "observed_at,context_json,created_at) VALUES(?,?,?,?,?,?)",
+                    (
+                        observation_id,
+                        monitor["monitor_id"],
+                        statement[:4000],
+                        observed.isoformat(),
+                        _json(context or {}),
+                        now.isoformat(),
+                    ),
+                )
+        return {
+            "observation_id": observation_id,
+            "monitor_name": name,
+            "statement": statement,
+            "observed_at": observed.isoformat(),
+        }
+
+    def capture_matching_monitoring_observations(self, statement: str) -> list[dict[str, Any]]:
+        text = statement.casefold()
+        captured = []
+        for monitor in self.list_monitoring_rules():
+            keywords = [str(item).casefold() for item in monitor.get("keywords", [])]
+            if keywords and any(keyword in text for keyword in keywords):
+                captured.append(
+                    self.record_monitoring_observation(
+                        monitor["name"], statement, context={"source": "conversation_keyword_match"}
+                    )
+                )
+        return captured
+
+    def queue_due_monitoring_feedback(self, thread_id: str | None = None) -> dict[str, Any] | None:
+        now = datetime.now(timezone.utc)
+        for monitor in self.list_monitoring_rules():
+            last_prompted = _parse_datetime(monitor.get("last_prompted_at"))
+            last_observed = _parse_datetime(monitor.get("last_observed_at"))
+            if last_observed and (not last_prompted or last_observed > last_prompted):
+                with self._connect() as db:
+                    db.execute(
+                        "UPDATE monitoring_rules SET last_prompted_at=?,updated_at=? WHERE monitor_id=?",
+                        (now.isoformat(), now.isoformat(), monitor["monitor_id"]),
+                    )
+                continue
+            if last_prompted and now < last_prompted + timedelta(days=monitor["cadence_days"]):
+                continue
+            item = self.ask_feedback(
+                monitor["question"],
+                thread_id=thread_id,
+                reason=f"Scheduled in-app check-in for {monitor['title']}",
+                learning_key=f"monitoring:{monitor['name']}",
+                context={
+                    "feedback_mode": "monitoring_observation",
+                    "monitor_name": monitor["name"],
+                    "fields": monitor.get("fields", []),
+                },
+            )
+            with self._connect() as db:
+                db.execute(
+                    "UPDATE monitoring_rules SET last_prompted_at=?,updated_at=? WHERE monitor_id=?",
+                    (now.isoformat(), now.isoformat(), monitor["monitor_id"]),
+                )
+            return item
+        return None
+
     def log_tool_event(
         self,
         event_type: str,
@@ -873,7 +1140,7 @@ class AgentStore:
         intensity: float | None = None,
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        statement = statement.strip()
+        statement = normalize_self_report_statement(statement)
         if not statement:
             raise ValueError("Self-report statement cannot be empty")
         now = datetime.now(timezone.utc)
@@ -1075,6 +1342,15 @@ class AgentStore:
                     source="explicit_user_confirmation",
                 )
             return self.feedback(feedback_id)
+        if context.get("feedback_mode") == "monitoring_observation":
+            monitor_name = str(context.get("monitor_name") or "").strip()
+            if monitor_name:
+                self.record_monitoring_observation(
+                    monitor_name,
+                    answer,
+                    context={"source": "scheduled_in_app_check_in", "feedback_id": feedback_id},
+                )
+            return self.feedback(feedback_id)
         self_report_id = str(context.get("self_report_id") or "").strip()
         if self_report_id:
             self.update_self_report_feedback(self_report_id, answer)
@@ -1214,6 +1490,7 @@ class AgentStore:
         with self._connect() as db:
             db.executescript(
                 "DELETE FROM tools; DELETE FROM user_model; DELETE FROM feedback; "
-                "DELETE FROM self_reports; DELETE FROM tool_events; DELETE FROM agent_meta;"
+                "DELETE FROM self_reports; DELETE FROM monitoring_observations; "
+                "DELETE FROM monitoring_rules; DELETE FROM tool_events; DELETE FROM agent_meta;"
             )
         self._initialize()

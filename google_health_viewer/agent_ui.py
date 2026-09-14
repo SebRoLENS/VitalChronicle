@@ -289,6 +289,31 @@ def _self_report_detail_text(item: dict[str, Any]) -> str:
     )
 
 
+def _monitor_detail_text(item: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            f"{_('Name')}: {_pretty_detail(item.get('name'))}",
+            f"{_('Status')}: {_pretty_detail(item.get('status'))}",
+            f"{_('Cadence')}: {_pretty_detail(item.get('cadence_days'))} day(s)",
+            f"{_('Observations')}: {_pretty_detail(item.get('observation_count'))}",
+            f"{_('Last prompted')}: {_pretty_detail(item.get('last_prompted_at'))}",
+            f"{_('Last observed')}: {_pretty_detail(item.get('last_observed_at'))}",
+            "",
+            _("Question"),
+            _pretty_detail(item.get("question")),
+            "",
+            _("Keywords"),
+            _pretty_detail(item.get("keywords")),
+            "",
+            _("Fields"),
+            _pretty_detail(item.get("fields")),
+            "",
+            _("Description"),
+            _pretty_detail(item.get("description")),
+        ]
+    )
+
+
 def _show_detail_dialog(parent: QWidget, title: str, text: str) -> None:
     dialog = QDialog(parent)
     dialog.setWindowTitle(title)
@@ -317,15 +342,17 @@ def refresh_personal_ai_page(window) -> None:
     builtins = sum(item["kind"] == "builtin" for item in tools)
     learned = sum(item["kind"] == "learned" and item["status"] == "active" for item in tools)
     superseded = sum(item["kind"] == "learned" and item["status"] == "superseded" for item in tools)
+    monitors = store.list_monitoring_rules()
     state = _("enabled") if runtime.enabled else _("disabled")
     window.agent_status_label.setText(
         _(
             "Personal agent {state} · {builtins} built-in tools · {learned} learned · "
-            "{superseded} superseded",
+            "{superseded} superseded · {monitors} monitoring rules",
             state=state,
             builtins=builtins,
             learned=learned,
             superseded=superseded,
+            monitors=len(monitors),
         )
     )
     calibrated = store.calibration_version() >= CALIBRATION_VERSION
@@ -381,6 +408,22 @@ def refresh_personal_ai_page(window) -> None:
             row.setData(0, Qt.UserRole, item)
             row.setToolTip(1, str(item.get("statement") or ""))
             window.agent_reports_tree.addTopLevelItem(row)
+
+    if hasattr(window, "agent_monitors_tree"):
+        window.agent_monitors_tree.clear()
+        for item in monitors:
+            row = QTreeWidgetItem(
+                [
+                    str(item.get("title") or item.get("name") or ""),
+                    str(item.get("cadence_days") or ""),
+                    str(item.get("observation_count") or 0),
+                    str(item.get("last_observed_at") or "—").replace("T", " ")[:16],
+                    str(item.get("status") or ""),
+                ]
+            )
+            row.setData(0, Qt.UserRole, item)
+            row.setToolTip(0, str(item.get("question") or ""))
+            window.agent_monitors_tree.addTopLevelItem(row)
 
     window.agent_events_list.clear()
     for item in store.recent_tool_events(80):
@@ -465,6 +508,36 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
     tool_actions.addWidget(delete_tool)
     tools_layout.addLayout(tool_actions)
     tabs.addTab(tools_page, _("Tool registry"))
+
+    monitors_page = QWidget()
+    monitors_layout = QVBoxLayout(monitors_page)
+    monitors_hint = QLabel(
+        _(
+            "Monitoring rules keep recurring personal check-ins separate from learned analysis tools. "
+            "They ask questions only while VitalChronicle is open; they are not system notifications."
+        )
+    )
+    monitors_hint.setWordWrap(True)
+    monitors_hint.setObjectName("pageSubtitle")
+    monitors_layout.addWidget(monitors_hint)
+    window.agent_monitors_tree = QTreeWidget()
+    window.agent_monitors_tree.setHeaderLabels(
+        [_('Monitoring'), _('Cadence (days)'), _('Observations'), _('Last observation'), _('Status')]
+    )
+    window.agent_monitors_tree.setAlternatingRowColors(True)
+    monitors_header = window.agent_monitors_tree.header()
+    monitors_header.setSectionResizeMode(0, QHeaderView.Stretch)
+    for column in range(1, 5):
+        monitors_header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
+    monitors_layout.addWidget(window.agent_monitors_tree, 1)
+    monitor_actions = QHBoxLayout()
+    view_monitor = QPushButton(_("View selected monitoring details…"))
+    delete_monitor = QPushButton(_("Delete selected monitoring rule"))
+    monitor_actions.addWidget(view_monitor)
+    monitor_actions.addStretch()
+    monitor_actions.addWidget(delete_monitor)
+    monitors_layout.addLayout(monitor_actions)
+    tabs.addTab(monitors_page, _("Monitoring"))
 
     model_page = QWidget()
     model_layout = QVBoxLayout(model_page)
@@ -575,6 +648,12 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
             return
         _show_detail_dialog(window, _("Self-report details"), _self_report_detail_text(item))
 
+    def show_selected_monitor_details() -> None:
+        item = _selected_payload(window.agent_monitors_tree)
+        if not item:
+            return
+        _show_detail_dialog(window, _("Monitoring details"), _monitor_detail_text(item))
+
     def delete_selected_tool() -> None:
         item = _selected_payload(window.agent_tools_tree)
         if not item or item.get("kind") != "learned":
@@ -607,13 +686,29 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
         runtime.agent_store.forget_user_model(str(item["key"]))
         refresh_personal_ai_page(window)
 
+    def delete_selected_monitor() -> None:
+        item = _selected_payload(window.agent_monitors_tree)
+        if not item:
+            return
+        if (
+            QMessageBox.question(
+                window,
+                _("Delete monitoring rule"),
+                _("Delete the monitoring rule {name}?", name=item["name"]),
+            )
+            != QMessageBox.Yes
+        ):
+            return
+        runtime.agent_store.delete_monitoring_rule(str(item["name"]))
+        refresh_personal_ai_page(window)
+
     def reset_personalisation() -> None:
         if (
             QMessageBox.warning(
                 window,
                 _("Reset personal AI"),
                 _(
-                    "This deletes learned tools, feedback, self-reports and personal associations. Your health "
+                    "This deletes learned tools, monitoring rules, feedback, self-reports and personal associations. Your health "
                     "archive and AI conversations are not deleted. Continue?"
                 ),
                 QMessageBox.Yes | QMessageBox.No,
@@ -633,6 +728,11 @@ def build_personal_ai_page(window, runtime: AgentRuntime) -> QWidget:
         lambda _item, _column: show_selected_tool_details()
     )
     delete_tool.clicked.connect(delete_selected_tool)
+    view_monitor.clicked.connect(show_selected_monitor_details)
+    window.agent_monitors_tree.itemDoubleClicked.connect(
+        lambda _item, _column: show_selected_monitor_details()
+    )
+    delete_monitor.clicked.connect(delete_selected_monitor)
     view_model.clicked.connect(show_selected_model_details)
     window.agent_model_tree.itemDoubleClicked.connect(
         lambda _item, _column: show_selected_model_details()

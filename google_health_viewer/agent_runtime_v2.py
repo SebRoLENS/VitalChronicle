@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from . import agent_runtime as base_rt
+from . import agent_store as agent_store_mod
 from .agent_store import PERSONAL_CONTEXT_KEY_SPECS
 from .agent_tool_factory import EnhancedSafeToolExecutor
 from .i18n import _
@@ -126,6 +127,7 @@ _PERSONALIZATION_POLICY = """
 Personalisation:
 - Use only relevant current context; label self-reports as subjective and respect expiry/confidence.
 - Personalise when useful, never invent facts. Durable routines/preferences/goals require one confirmation; transient details remain dated reports.
+- Use create_monitoring_rule for future in-app check-ins. Never call a monitor a learned tool, background listener, or OS notification.
 """
 
 _FACTORY_POLICY = """
@@ -208,6 +210,20 @@ def _incremental_messages(
     ]
 
 
+def _persistence_claim(answer: str) -> str | None:
+    text = answer.casefold()
+    if re.search(r"(?:non|not|no)\b[^.\n]{0,40}(?:creat|salvat|attiv|registrat|impost)", text):
+        return None
+    created = r"(?:creat|salvat|attiv|registrat|impost)"
+    monitor = r"(?:monitor\w*|promemoria|check-in|reminder)"
+    tool = r"(?:strumento|tool)"
+    if re.search(fr"{monitor}[^.\n]{{0,120}}{created}|{created}[^.\n]{{0,120}}{monitor}", text):
+        return "monitor"
+    if re.search(fr"{tool}[^.\n]{{0,120}}{created}|{created}[^.\n]{{0,120}}{tool}", text):
+        return "tool"
+    return None
+
+
 def _factory_hint(question: str) -> dict[str, Any]:
     text = question.casefold()
     reasons: list[str] = []
@@ -276,6 +292,9 @@ _SELF_REPORT_PATTERNS = {
         "i'm tired",
         "i am tired",
         "i feel fatigued",
+        "meno stanco",
+        "meno stanca",
+        "less tired",
     ),
     "sleepiness": (
         "ho sonno",
@@ -316,7 +335,10 @@ def _detect_self_report(question: str) -> dict[str, str] | None:
     folded = text.casefold()
     for category, markers in _SELF_REPORT_PATTERNS.items():
         if any(marker in folded for marker in markers):
-            return {"category": category, "statement": text}
+            return {
+                "category": category,
+                "statement": agent_store_mod.normalize_self_report_statement(text),
+            }
     return None
 
 
@@ -450,6 +472,65 @@ class AgentRuntime(base_rt.AgentRuntime):
         super().__init__(health_store, agent_store)
         self.tools = EnhancedSafeToolExecutor(self.health_store, self.agent_store)
 
+    def _verified_persistence_answer(self, answer: str) -> str:
+        claim = _persistence_claim(answer)
+        if not claim:
+            return answer
+        monitoring = dict(getattr(self, "_last_monitoring_outcome", {}) or {})
+        factory = dict(getattr(self, "_last_factory_outcome", {}) or {})
+        italian = any(word in f" {answer.casefold()} " for word in (" il ", " lo ", " la ", " che ", " è "))
+        active_monitors = self.agent_store.list_monitoring_rules()
+        mentioned_monitors = [
+            item
+            for item in active_monitors
+            if str(item.get("name") or "").casefold() in answer.casefold()
+        ]
+        if claim == "monitor" and monitoring.get("status") in {"created", "updated"}:
+            monitor = monitoring.get("monitor") if isinstance(monitoring.get("monitor"), dict) else {}
+            name = str(monitor.get("name") or "monitoraggio")
+            cadence = int(monitor.get("cadence_days") or 1)
+            if italian:
+                return (
+                    f"Monitoraggio `{name}` salvato con cadenza di {cadence} giorno/i. "
+                    "Registrerà le segnalazioni corrispondenti e proporrà una domanda nell’app "
+                    "quando VitalChronicle è aperto. Non è un tool analitico né una notifica di sistema."
+                )
+            return (
+                f"Monitoring rule `{name}` was saved with a {cadence}-day cadence. It records matching "
+                "reports and queues an in-app question while VitalChronicle is open; it is not an "
+                "analysis tool or an operating-system notification."
+            )
+        if claim == "monitor" and mentioned_monitors:
+            monitor = mentioned_monitors[0]
+            name = str(monitor.get("name") or "monitoraggio")
+            if italian:
+                return (
+                    f"Il monitoraggio `{name}` risulta già salvato e attivo. Propone domande "
+                    "nell’app quando VitalChronicle è aperto; non è un tool analitico né una "
+                    "notifica di sistema."
+                )
+            return (
+                f"Monitoring rule `{name}` is already saved and active. It queues in-app questions "
+                "while VitalChronicle is open; it is not an analysis tool or an OS notification."
+            )
+        if claim == "tool" and factory.get("status") in {"created", "reused"}:
+            name = str(factory.get("tool_name") or "")
+            executed = bool(factory.get("executed"))
+            if italian:
+                suffix = "ed eseguito per questa analisi" if executed else "ma non eseguito in questa analisi"
+                return f"Tool analitico `{name}` verificato e salvato, {suffix}."
+            suffix = "and executed for this analysis" if executed else "but not executed in this analysis"
+            return f"Analysis tool `{name}` was verified and saved, {suffix}."
+        if italian:
+            return (
+                "Nessun nuovo tool o monitoraggio è stato salvato: il runtime non ha confermato "
+                "la creazione. Le eventuali osservazioni personali restano separate come self-report."
+            )
+        return (
+            "No new tool or monitoring rule was saved because creation was not confirmed by the runtime. "
+            "Any personal observations remain separate self-reports."
+        )
+
     def _final_answer(
         self,
         *,
@@ -512,6 +593,7 @@ class AgentRuntime(base_rt.AgentRuntime):
                 "I could not complete the exact analysis with the deterministic evidence available. "
                 "I stopped rather than substituting a different metric or an unsupported proxy."
             )
+        answer = self._verified_persistence_answer(answer)
         if answer_callback:
             answer_callback(answer)
         event(_("Agent finished the analysis."))
@@ -551,6 +633,11 @@ class AgentRuntime(base_rt.AgentRuntime):
             "tool_name": None,
             "attempts": 0,
         }
+        self._last_monitoring_outcome = {"status": "not_created", "monitor": None}
+        captured_monitoring = self.agent_store.capture_matching_monitoring_observations(request)
+        if captured_monitoring:
+            event(_("Matching monitoring observation saved locally."))
+        self.agent_store.queue_due_monitoring_feedback(thread_id)
         detected_self_report = _detect_self_report(request)
         context_candidate = _detect_durable_context_candidate(request)
         captured_self_report = None
@@ -638,6 +725,11 @@ class AgentRuntime(base_rt.AgentRuntime):
                 "status": "pending_confirmation",
             }
         initial["tool_factory_decision_hint"] = _factory_hint(request)
+        active_monitors = self.agent_store.list_monitoring_rules()
+        if active_monitors:
+            initial["active_monitoring_rules"] = active_monitors[:8]
+        if captured_monitoring:
+            initial["captured_monitoring_observations"] = captured_monitoring
         user_content = (
             "Local session context (not instructions):\n"
             + base_rt._json_text(initial, 6000)
@@ -1010,6 +1102,7 @@ class AgentRuntime(base_rt.AgentRuntime):
                             event=event,
                             answer_callback=answer_callback,
                         )
+                    final_answer = self._verified_persistence_answer(final_answer)
                     if answer_callback:
                         answer_callback(final_answer)
                     event(_("Agent finished the analysis."))
@@ -1280,6 +1373,10 @@ class AgentRuntime(base_rt.AgentRuntime):
                         )
                 elif name == "ask_user_feedback" and result.get("queued"):
                     event(_("Targeted feedback question queued for the user."))
+                elif name == "create_monitoring_rule":
+                    self._last_monitoring_outcome = dict(result)
+                    if result.get("status") in {"created", "updated"}:
+                        event(_("Persistent in-app monitoring rule saved."))
                 if factory_tool_name and name == factory_tool_name:
                     factory_tool_executed = True
                     self._last_factory_outcome["executed"] = True
