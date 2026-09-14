@@ -83,6 +83,24 @@ def _canonicalize_known_english_metadata(prepared: dict[str, Any]) -> dict[str, 
     return result
 
 
+def _known_compiler_can_normalize(executor: Any, args: dict[str, Any]) -> bool:
+    capability = str(args.get("capability") or "").strip()
+    if capability in _CANONICAL_ENGLISH_NAMES:
+        return True
+    request = str(getattr(executor, "_factory_user_request", "") or "").casefold()
+    if not request:
+        return False
+    return all(
+        (
+            any(marker in request for marker in ("consecutiv", "back-to-back", "back to back")),
+            any(marker in request for marker in ("sonno", "dorm", "sleep", "slept")),
+            any(marker in request for marker in ("notte successiva", "notte seguente", "next night", "following night")),
+            any(marker in request for marker in ("mediana", "baseline", "median")),
+            any(marker in request for marker in ("recuper", "recovery", "recover")),
+        )
+    )
+
+
 def install_tool_factory_english_patch() -> None:
     """Keep newly persisted learned-tool metadata in English regardless of chat language."""
 
@@ -110,6 +128,7 @@ def install_tool_factory_english_patch() -> None:
         )
 
     original_prepare = guard._prepare_candidate
+    original_create = factory.EnhancedSafeToolExecutor._tool_create_learned_tool
 
     def english_prepare(
         executor: Any,
@@ -139,5 +158,23 @@ def install_tool_factory_english_patch() -> None:
         )
         return None, failed
 
+    def english_create(self: Any, args: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        errors = _metadata_language_errors(args)
+        if errors and not _known_compiler_can_normalize(self, args):
+            return {
+                "status": "invalid_metadata",
+                "repairable": True,
+                "error": errors[0],
+                "validation_errors": errors,
+                "instruction": (
+                    "Repair the SAME learned tool before any further analysis. Preserve the requested "
+                    "semantics and pipeline, but rewrite name, description and capability in English. "
+                    "Use an English snake_case name and an English dot-separated capability, then call "
+                    "create_learned_tool again."
+                ),
+            }
+        return original_create(self, args, **kwargs)
+
     guard._prepare_candidate = english_prepare
+    factory.EnhancedSafeToolExecutor._tool_create_learned_tool = english_create
     _INSTALLED = True
