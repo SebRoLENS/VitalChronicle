@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import agent_tool_factory as factory
+from . import agent_tool_factory_reliability_patch as reliability
 from . import agent_tool_factory_schema_guard as guard
 from . import agent_tool_factory_semantic_guard as semantic
 
@@ -47,6 +48,18 @@ def install_semantic_tool_factory_compat_patch() -> None:
 
     original_prepare = guard._prepare_candidate
     original_execute = factory.EnhancedSafeToolExecutor.execute
+    original_pipeline_semantics = semantic._pipeline_semantics
+
+    def known_primitive_semantics(pipeline: list[dict[str, Any]]) -> set[str]:
+        features = set(original_pipeline_semantics(pipeline))
+        for step in pipeline:
+            if not isinstance(step, dict) or str(step.get("op") or "") != "call_tool":
+                continue
+            if str(step.get("tool") or "") == reliability._BUILTIN_NAME:
+                features.add("high_load_filter")
+        return features
+
+    semantic._pipeline_semantics = known_primitive_semantics
 
     def contextual_prepare(
         executor: Any,
