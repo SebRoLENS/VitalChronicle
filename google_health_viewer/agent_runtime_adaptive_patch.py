@@ -52,8 +52,6 @@ def _estimate_payload_tokens(
             chars += len(_encoded(item.get("tool_calls")))
     if tools:
         chars += len(_encoded(tools))
-    # JSON/prompt framing costs a little more than raw text. 3.5 chars/token is
-    # intentionally conservative for mixed Italian/English JSON payloads.
     return max(1, math.ceil(chars / 3.5) + 192)
 
 
@@ -72,8 +70,6 @@ def _adaptive_char_budget(
     reserve = max(predicted + 512, int(context * 0.18))
     free_tokens = max(256, context - estimated - reserve)
 
-    # Tool evidence may use part of what is actually free, rather than a fixed
-    # global 5k-character cap. Keep a generous reserve for subsequent turns.
     tool_tokens = int(free_tokens * 0.38)
     tool_tokens = max(650, min(12000, tool_tokens, int(context * 0.34)))
     tool_chars = max(2600, tool_tokens * 4)
@@ -177,7 +173,7 @@ def _smart_json_text(value: Any, limit: int | None = None) -> str:
         return full
 
     preferred = max(1, _CURRENT_LIST_ITEMS.get())
-    attempts = []
+    attempts: list[int] = []
     for list_limit in (preferred, 8, 5, 3, 1, 0):
         if list_limit in attempts:
             continue
@@ -208,7 +204,6 @@ def _smart_json_text(value: Any, limit: int | None = None) -> str:
     if len(encoded) <= target:
         return encoded
 
-    # This is deliberately valid JSON rather than the old raw string slice.
     return _encoded(
         {
             "truncated": True,
@@ -244,6 +239,22 @@ def _select_exact_match(result: Any, capability: str) -> dict[str, Any] | None:
     return dict(matches[0])
 
 
+def _result_successful(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return True
+    status = str(result.get("status") or "").casefold()
+    nested = result.get("result")
+    if not status and isinstance(nested, dict):
+        status = str(nested.get("status") or "").casefold()
+    return status not in {
+        "invalid_arguments",
+        "invalid_spec",
+        "invalid_pipeline",
+        "error",
+        "failed",
+    }
+
+
 def _install_runtime_patch() -> None:
     global _RUNTIME_INSTALLED
     if _RUNTIME_INSTALLED:
@@ -267,6 +278,8 @@ def _install_runtime_patch() -> None:
         result = original_execute(self, name, args, thread_id=thread_id)
         if name == "search_tool_registry":
             exact = _select_exact_match(result, str(args.get("capability") or ""))
+            self._vc_exact_registry_executed = False
+            self._vc_exact_registry_finalized = False
             if exact:
                 self._vc_exact_registry_match_name = str(exact.get("name") or "")
                 self._vc_exact_registry_match_capability = str(exact.get("capability") or "")
@@ -281,11 +294,13 @@ def _install_runtime_patch() -> None:
                 self._vc_exact_registry_match_name = ""
                 self._vc_exact_registry_match_capability = ""
                 self._vc_exact_registry_pending = False
-        elif (
-            bool(getattr(self, "_vc_exact_registry_pending", False))
-            and name == str(getattr(self, "_vc_exact_registry_match_name", ""))
-        ):
-            self._vc_exact_registry_pending = False
+        elif name == str(getattr(self, "_vc_exact_registry_match_name", "")):
+            if _result_successful(result):
+                self._vc_exact_registry_pending = False
+                self._vc_exact_registry_executed = True
+            else:
+                self._vc_exact_registry_pending = True
+                self._vc_exact_registry_executed = False
         return result
 
     def adaptive_chat(self: Any, **kwargs: Any) -> dict[str, Any]:
@@ -302,8 +317,24 @@ def _install_runtime_patch() -> None:
         _CURRENT_LIST_ITEMS.set(list_items)
 
         exact_name = str(getattr(self.tools, "_vc_exact_registry_match_name", "") or "")
+        exact_capability = str(
+            getattr(self.tools, "_vc_exact_registry_match_capability", "") or ""
+        )
         exact_pending = bool(getattr(self.tools, "_vc_exact_registry_pending", False))
-        if tools and exact_name and exact_pending:
+        exact_executed = bool(getattr(self.tools, "_vc_exact_registry_executed", False))
+        exact_finalized = bool(getattr(self.tools, "_vc_exact_registry_finalized", False))
+
+        if exact_name and exact_pending:
+            self._last_factory_outcome.update(
+                {
+                    "status": "reused",
+                    "persisted": True,
+                    "executed": False,
+                    "tool_name": exact_name,
+                    "capability": exact_capability,
+                    "attempts": 0,
+                }
+            )
             exact_schema = next(
                 (
                     schema
@@ -358,6 +389,33 @@ def _install_runtime_patch() -> None:
                     },
                 ]
                 return original_chat(self, **retry_kwargs)
+
+        if exact_name and exact_executed and not exact_finalized:
+            self._last_factory_outcome.update(
+                {
+                    "status": "reused",
+                    "persisted": True,
+                    "executed": True,
+                    "tool_name": exact_name,
+                    "capability": exact_capability,
+                    "attempts": 0,
+                }
+            )
+            self.tools._vc_exact_registry_finalized = True
+            final_kwargs = dict(kwargs)
+            final_kwargs["tools"] = []
+            final_kwargs["messages"] = [
+                *messages,
+                {
+                    "role": "system",
+                    "content": (
+                        "RUNTIME EXACT TOOL REUSE COMPLETE: the exact registry tool "
+                        f"{exact_name} has been executed successfully. Answer now from that result. "
+                        "Do not call a broader primitive and do not reopen Tool Factory creation."
+                    ),
+                },
+            ]
+            return original_chat(self, **final_kwargs)
 
         return original_chat(self, **kwargs)
 
