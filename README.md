@@ -20,7 +20,8 @@
 VitalChronicle is a local-first desktop application for downloading, storing,
 exploring, and exporting personal data made available through the Google Health API.
 It combines adaptive visualisations with optional analysis performed by a local Ollama
-model. Health records stay on the computer unless the user explicitly exports them.
+model or, after explicit consent, by a supported online provider. Health records stay on
+the computer unless the user exports them or authorises an online AI request.
 
 > **VitalChronicle is and will remain free and open-source software.** If it is useful
 > to you, a voluntary [contribution through Buy Me a Coffee](https://buymeacoffee.com/sebromi)
@@ -254,6 +255,14 @@ VitalChronicle does not present local-model output as a diagnosis. Wearable data
 incomplete or inaccurate, correlations do not establish causality, and important health
 decisions should be discussed with a qualified professional.
 
+## Optional online AI
+
+The model selector also offers Mistral and Groq through their OpenAI-compatible APIs.
+Select an online model, use **Configure Mistral** or **Configure Groq**, follow the link to
+create an API key, and review the consent banner before enabling it. When enabled, the
+question and selected health evidence are sent to that provider; local records remain in
+VitalChronicle. API quotas and charges are controlled by the provider account.
+
 ## Documentation
 
 - [Detailed manual](docs/manual.md)
@@ -267,9 +276,10 @@ decisions should be discussed with a qualified professional.
 
 Health data are stored in a private local SQLite database. OAuth credentials use the
 system keyring when available and otherwise fall back to a user-readable local file with
-restricted permissions. Local Ollama analysis is sent only to `127.0.0.1`. The only
-remote services contacted are Google for authorised health-data access and the Ollama
-registry when checking whether model weights have changed.
+restricted permissions. Local Ollama analysis is sent only to `127.0.0.1`. If the user
+explicitly configures and authorises Mistral or Groq, the question and selected evidence
+are sent to that provider's API. Other remote requests include Google health-data access
+and the Ollama registry check for changed model weights.
 
 The application deliberately retains the historical internal `GoogleHealthViewer` data
 directory name so that upgrading from 0.2.12 to current VitalChronicle releases preserves existing

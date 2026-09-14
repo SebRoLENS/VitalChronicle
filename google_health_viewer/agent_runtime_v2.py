@@ -663,6 +663,8 @@ class AgentRuntime(base_rt.AgentRuntime):
             {"role": "user", "content": user_content},
         ]
         schemas = self.tools.tool_schemas()
+        if base_rt.is_online_model(model):
+            schemas = base_rt.online_tool_subset(schemas, request)
         tool_function_names = {
             str(item.get("function", {}).get("name") or "")
             for item in schemas
@@ -1198,6 +1200,12 @@ class AgentRuntime(base_rt.AgentRuntime):
                             _("Equivalent tool found · reusing it instead of creating a duplicate.")
                         )
                         schemas = self.tools.tool_schemas()
+                        if base_rt.is_online_model(model):
+                            schemas = base_rt.online_tool_subset(
+                                schemas,
+                                request,
+                                required_names={factory_tool_name} if factory_tool_name else None,
+                            )
                     elif status == "created":
                         tool_record = result.get("tool") if isinstance(result.get("tool"), dict) else {}
                         factory_tool_name = str(
@@ -1216,6 +1224,12 @@ class AgentRuntime(base_rt.AgentRuntime):
                         factory_gate_required = False
                         event(_("Learned tool validated and saved locally."))
                         schemas = self.tools.tool_schemas()
+                        if base_rt.is_online_model(model):
+                            schemas = base_rt.online_tool_subset(
+                                schemas,
+                                request,
+                                required_names={factory_tool_name} if factory_tool_name else None,
+                            )
                     else:
                         factory_error = str(
                             result.get("error")
@@ -1263,13 +1277,15 @@ class AgentRuntime(base_rt.AgentRuntime):
                     event(_("Persisted learned tool executed for this request."))
 
                 tool_text = base_rt._json_text(result)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_name": name,
-                        "content": tool_text,
-                    }
-                )
+                tool_message: dict[str, Any] = {
+                    "role": "tool",
+                    "content": tool_text,
+                }
+                if base_rt.is_online_model(model):
+                    tool_message["tool_call_id"] = str(call.get("id") or name)
+                else:
+                    tool_message["tool_name"] = name
+                messages.append(tool_message)
                 self._emit_agent_trace(name, "Agent", tool_text, kind="tool_result")
 
             if not repair_turn or productive_tool_call:

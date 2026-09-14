@@ -24,6 +24,7 @@ from .ai_insights import build_ai_ready_snapshot
 from .constants import DATA_TYPE_BY_KEY
 from .i18n import _
 from .local_ai import AIAnalysisCancelled, LocalAIError
+from .online_ai import is_online_model, online_client
 
 from .ai_query_planner_core import (
     MAX_LOOKBACK_DAYS,
@@ -70,7 +71,11 @@ class AIDataPlanThread(QThread):
     def run(self) -> None:
         try:
             profile = str(QSettings().value("ai/performance_profile", "standard") or "standard")
-            client = OptimizedOllamaClient(model=self.model, performance_profile=profile)
+            client = (
+                online_client(self.model, performance_profile=profile)
+                if is_online_model(self.model)
+                else OptimizedOllamaClient(model=self.model, performance_profile=profile)
+            )
             messages = _planner_messages(self.catalog, self.question, self.history)
             num_ctx, num_predict, _estimated = _request_budget(
                 messages, PLANNER_OUTPUT_TOKENS, self.model_context_limit
@@ -246,7 +251,13 @@ class PlannedAIChatWindow(AIChatWindow):
             self._planned_failed(message)
             return
         self._planned_fallback_used = True
-        self._activity_event(_("Planner output was invalid; using a safe broad local-data fallback…"))
+        detail = " ".join(str(message).split())[:220]
+        self._activity_event(
+            _(
+                "AI planner unavailable ({detail}); using a safe broad local-data fallback…",
+                detail=detail or _("unknown error"),
+            )
+        )
         self._plan_ready(fallback_data_plan(catalog, reason=f"planner_fallback: {message[:120]}"))
 
     def _plan_ready(self, plan: dict[str, Any]) -> None:

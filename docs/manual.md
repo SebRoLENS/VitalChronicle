@@ -14,8 +14,8 @@ toc-depth: 3
 # About this manual
 
 This is the authoritative user manual for **VitalChronicle 1.2.1**. VitalChronicle is a
-local-first desktop dashboard for personal Google Health data and optional local AI
-analysis through Ollama.
+local-first desktop dashboard for personal Google Health data and optional AI analysis
+through local Ollama or an explicitly authorised online provider.
 
 VitalChronicle is independent from Google and is not a medical device. Charts,
 statistical bands, anomaly indicators, correlations, and language-model output are
@@ -80,9 +80,10 @@ VitalChronicle can:
 - show the model's thinking while it runs and replace it with the final answer in the
   same assistant area.
 
-VitalChronicle does not upload health records to the developer or to a hosted AI
-provider. Google receives authenticated API requests, and local AI requests are sent to
-the Ollama service on `127.0.0.1`.
+VitalChronicle does not upload health records to the developer. Google receives
+authenticated API requests, and local AI requests are sent to Ollama on `127.0.0.1`.
+Mistral or Groq receives a question and selected evidence only after the user configures
+that provider and accepts the visible online-data consent.
 
 # 2. System requirements
 
@@ -95,15 +96,15 @@ the Ollama service on `127.0.0.1`.
 | macOS Apple Silicon | Recent arm64 macOS release |
 | macOS Intel | Recent x86-64 macOS release |
 
-Internet access is required for Google authentication and synchronisation. AI analysis
-does not require Internet after the Ollama model has been downloaded.
+Internet access is required for Google authentication, synchronisation, and online AI.
+Local AI does not require Internet after the Ollama model has been downloaded.
 
 ## 2.2 Running from source
 
 - Python 3.10 or newer;
 - PySide6 and the dependencies declared in `pyproject.toml`;
 - a desktop session able to run Qt applications;
-- optional Ollama for local AI.
+- optional Ollama for local AI, or an API key for a supported online provider.
 
 ## 2.3 Local AI hardware profiles
 
@@ -442,7 +443,7 @@ Choose **Export archive** to create a ZIP containing JSON Lines files for downlo
 categories plus account/device resources. Treat exported archives as sensitive health
 records and store them appropriately.
 
-# 9. Local AI with Ollama
+# 9. AI analysis
 
 ## 9.1 Installation checks
 
@@ -469,7 +470,25 @@ Choose the closest profile, then select an installed model. VitalChronicle check
 local Ollama endpoint and periodically compares the installed model digest with the
 registry. Only model metadata are used for that update check; health data are not sent.
 
-## 9.3 RAM and token recommendation
+Online models are marked with their provider in the same selector. Selecting one reveals
+a provider-specific configuration button and privacy banner. The Ollama installation,
+hardware, and model-download controls are hidden because they do not apply.
+
+## 9.3 Optional Mistral and Groq setup
+
+1. Select a Mistral or Groq model in **AI model**.
+2. Select **Configure Mistral** or **Configure Groq**.
+3. Follow the displayed provider link, create an API key, and paste it into VitalChronicle.
+4. Read and accept the consent explaining that the question and selected health evidence
+   leave the computer and are handled under the provider's terms.
+5. Save, then send a question from the AI chat.
+
+VitalChronicle stores the key in the system keyring when available. Provider rate limits,
+retention policies, and billing are external to VitalChronicle. A rate-limit error reports
+the HTTP status and any retry/reset information returned by the provider. Online analysis
+never requires Ollama, and an online failure should not instruct the user to check Ollama.
+
+## 9.4 RAM and token recommendation
 
 Open **Local AI analysis → Model and tokens**, enter installed RAM in GB, and request a
 recommendation. The estimate considers model size, CPU/GPU profile, and the context length
@@ -477,15 +496,15 @@ reported by Ollama. The token value remains manually editable and is capped only
 model declares a physical context limit. AI settings are intentionally part of the AI
 workspace rather than a separate application tab.
 
-## 9.4 AI control centre and conversation window
+## 9.5 AI control centre and conversation window
 
 ![VitalChronicle AI control centre](screenshots/ai-control-center.png)
 
-The **Local AI analysis** tab is one coherent workspace with four internal sections:
+The **AI analysis** tab is one coherent workspace with four internal sections:
 
 | Section | Purpose |
 |---|---|
-| **Analysis and chat** | Ollama status, hardware/model choice, question period, recent conversations, and analysis actions |
+| **Analysis and chat** | Provider status, model choice, question period, recent conversations, and analysis actions |
 | **Deterministic metrics** | Requested-versus-observed coverage and every statistic prepared before the model is called |
 | **Model and tokens** | RAM-aware output-token recommendation and editable local model settings |
 | **Prompt and instructions** | The read-only system prompt included with every local-model request |
@@ -498,8 +517,8 @@ The **Analysis and chat** section provides two main actions:
 
 For a first analysis:
 
-1. confirm that the status indicator reports Ollama as available;
-2. choose the hardware profile and an installed model;
+1. select an AI model;
+2. for Ollama, confirm it is available and choose the hardware profile; for an online model, configure its API key and consent;
 3. open **Model and tokens** if the output-token recommendation needs to be recalculated;
 4. choose the period immediately above the question actions when asking a focused question;
 5. select **Open AI chat** for that period, or **Analyse all data** to
@@ -507,13 +526,13 @@ For a first analysis:
 6. enter a question and select **Send**;
 7. continue with follow-up questions in the same thread so recent dialogue is retained;
 8. inspect **Evidence** when an answer needs to be checked against the prepared statistics;
-9. select **Show prompt** in chat when the exact messages sent to Ollama need to be audited.
+9. select **Show prompt** in chat when the exact messages sent to the selected model need to be audited.
 
 The period selector applies to a new selected-period chat. It does not limit **Analyse all
 data**. The latter includes secondary numeric fields, sleep stages, workout
 types, heart-rate zones, body measurements, and any other locally available categories.
 
-## 9.5 Conversation window, history, and data snapshots
+## 9.6 Conversation window, history, and data snapshots
 
 ![VitalChronicle persistent local AI conversation](screenshots/local-ai.png)
 
@@ -557,7 +576,7 @@ historical VitalChronicle data archive, with restrictive file permissions where 
 Deleting a thread does not delete health records. The privacy command that removes all
 local data also clears conversations and credentials.
 
-## 9.6 Periods and time-of-day handling
+## 9.7 Periods and time-of-day handling
 
 New chats and direct questions use the explicit period selector: Today, last seven days,
 last month, last year, all data, or a custom interval. A complete-history analysis always
@@ -574,7 +593,7 @@ energy. Physiological measurements such as resting heart rate, HRV, oxygen satur
 respiratory rate are described as neutral deviations from a personal baseline rather than
 as goals to complete.
 
-## 9.7 Deterministic data preparation
+## 9.8 Deterministic data preparation
 
 Before a health snapshot is sent to local Ollama, Python calculates the evidence that a
 language model would otherwise have to infer unreliably from raw records:
@@ -616,7 +635,7 @@ This preparation is descriptive, not diagnostic. A higher or lower value is not 
 as better or worse, associations never imply causality, and missing measurements are never
 converted to zero.
 
-## 9.8 Deterministic metrics inspector and interval completeness
+## 9.9 Deterministic metrics inspector and interval completeness
 
 ![VitalChronicle deterministic metrics inspector](screenshots/ai-deterministic-metrics.png)
 
@@ -651,7 +670,7 @@ are not physiological measurements. VitalChronicle therefore retains their lates
 for context but excludes their dates from measured-day counts and excludes the thresholds
 from baselines, trends, anomaly detection, and cross-metric associations.
 
-## 9.9 Ranked evidence and deep synthesis
+## 9.10 Ranked evidence and deep synthesis
 
 Potential observations are scored by magnitude, repeated support, coverage, and statistical
 reliability. At most 20 candidate insights are included, with the strongest evidence IDs
@@ -679,7 +698,7 @@ for this process. It is a verification aid: confidence describes support in the 
 personal history, not medical certainty. Increasing the output-token setting can allow a
 longer explanation, but it cannot create evidence that is absent from the archive.
 
-## 9.10 Thinking, prompt inspection, stopping, and regeneration
+## 9.11 Thinking, prompt inspection, stopping, and regeneration
 
 During a request, the current assistant area streams the model's thinking. When final
 answer text begins, that same area changes to the answer; no second thinking panel is
@@ -713,7 +732,7 @@ Ollama processing, synthesis, compact retry, and final-answer generation. The an
 indeterminate because Ollama does not provide a trustworthy total percentage. The panel closes
 only after completion, cancellation, or a reported failure.
 
-## 9.11 Interpretation limits
+## 9.12 Interpretation limits
 
 Local language models can misunderstand data, omit important context, or produce
 incorrect statements. Wearable measurements also contain artefacts. Review the underlying
@@ -804,6 +823,7 @@ the personal OAuth client from Google Cloud.
 - Local files use restrictive permissions where supported.
 - Health data remain local unless the user exports them.
 - Ollama analysis targets the loopback interface.
+- Mistral and Groq receive selected evidence only after explicit setup and consent.
 - Release workflows publish SHA-256 checksums.
 - The Linux AppImage is attested using GitHub's open Sigstore infrastructure.
 - Windows and macOS packages are not signed with paid platform certificates.

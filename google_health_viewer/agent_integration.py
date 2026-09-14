@@ -268,6 +268,13 @@ def _install_chat_integration(ai_chat_module) -> None:
         thread = self._current_thread()
         if not thread:
             return
+        selected_model = str(thread.get("model") or self.model_provider()).strip()
+        if (
+            ai_chat_module.is_online_model(selected_model)
+            and self.online_prepare_provider is not None
+            and not self.online_prepare_provider()
+        ):
+            return
         display_question = question.strip() or _(
             "Analyse my complete health history deeply and explain the strongest useful patterns."
         )
@@ -294,7 +301,7 @@ def _install_chat_integration(ai_chat_module) -> None:
 
         self.analysis_thread = AgentAnalysisThread(
             runtime,
-            str(thread.get("model") or self.model_provider()),
+            selected_model,
             thread["snapshot"],
             question,
             self.tokens_provider(),

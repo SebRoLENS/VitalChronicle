@@ -16,11 +16,9 @@ from PySide6.QtWidgets import QLabel
 from .ai_hardware import HardwareInfo, detect_hardware, override_hardware
 from .ai_model_catalog import is_cloud_model, model_memory_gb
 from .i18n import _
+from .online_ai import ONLINE_MODELS, is_online_model
 
 MAX_SUGGESTED_MODELS = 10
-MISTRAL_MODEL = "mistral-small-latest"
-
-
 def _model_key(model: str) -> str:
     value = model.strip().lower()
     return value.removesuffix(":latest")
@@ -112,13 +110,13 @@ def ordered_model_choices(
         for model in _unique_models(installed)
         if model_fits_hardware(model, hardware)
     ]
-    suggestions = [MISTRAL_MODEL, *optimal_model_options(catalog, hardware)]
+    suggestions = [*ONLINE_MODELS, *optimal_model_options(catalog, hardware)]
     result = list(installed_models)
 
     last = last_used.strip()
     if (
         last
-        and not is_cloud_model(last)
+        and (is_online_model(last) or not is_cloud_model(last))
         and model_fits_hardware(last, hardware)
         and not any(_same_model(last, item) for item in result)
     ):
@@ -227,7 +225,9 @@ def _rebuild_combo(window, status) -> None:
     window._update_online_model_ui(selected)
     if selected:
         window._update_ai_model_hint(selected)
-        window.pull_button.setEnabled(not window._ai_model_is_installed(selected))
+        window.pull_button.setEnabled(
+            not is_online_model(selected) and not window._ai_model_is_installed(selected)
+        )
 
 
 def install_ai_model_selector(main_window_module) -> None:
@@ -252,7 +252,7 @@ def install_ai_model_selector(main_window_module) -> None:
             for index in range(combo.count())
             if combo.itemText(index).strip()
         )
-        choices = [MISTRAL_MODEL, *optimal_model_options(initial_catalog, hardware)]
+        choices = [*ONLINE_MODELS, *optimal_model_options(initial_catalog, hardware)]
         if (
             last_used
             and model_fits_hardware(last_used, hardware)
@@ -291,9 +291,8 @@ def install_ai_model_selector(main_window_module) -> None:
 
         banner = QLabel(
             _(
-                "These are open-source models that fit this computer. Installed Ollama models "
-                "are shown first. To use another model, install it manually with Ollama and it "
-                "will appear here."
+                "Installed compatible Ollama models are shown first. Online models are clearly "
+                "identified and require an API key plus explicit data-sharing consent."
             )
         )
         banner.setObjectName("coverageNeutral")
@@ -314,7 +313,9 @@ def install_ai_model_selector(main_window_module) -> None:
     def ai_model_changed(self, model: str) -> None:
         original_model_changed(self, model)
         if model.strip() and hasattr(self, "pull_button"):
-            self.pull_button.setEnabled(not self._ai_model_is_installed(model))
+            self.pull_button.setEnabled(
+                not is_online_model(model) and not self._ai_model_is_installed(model)
+            )
         self._update_online_model_ui(model)
 
     def ai_status_ready(self, status) -> None:
