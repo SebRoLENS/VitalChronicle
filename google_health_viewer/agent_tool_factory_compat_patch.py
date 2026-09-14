@@ -176,6 +176,11 @@ def install_tool_factory_compat_patch() -> None:
         if not isinstance(result, dict):
             return result
         result = dict(result)
+        if result.get("status") in {"created", "reused"}:
+            compiler_strategy = str(result.get("compiler_strategy") or "")
+            if compiler_strategy:
+                result.setdefault("auto_repaired", True)
+                result.setdefault("repair_strategy", compiler_strategy)
         if result.get("status") in {"invalid_pipeline", "invalid_spec"}:
             result.setdefault("dsl_reference", factory.DSL_REFERENCE)
             result.setdefault(
