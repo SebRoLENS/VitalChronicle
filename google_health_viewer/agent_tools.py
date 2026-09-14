@@ -367,6 +367,51 @@ _TOOL_ROWS = (
         ),
     ),
     (
+        "create_monitoring_rule",
+        "Create or update a persistent in-app check-in rule. This is not a learned analysis tool, background listener, or operating-system notification.",
+        "agent.create_monitoring_rule",
+        _obj(
+            {
+                "name": {"type": "string"},
+                "title": {"type": "string"},
+                "description": {"type": "string"},
+                "question": {"type": "string"},
+                "cadence_days": {"type": "integer", "minimum": 1, "maximum": 30},
+                "keywords": {
+                    "type": "array",
+                    "maxItems": 12,
+                    "items": {"type": "string"},
+                },
+                "fields": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {"type": "string"},
+                },
+            },
+            ("name", "title", "question", "cadence_days", "keywords"),
+        ),
+    ),
+    (
+        "record_monitoring_observation",
+        "Record one dated subjective observation for an existing monitoring rule.",
+        "agent.record_monitoring_observation",
+        _obj(
+            {
+                "name": {"type": "string"},
+                "statement": {"type": "string"},
+                "observed_at": {"type": "string"},
+                "context": {"type": "object"},
+            },
+            ("name", "statement"),
+        ),
+    ),
+    (
+        "list_monitoring_rules",
+        "List active persistent in-app monitoring/check-in rules and observation counts.",
+        "agent.monitoring_rules",
+        _obj({}),
+    ),
+    (
         "get_user_feedback_history",
         "Read recent answered feedback used for personalisation.",
         "agent.feedback_history",
@@ -1554,6 +1599,26 @@ class SafeToolExecutor:
             "feedback_id": item.get("feedback_id"),
             "question": item.get("question"),
             "rule": "Subjective wellbeing never proves physiological safety.",
+        }
+
+    def _tool_create_monitoring_rule(self, args, **_):
+        return self.agent_store.create_monitoring_rule(args)
+
+    def _tool_record_monitoring_observation(self, args, **_):
+        return {
+            "stored": True,
+            "observation": self.agent_store.record_monitoring_observation(
+                str(args.get("name") or ""),
+                str(args.get("statement") or ""),
+                observed_at=str(args.get("observed_at") or "") or None,
+                context=args.get("context") if isinstance(args.get("context"), dict) else {},
+            ),
+        }
+
+    def _tool_list_monitoring_rules(self, args, **_):
+        return {
+            "monitoring_rules": self.agent_store.list_monitoring_rules(),
+            "rule": "These are in-app check-ins, not learned analysis tools or background notifications.",
         }
 
     def _tool_get_user_feedback_history(self, args, **_):
