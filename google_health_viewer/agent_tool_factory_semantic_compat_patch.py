@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import agent_tool_factory as factory
 from . import agent_tool_factory_schema_guard as guard
 from . import agent_tool_factory_semantic_guard as semantic
 
@@ -45,6 +46,7 @@ def install_semantic_tool_factory_compat_patch() -> None:
         return
 
     original_prepare = guard._prepare_candidate
+    original_execute = factory.EnhancedSafeToolExecutor.execute
 
     def contextual_prepare(
         executor: Any,
@@ -72,8 +74,27 @@ def install_semantic_tool_factory_compat_patch() -> None:
                     pass
         if isinstance(meta, dict):
             meta = dict(meta)
-            meta.setdefault("semantic_context", "declared_pipeline" if fallback != str(args.get("description") or "").strip() else "unambiguous_description")
+            description = str(args.get("description") or "").strip()
+            context = "unambiguous_description" if fallback == description else "declared_pipeline"
+            meta.setdefault("semantic_context", context)
         return prepared, meta
 
+    def contextual_execute(
+        self: Any,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        thread_id: str | None = None,
+    ) -> dict[str, Any]:
+        result = original_execute(self, name, arguments, thread_id=thread_id)
+        if (
+            name == "create_learned_tool"
+            and isinstance(result, dict)
+            and result.get("status") in {"created", "reused"}
+        ):
+            self._factory_user_request = ""
+        return result
+
     guard._prepare_candidate = contextual_prepare
+    factory.EnhancedSafeToolExecutor.execute = contextual_execute
     _INSTALLED = True
