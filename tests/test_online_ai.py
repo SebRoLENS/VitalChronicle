@@ -8,9 +8,9 @@ from google_health_viewer.agent_runtime import AGENT_SYSTEM_PROMPT, online_tool_
 from google_health_viewer.agent_runtime_v2 import (
     _FACTORY_POLICY,
     _PERSONALIZATION_POLICY,
+    AgentRuntime,
     _evidence_entry,
     _incremental_messages,
-    AgentRuntime,
 )
 from google_health_viewer.agent_store import AgentStore
 from google_health_viewer.ai_query_planner import AIDataPlanThread
