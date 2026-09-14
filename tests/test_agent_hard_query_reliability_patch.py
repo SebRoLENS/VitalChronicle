@@ -6,6 +6,8 @@ from google_health_viewer import agent_hard_query_reliability_patch as hard
 from google_health_viewer import agent_runtime_v2 as runtime_v2
 from google_health_viewer.agent_store import AgentStore
 
+hard.install_hard_query_reliability_patch()
+
 QUESTION = (
     "Di solito mi alleno 3-4 volte a settimana, soprattutto la mattina. "
     "Normalmente vado a letto verso mezzanotte e mi sveglio verso le 7:30. "
