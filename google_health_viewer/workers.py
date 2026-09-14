@@ -18,7 +18,8 @@ from .storage import HealthStore
 from .updates import fetch_latest_release
 
 FILTER_REPAIR_VERSION = "snake-case-filters-v1"
-HEART_RATE_STORAGE_VERSION = "heart-rate-five-minute-rollup-v1"
+HEART_RATE_STORAGE_VERSION = "heart-rate-five-minute-rollup-v2"
+DAILY_ROLLUP_STORAGE_VERSION = "daily-rollup-civil-v1"
 
 
 class AuthThread(QThread):
@@ -102,23 +103,34 @@ class SyncThread(QThread):
                         spec.key == "heart-rate"
                         and not self.store.has_app_marker(HEART_RATE_STORAGE_VERSION)
                     )
+                    daily_rollup_marker = f"{DAILY_ROLLUP_STORAGE_VERSION}:{spec.key}"
+                    needs_daily_rollup_migration = bool(
+                        spec.operation == "daily_rollup"
+                        and not self.store.has_app_marker(daily_rollup_marker)
+                    )
+                    legacy_record_count = (
+                        self.store.count_records_by_kind(spec.key, "data_point")
+                        if needs_heart_rate_migration or needs_daily_rollup_migration
+                        else 0
+                    )
                     needs_filter_repair = bool(
                         spec.operation == "list"
+                        and spec.key != "irregular-rhythm-notification"
                         and spec.filter_field
                         and "_" in spec.filter_field.split(".", 1)[0]
                         and not self.store.has_app_marker(repair_key)
                     )
-                    if needs_heart_rate_migration:
-                        heart_rate_bounds = self.store.data_type_date_bounds("heart-rate")
-                        self.store.reset_sync_ranges("heart-rate")
+                    if needs_heart_rate_migration or needs_daily_rollup_migration:
+                        existing_bounds = self.store.data_type_date_bounds(spec.key)
+                        self.store.reset_sync_ranges(spec.key)
                         migration_start = (
-                            min(self.start_date, heart_rate_bounds[0])
-                            if heart_rate_bounds
+                            min(self.start_date, existing_bounds[0])
+                            if existing_bounds
                             else self.start_date
                         )
                         migration_end = (
-                            max(self.end_date, heart_rate_bounds[1])
-                            if heart_rate_bounds
+                            max(self.end_date, existing_bounds[1])
+                            if existing_bounds
                             else self.end_date
                         )
                         ranges = [(migration_start, migration_end)]
@@ -162,12 +174,16 @@ class SyncThread(QThread):
                         # Today is intentionally left open: wearable data can still arrive.
                         stable_end = min(range_end, today - timedelta(days=1))
                         self.store.mark_sync_range(spec.key, range_start, stable_end)
-                    if needs_heart_rate_migration:
+                    migration_has_replacement = not legacy_record_count or count > 0
+                    if needs_heart_rate_migration and migration_has_replacement:
                         # Keep legacy raw samples until every requested rollup page has
                         # been persisted successfully. A failed network/API migration
                         # therefore remains retryable without losing local history.
                         self.store.delete_records_by_kind("heart-rate", "data_point")
                         self.store.set_app_marker(HEART_RATE_STORAGE_VERSION)
+                    if needs_daily_rollup_migration and migration_has_replacement:
+                        self.store.delete_records_by_kind(spec.key, "data_point")
+                        self.store.set_app_marker(daily_rollup_marker)
                     if needs_filter_repair:
                         self.store.set_app_marker(repair_key)
                     message = (

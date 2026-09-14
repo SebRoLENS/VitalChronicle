@@ -260,7 +260,7 @@ DATA_TYPES = (
         _("Heart"),
         "irn",
         "session",
-        filter_field=None,
+        filter_field="irregular_rhythm_notification.interval.civil_start_time",
     ),
 )
 
