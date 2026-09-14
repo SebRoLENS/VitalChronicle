@@ -4,7 +4,7 @@ import copy
 import math
 import time
 from collections.abc import Callable, Iterator
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from datetime import time as clock
 from typing import Any
 
@@ -172,13 +172,12 @@ class GoogleHealthClient:
         cursor = start
         while cursor <= end:
             chunk_end = min(end + timedelta(days=1), cursor + timedelta(days=maximum_days))
-            body = {
+            body: dict[str, Any] = {
                 "range": {
-                    "startTime": datetime.combine(cursor, clock.min).astimezone().isoformat(),
-                    "endTime": datetime.combine(chunk_end, clock.min).astimezone().isoformat(),
+                    "start": self._civil_datetime(cursor),
+                    "end": self._civil_datetime(chunk_end),
                 },
-                "windowSize": "86400s",
-                "pageSize": 10000,
+                "windowSizeDays": 1,
             }
             page_token = None
             seen_tokens: set[str] = set()
@@ -187,7 +186,7 @@ class GoogleHealthClient:
                     body["pageToken"] = page_token
                 response = self._request(
                     "POST",
-                    f"users/me/dataTypes/{spec.key}/dataPoints:rollUp",
+                    f"users/me/dataTypes/{spec.key}/dataPoints:dailyRollUp",
                     json_body=body,
                     cancel=cancel,
                 )
@@ -199,6 +198,21 @@ class GoogleHealthClient:
                     raise ApiError(508, _("Repeated roll-up page for {label}.", label=spec.label))
                 seen_tokens.add(page_token)
             cursor = chunk_end
+
+    @staticmethod
+    def _civil_datetime(value: date) -> dict[str, Any]:
+        return {
+            "date": {"year": value.year, "month": value.month, "day": value.day},
+            "time": {"hours": 0, "minutes": 0, "seconds": 0, "nanos": 0},
+        }
+
+    @staticmethod
+    def _utc_midnight(value: date) -> str:
+        return (
+            datetime.combine(value, clock.min, tzinfo=timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
 
     @staticmethod
     def _prepare_five_minute_heart_rate_rollup(
@@ -235,14 +249,16 @@ class GoogleHealthClient:
 
         cursor = start
         while cursor <= end:
-            chunk_end = min(end + timedelta(days=1), cursor + timedelta(days=14))
+            # Four days contain at most 1,152 five-minute windows. This stays
+            # below the API's default 1,440-result page and avoids relying on a
+            # large pageSize accepted inconsistently by early v4 deployments.
+            chunk_end = min(end + timedelta(days=1), cursor + timedelta(days=4))
             body: dict[str, Any] = {
                 "range": {
-                    "startTime": datetime.combine(cursor, clock.min).astimezone().isoformat(),
-                    "endTime": datetime.combine(chunk_end, clock.min).astimezone().isoformat(),
+                    "startTime": self._utc_midnight(cursor),
+                    "endTime": self._utc_midnight(chunk_end),
                 },
                 "windowSize": "300s",
-                "pageSize": 10000,
             }
             page_token = None
             seen_tokens: set[str] = set()
@@ -251,12 +267,20 @@ class GoogleHealthClient:
                     body["pageToken"] = page_token
                 else:
                     body.pop("pageToken", None)
-                response = self._request(
-                    "POST",
-                    f"users/me/dataTypes/{spec.key}/dataPoints:rollUp",
-                    json_body=body,
-                    cancel=cancel,
-                )
+                try:
+                    response = self._request(
+                        "POST",
+                        f"users/me/dataTypes/{spec.key}/dataPoints:rollUp",
+                        json_body=body,
+                        cancel=cancel,
+                    )
+                except ApiError as exc:
+                    if exc.status != 400 or page_token:
+                        raise
+                    yield self._local_five_minute_heart_rate_rollups(
+                        spec, cursor, chunk_end - timedelta(days=1), cancel
+                    )
+                    break
                 page = [
                     self._prepare_five_minute_heart_rate_rollup(point)
                     for point in response.get("rollupDataPoints", [])
@@ -270,6 +294,67 @@ class GoogleHealthClient:
                     raise ApiError(508, _("Repeated roll-up page for {label}.", label=spec.label))
                 seen_tokens.add(page_token)
             cursor = chunk_end
+
+    def _local_five_minute_heart_rate_rollups(
+        self,
+        spec: DataTypeSpec,
+        start: date,
+        end: date,
+        cancel: Callable[[], bool] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fallback to bounded raw retrieval when Google's roll-up rejects a request."""
+        raw_spec = DataTypeSpec(
+            key=spec.key,
+            label=spec.label,
+            category=spec.category,
+            scope=spec.scope,
+            record_type="sample",
+            operation="list",
+            filter_field="heart_rate.sample_time.physical_time",
+        )
+        buckets: dict[int, list[float]] = {}
+        for page in self.iter_data_pages(raw_spec, start, end, cancel):
+            for point in page:
+                heart_rate = point.get("heartRate") if isinstance(point, dict) else None
+                if not isinstance(heart_rate, dict):
+                    continue
+                sample_time = heart_rate.get("sampleTime")
+                if not isinstance(sample_time, dict):
+                    continue
+                raw_time = sample_time.get("physicalTime")
+                raw_bpm = heart_rate.get("beatsPerMinute")
+                try:
+                    timestamp = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+                    bpm = float(raw_bpm)
+                except (TypeError, ValueError):
+                    continue
+                if not math.isfinite(bpm) or not 20 <= bpm <= 250:
+                    continue
+                bucket = math.floor(timestamp.timestamp() / 300)
+                buckets.setdefault(bucket, []).append(bpm)
+
+        prepared: list[dict[str, Any]] = []
+        for bucket, values in sorted(buckets.items()):
+            start_time = datetime.fromtimestamp(bucket * 300, timezone.utc)
+            end_time = start_time + timedelta(seconds=300)
+            average = sum(values) / len(values)
+            prepared.append(
+                {
+                    "startTime": start_time.isoformat().replace("+00:00", "Z"),
+                    "endTime": end_time.isoformat().replace("+00:00", "Z"),
+                    "heartRate": {
+                        "beatsPerMinuteAvg": average,
+                        "beatsPerMinuteMin": min(values),
+                        "beatsPerMinuteMax": max(values),
+                        "beatsPerMinute": average,
+                    },
+                    "name": (
+                        f"heart-rate:5m:{start_time.isoformat().replace('+00:00', 'Z')}:"
+                        f"{end_time.isoformat().replace('+00:00', 'Z')}"
+                    ),
+                }
+            )
+        return prepared
 
     def get_resources(self, cancel: Callable[[], bool] | None = None) -> dict[str, dict]:
         resources = {}

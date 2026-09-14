@@ -1805,7 +1805,8 @@ class MainWindow(QMainWindow):
         if self.progress_dialog:
             self.progress_dialog.canceled.connect(self.sync_thread.cancel)
         self.sync_thread.progress.connect(self._sync_progress)
-        self.sync_thread.type_done.connect(lambda *_: self.refresh_tree())
+        # Rebuilding the complete data tree after every category can block the
+        # GUI while the worker is still writing SQLite. Refresh once at the end.
         self.sync_thread.warning.connect(self._sync_warning)
         self.sync_thread.completed.connect(
             lambda success, errors: self._sync_completed(success, errors, automatic)

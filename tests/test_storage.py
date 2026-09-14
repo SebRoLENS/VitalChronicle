@@ -470,6 +470,8 @@ def test_heart_rate_storage_migration_removes_raw_only_and_resets_coverage(tmp_p
     store.upsert_records("heart-rate", [rolled], "five_minute_rollup")
     store.mark_sync_range("heart-rate", date(2026, 9, 1), date(2026, 9, 2))
 
+    assert store.count_records_by_kind("heart-rate", "data_point") == 1
+    assert store.count_records_by_kind("heart-rate", "five_minute_rollup") == 1
     assert store.data_type_date_bounds("heart-rate") == (
         date(2026, 9, 1),
         date(2026, 9, 2),

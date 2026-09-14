@@ -215,6 +215,15 @@ class HealthStore:
             removed = cursor.rowcount
         return max(0, int(removed if removed is not None else 0))
 
+    def count_records_by_kind(self, data_type: str, record_kind: str) -> int:
+        """Count records from one storage representation."""
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT COUNT(*) AS n FROM records WHERE data_type = ? AND record_kind = ?",
+                (data_type, record_kind),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
     def reset_sync_ranges(self, data_type: str) -> None:
         """Forget downloaded coverage so a representation migration can refetch it."""
         with self._connect() as db:
