@@ -651,10 +651,11 @@ class AgentRuntime(base_rt.AgentRuntime):
             {"role": "user", "content": user_content},
         ]
         online_model = base_rt.is_online_model(model)
-        schemas = base_rt.online_tool_subset(self.tools.tool_schemas(), request)
+        all_schemas = self.tools.tool_schemas()
+        schemas = base_rt.online_tool_subset(all_schemas, request)
         tool_function_names = {
             str(item.get("function", {}).get("name") or "")
-            for item in schemas
+            for item in all_schemas
             if isinstance(item, dict) and isinstance(item.get("function"), dict)
         }
         metric_reader_tools = {
@@ -1205,6 +1206,8 @@ class AgentRuntime(base_rt.AgentRuntime):
                         )
                         factory_resolution_seen = True
                         factory_gate_required = False
+                        if factory_tool_name:
+                            tool_function_names.add(factory_tool_name)
                         event(
                             _("Equivalent tool found · reusing it instead of creating a duplicate.")
                         )
@@ -1229,6 +1232,8 @@ class AgentRuntime(base_rt.AgentRuntime):
                         )
                         factory_resolution_seen = True
                         factory_gate_required = False
+                        if factory_tool_name:
+                            tool_function_names.add(factory_tool_name)
                         event(_("Learned tool validated and saved locally."))
                         schemas = base_rt.online_tool_subset(
                             self.tools.tool_schemas(),
