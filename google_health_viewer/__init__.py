@@ -47,6 +47,7 @@ _install_scientific_context_preserve_core()
 # Health Daily records are never mistaken for partial intraday measurements.
 _install_ai_query_semantics()
 
-# Give the agent a deterministic cross-metric threshold primitive so Tool Factory
-# repairs do not fall back to hand-joining independent raw series by date.
+# Register Tool Factory validation/repair hooks without importing the Qt-heavy
+# agent runtime. Runtime token/resource limits are installed lazily when the
+# personal agent executor is actually created.
 _install_agent_tool_factory_reliability_patch()
