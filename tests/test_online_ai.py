@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import copy
+
 import pytest
 
-from google_health_viewer.agent_runtime import online_tool_subset
-from google_health_viewer.agent_runtime_v2 import AgentRuntime
+from google_health_viewer.agent_runtime import AGENT_SYSTEM_PROMPT, online_tool_subset
+from google_health_viewer.agent_runtime_v2 import (
+    _FACTORY_POLICY,
+    _PERSONALIZATION_POLICY,
+    AgentRuntime,
+)
 from google_health_viewer.agent_store import AgentStore
 from google_health_viewer.ai_query_planner import AIDataPlanThread
 from google_health_viewer.local_ai import LocalAIError
@@ -178,7 +184,7 @@ def test_online_agent_returns_matching_tool_call_id_and_bounded_schemas(
     calls: list[dict] = []
 
     def fake_chat_once(**kwargs):
-        calls.append(kwargs)
+        calls.append(copy.deepcopy(kwargs))
         if len(calls) == 1:
             return {
                 "content": "",
@@ -210,6 +216,57 @@ def test_online_agent_returns_matching_tool_call_id_and_bounded_schemas(
     assert answer == "Risposta"
     assert tool_message["tool_call_id"] == "call_7"
     assert "tool_name" not in tool_message
-    assert len(calls[0]["tools"]) <= 28
+    assert len(calls[0]["tools"]) <= 20
     assert "create_learned_tool" in advertised
     assert "ask_user_feedback" in advertised
+
+
+def test_initial_online_agent_payload_stays_compact_and_relevant(tmp_path, monkeypatch) -> None:
+    store = AgentStore(tmp_path / "agent.sqlite3")
+    store.learn_user_model(
+        "sleep_schedule_context",
+        "I usually go to bed at 23:00",
+        evidence={"temporal_scope": "stable"},
+    )
+    store.learn_user_model(
+        "training_routine_context",
+        "I cycle five days a week",
+        evidence={"temporal_scope": "stable"},
+    )
+    runtime = AgentRuntime(HealthStore(tmp_path / "health.sqlite3"), store)
+    calls: list[dict] = []
+
+    def fake_chat_once(**kwargs):
+        calls.append(copy.deepcopy(kwargs))
+        return {"content": "Risposta", "tool_calls": []}
+
+    monkeypatch.setattr(runtime, "_chat_once", fake_chat_once)
+    history = [
+        {"role": "user" if index % 2 == 0 else "assistant", "content": f"turn-{index} " + "x" * 3000}
+        for index in range(12)
+    ]
+    runtime.analyze(
+        model=GROQ_MODEL,
+        snapshot={},
+        question="Come ho dormito oggi?",
+        history=history,
+        max_tokens=1024,
+        model_context_limit=32768,
+        performance_profile="fast",
+        thread_id=None,
+    )
+
+    messages = calls[0]["messages"]
+    system_text = str(messages[0]["content"])
+    user_text = str(messages[-1]["content"])
+    retained_history = [item for item in messages if str(item.get("content", "")).startswith("turn-")]
+
+    assert len(AGENT_SYSTEM_PROMPT + _FACTORY_POLICY + _PERSONALIZATION_POLICY) < 3000
+    assert len(system_text) < 3200
+    assert len(retained_history) == 6
+    assert all(len(str(item["content"])) <= 1600 for item in retained_history)
+    assert "personal_context_key_catalogue" not in user_text
+    assert "safe_tool_count" not in user_text
+    assert user_text.count("I usually go to bed at 23:00") == 1
+    assert "I cycle five days a week" not in user_text
+    assert len(calls[0]["tools"]) <= 20

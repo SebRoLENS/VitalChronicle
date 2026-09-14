@@ -257,11 +257,23 @@ jobs:
         run: |
           mkdir dmg-stage
           ditto dist/VitalChronicle.app dmg-stage/VitalChronicle.app
-          hdiutil create \
-            -volname VitalChronicle \
-            -srcfolder dmg-stage \
-            -ov -format UDZO \
-            "VitalChronicle-${VERSION}-macos-${{ matrix.arch }}.dmg"
+          DMG_PATH="VitalChronicle-${VERSION}-macos-${{ matrix.arch }}.dmg"
+          for attempt in 1 2 3; do
+            if hdiutil create \
+              -volname VitalChronicle \
+              -srcfolder dmg-stage \
+              -ov -format UDZO \
+              "$DMG_PATH"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "hdiutil failed after $attempt attempts."
+              exit 1
+            fi
+            echo "hdiutil reported a transient failure; retrying ($attempt/3)…"
+            rm -f "$DMG_PATH"
+            sleep $((attempt * 5))
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: release-macos-${{ matrix.arch }}

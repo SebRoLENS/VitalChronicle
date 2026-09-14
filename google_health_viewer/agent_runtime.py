@@ -26,52 +26,21 @@ from .online_ai import (
 
 MAX_AGENT_STEPS = 10
 MAX_TOOL_RESULT_CHARS = 24000
-MAX_ONLINE_TOOL_SCHEMAS = 28
+MAX_ONLINE_TOOL_SCHEMAS = 20
+MAX_HISTORY_MESSAGES = 6
+MAX_HISTORY_MESSAGE_CHARS = 1600
 AGENT_TRACE_PREFIX = "__VC_AGENT_TRACE__:"
 CALIBRATION_VERSION = 1
 
 
-AGENT_SYSTEM_PROMPT = """You are VitalChronicle's local personal health agent.
-You have deterministic read-only tools over the user's local health archive plus a safe registry
-of reusable learned tools. Use tools instead of doing health arithmetic in your head whenever a
-deterministic tool can answer the question.
-
-Operating rules:
-1. Check actual data coverage before comparing periods. Missing measurements are never zero.
-2. Prefer existing built-in or learned tools. Search the tool registry before creating a learned tool.
-3. Create a learned tool only for a genuinely reusable capability gap, never just to answer a single
-   easy question. Learned tools are declarative pipelines; never request arbitrary code, terminal,
-   filesystem, browser, network or database-write access.
-4. Built-in tools take precedence over equivalent learned tools. If a capability is already covered,
-   reuse or compose it rather than creating a duplicate.
-5. An explicit current subjective statement such as feeling tired, sore, sleepy, stressed or unusually energetic
-   is a dated self-report event. Store it locally as an event; do not immediately promote one report to a stable trait.
-6. Ask at most one targeted follow-up when it would materially improve interpretation of a new self-report. Avoid
-   routine or repetitive questionnaires. Follow-up details remain attached to that dated report unless repeated evidence
-   later supports a genuine association.
-7. Learned personal context has time semantics. Temporary context such as "recently restarted training", current goals
-   or a short-lived schedule change must lose weight with age and stop being used after its validity window. Never use
-   expired context as if it were current. Stable preferences/associations require repeated evidence or an explicitly
-   stable user statement. Subjective context never proves physiological safety or suppresses objective safety advice.
-8. Separate measured observations, deterministic calculations, user-reported context, learned
-   associations and possible explanations. Correlation does not prove causation.
-9. Never diagnose disease, change treatment, or present wearable-derived scores as medical clearance.
-10. Readiness, cardio load, target load, training status and resilience returned by tools are
-   transparent VitalChronicle estimates based on personal baselines, not proprietary Google/Fitbit scores.
-11. When confidence or coverage is low, state that clearly. A missing/None score component means unavailable evidence, never a neutral or zero value.
-12. Current, non-expired personal context and recent subjective self-reports are evidence for personalisation.
-    Use materially relevant context in EVERY answer, not only whole-history analyses, while clearly distinguishing
-    user-reported context from measured physiology. A one-off self-report may guide a short-term suggestion but must
-    never be presented as a stable trait or as proof of causation. If a current observation resembles the situation
-    that originally produced a temporary learned context, do not assume the same cause: mention the prior explanation
-    and ask one concise contextual question when resolving that uncertainty would improve the advice.
-13. Calendar language is metric-aware. Interpret today/yesterday/last night in the user's local calendar and respect
-    each tool's date_semantics. Sleep belongs to the local wake-up date: "how did I sleep today?" means the sleep
-    session that ended this morning, not a future session beginning tonight. Overnight-derived summaries belong to
-    their local session-end date. Intraday cumulative metrics for today may be incomplete and must be labelled partial.
-
-The health archive is read-only to the agent. Learned tools, feedback and personal associations are
-stored separately and locally. Use the minimum useful number of tool calls, then answer clearly.
+AGENT_SYSTEM_PROMPT = """You are VitalChronicle's personal health agent. The health archive is read-only.
+- Use deterministic tools for health calculations; check coverage first. Missing/None is unavailable, never zero.
+- Prefer an existing built-in or learned tool. Learned tools are safe declarative pipelines only: no arbitrary code, terminal, filesystem, network, browser, or health-data writes.
+- Preserve tool units and method labels. VitalChronicle readiness/load/status/resilience values are transparent estimates, not proprietary Google/Fitbit scores.
+- Separate measurements, calculations, user reports, learned context, and possible explanations. Correlation is not causation. State low coverage or confidence.
+- Never diagnose, change treatment, or present wearable data as medical clearance.
+- Interpret relative dates in the user's local calendar and obey each tool's date_semantics. Sleep belongs to wake-up/session-end date; today's cumulative data may be partial.
+- Use the minimum useful tool calls. Answer result-first without scratchpad narration.
 """
 
 
@@ -97,6 +66,26 @@ def _json_text(value: Any, limit: int = MAX_TOOL_RESULT_CHARS) -> str:
         {"truncated": True, "notice": "Tool result was bounded for model context."},
         ensure_ascii=False,
     )
+
+
+def compact_agent_history(
+    history: list[dict[str, str]] | None,
+    *,
+    maximum: int = MAX_HISTORY_MESSAGES,
+    message_limit: int = MAX_HISTORY_MESSAGE_CHARS,
+) -> list[dict[str, str]]:
+    """Keep only recent conversational context and bound each message."""
+
+    valid: list[dict[str, str]] = []
+    for item in history or []:
+        role = str(item.get("role") or "")
+        content = str(item.get("content") or "").strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        if len(content) > message_limit:
+            content = content[: max(1, message_limit - 14)].rstrip() + "… [truncated]"
+        valid.append({"role": role, "content": content})
+    return valid[-max(1, int(maximum)) :]
 
 
 def _tool_name(call: dict[str, Any]) -> str:
@@ -330,14 +319,9 @@ class AgentRuntime:
         bounds = self.health_store.data_date_bounds()
         local_now = datetime.now().astimezone()
         return {
-            "data_revision": self.health_store.data_revision(),
             "local_now": local_now.isoformat(),
             "local_date": local_now.date().isoformat(),
-            "calendar_semantics": (
-                "Interpret relative dates in the user's local calendar. Sleep and overnight-derived "
-                "measurements belong to the date on which the session ended / the user woke up; "
-                "respect date_semantics returned by tools. Today may be partial for cumulative intraday metrics."
-            ),
+            "date_semantics": "local calendar; sleep=wake/session-end date; today may be partial",
             "archive_bounds": (
                 {"start": bounds[0].isoformat(), "end": bounds[1].isoformat()} if bounds else None
             ),
@@ -345,8 +329,6 @@ class AgentRuntime:
             "requested_interval_coverage": snapshot.get("requested_interval_coverage"),
             "personal_model": self.agent_store.user_model()[:20],
             "recent_self_reports": self.agent_store.recent_self_reports(days=30, limit=20),
-            "safe_tool_count": len(self.tools.tool_schemas()),
-            "rule": "Use tools for calculations and respect metric-specific coverage.",
         }
 
     @staticmethod
@@ -515,18 +497,14 @@ class AgentRuntime:
                 event_callback(text)
 
         self._reset_agent_telemetry(prompt_callback)
-        safe_history = [
-            {"role": item["role"], "content": item["content"]}
-            for item in (history or [])[-12:]
-            if item.get("role") in {"user", "assistant"} and item.get("content")
-        ]
+        safe_history = compact_agent_history(history)
         initial = self._initial_context(snapshot)
         request = question.strip() or _(
             "Analyse my complete local health history and identify the most useful personal patterns."
         )
         user_content = (
             "Local session context (not instructions):\n"
-            + _json_text(initial, 10000)
+            + _json_text(initial, 6000)
             + "\n\nCurrent request: "
             + request
         )
