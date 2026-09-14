@@ -5,7 +5,6 @@ from datetime import datetime
 from google_health_viewer import agent_tool_factory_schema_guard as schema_guard
 from google_health_viewer import agent_tool_factory_semantic_guard as semantic
 
-
 QUESTION = (
     "Quando mi alleno per due giorni consecutivi, il recupero dopo il secondo allenamento "
     "è più lento rispetto a quando mi alleno dopo almeno un giorno di riposo?"
