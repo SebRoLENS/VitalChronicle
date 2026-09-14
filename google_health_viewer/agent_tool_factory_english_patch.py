@@ -4,12 +4,13 @@ import re
 from typing import Any
 
 from . import agent_tool_factory as factory
+from . import agent_tool_factory_schema_guard as guard
 
 _INSTALLED = False
 
 # Deliberately conservative domain/UI vocabulary. We reject clear Italian metadata rather than
 # pretending to translate arbitrary prose deterministically. The model then repairs the SAME tool
-# in English before schema/semantic validation and persistence continue.
+# in English before persistence continues.
 _ITALIAN_METADATA_TOKENS = {
     "analisi",
     "allenamento",
@@ -90,25 +91,34 @@ def install_tool_factory_english_patch() -> None:
             "one user question."
         )
 
-    original_create = factory.EnhancedSafeToolExecutor._tool_create_learned_tool
+    original_prepare = guard._prepare_candidate
 
-    def english_create(self: Any, args: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-        errors = _metadata_language_errors(args)
-        if errors:
-            return {
-                "status": "invalid_metadata",
-                "repairable": True,
+    def english_prepare(
+        executor: Any,
+        args: dict[str, Any],
+        *,
+        run_dry: bool,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        prepared, meta = original_prepare(executor, args, run_dry=run_dry)
+        if prepared is None:
+            return prepared, meta
+        errors = _metadata_language_errors(prepared)
+        if not errors:
+            return prepared, meta
+        failed = dict(meta)
+        failed.update(
+            {
                 "error": errors[0],
                 "validation_errors": errors,
-                "instruction": (
+                "metadata_language": "english_required",
+                "repair_instruction": (
                     "Repair the SAME learned tool before any further analysis. Keep its semantics and "
                     "pipeline unchanged, but rewrite name, description and capability in English. "
-                    "Use an English snake_case name and an English dot-separated capability. Then "
-                    "submit create_learned_tool again so normal schema, semantic and dry-run validation "
-                    "can continue."
+                    "Use an English snake_case name and an English dot-separated capability."
                 ),
             }
-        return original_create(self, args, **kwargs)
+        )
+        return None, failed
 
-    factory.EnhancedSafeToolExecutor._tool_create_learned_tool = english_create
+    guard._prepare_candidate = english_prepare
     _INSTALLED = True
