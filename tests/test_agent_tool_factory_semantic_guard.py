@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from google_health_viewer import agent_tool_factory_semantic_guard as semantic
 from google_health_viewer import agent_tool_factory_schema_guard as schema_guard
+from google_health_viewer import agent_tool_factory_semantic_guard as semantic
 
 
 QUESTION = (
