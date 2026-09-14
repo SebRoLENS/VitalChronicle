@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from typing import Any
@@ -17,6 +18,10 @@ MAX_OUT_OF_SCOPE_TOOL_REFUSALS = 2
 MAX_RAW_SERIES_PROBES_BEFORE_FACTORY = 2
 FACTORY_GATE_AFTER_ANALYSIS_STEPS = 3
 MAX_TOTAL_MODEL_TURNS = MAX_ANALYSIS_STEPS + MAX_FACTORY_REPAIR_ATTEMPTS + 4
+MAX_EVIDENCE_ENTRIES = 8
+MAX_EVIDENCE_LIST_ITEMS = 24
+MAX_EVIDENCE_ENTRY_CHARS = 6500
+MAX_EVIDENCE_LEDGER_CHARS = 16000
 
 _COMPREHENSIVE_ANALYSIS_MARKERS = (
     "analisi totale",
@@ -119,24 +124,88 @@ def _relevant_personal_evidence(
 _PERSONALIZATION_POLICY = """
 
 Personalisation:
-- Use only relevant, current personal context; respect scope, freshness, confidence, and expiry.
-- Label self-reports as subjective. One report may guide short-term advice but is neither a stable trait nor proof of cause.
-- Personalise focused answers when relevant evidence exists; never add unrelated profile facts or invent context.
-- Treat a durable first-person routine, preference, or goal as a candidate requiring one concise confirmation. Transient details remain dated reports. Ask at most one useful follow-up.
+- Use only relevant current context; label self-reports as subjective and respect expiry/confidence.
+- Personalise when useful, never invent facts. Durable routines/preferences/goals require one confirmation; transient details remain dated reports.
 """
 
 _FACTORY_POLICY = """
 
 Tool Factory:
-- Detect reusable capability gaps without an explicit request. Reuse an exact built-in/learned tool or search the registry first.
-- Create only when the missing capability is reusable, especially composed transforms, relative-baseline thresholds, event-conditioned lag/next-day analysis, or recovery time. Skip trivial one-off arithmetic.
-- Use the exact requested metric and semantic tools; never substitute a proxy or pass a function name as a metric identifier. Verify the semantic source before claiming no data.
-- On invalid_spec/invalid_pipeline, use the returned DSL reference to repair the same tool. Stop after the runtime repair budget.
-- If the runtime gate leaves only create_learned_tool, call it. Execute a created/reused tool for the current answer.
-- For event responses, group consecutive triggers into episodes anchored at the last trigger. Zero triggers means frequency/recovery is not estimable. Insufficient sample quality supports only a preliminary observation.
-- Report TOOL FACTORY OUTCOME exactly: created/reused=persisted; not_persisted/not_needed means no new saved tool.
-- Sleep-stage durations are hours; deep is one stage, while total sleep is deep+REM+light.
+- Detect reusable composed/baseline/lag/recovery gaps. Reuse an exact tool or search first; skip one-off arithmetic.
+- Never substitute metrics or use a function name as a metric. Repair invalid pipelines from the returned DSL, within the runtime budget.
+- Obey a factory-only gate and execute a created/reused tool before answering.
+- Event episodes end at the last consecutive trigger; zero triggers cannot estimate frequency/recovery. Small samples support preliminary findings only.
+- Report factory status exactly. Sleep stages are hours; total sleep is deep+REM+light.
 """
+
+
+def _compact_evidence_value(value: Any, *, depth: int = 0) -> Any:
+    """Deterministically retain useful facts without forwarding bulky raw results."""
+
+    if depth >= 6:
+        return "[nested value omitted]"
+    if isinstance(value, dict):
+        return {
+            str(key): _compact_evidence_value(item, depth=depth + 1)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        if len(value) <= MAX_EVIDENCE_LIST_ITEMS:
+            return [_compact_evidence_value(item, depth=depth + 1) for item in value]
+        edge = MAX_EVIDENCE_LIST_ITEMS // 2
+        return [
+            *[_compact_evidence_value(item, depth=depth + 1) for item in value[:edge]],
+            {"omitted_items": len(value) - edge * 2},
+            *[_compact_evidence_value(item, depth=depth + 1) for item in value[-edge:]],
+        ]
+    if isinstance(value, str) and len(value) > 1200:
+        return value[:1180].rstrip() + "… [bounded]"
+    return value
+
+
+def _evidence_entry(name: str, arguments: dict[str, Any], result: Any) -> dict[str, Any]:
+    entry = {
+        "tool": name,
+        "arguments": _compact_evidence_value(arguments),
+        "result": _compact_evidence_value(result),
+    }
+    encoded = json.dumps(entry, ensure_ascii=False, separators=(",", ":"), default=str)
+    if len(encoded) <= MAX_EVIDENCE_ENTRY_CHARS:
+        return entry
+    return {
+        "tool": name,
+        "arguments": _compact_evidence_value(arguments),
+        "result_preview": encoded[: MAX_EVIDENCE_ENTRY_CHARS - 500],
+        "notice": "Entry exceeded the step budget; omitted values are unknown.",
+        "bounded": True,
+    }
+
+
+def _incremental_messages(
+    system_prompt: str,
+    safe_history: list[dict[str, str]],
+    user_content: str,
+    evidence: list[dict[str, Any]],
+    runtime_state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    ledger = list(evidence[-MAX_EVIDENCE_ENTRIES:])
+    ledger_text = base_rt._json_text(ledger, MAX_EVIDENCE_LEDGER_CHARS)
+    state_text = base_rt._json_text(runtime_state, 2200)
+    return [
+        {"role": "system", "content": system_prompt},
+        *safe_history,
+        {"role": "user", "content": user_content},
+        {
+            "role": "system",
+            "content": (
+                "DETERMINISTIC EVIDENCE LEDGER (compact; omitted rows are unknown):\n"
+                + ledger_text
+                + "\nRUNTIME STATE:\n"
+                + state_text
+                + "\nChoose only the next necessary action. Do not repeat completed calls."
+            ),
+        },
+    ]
 
 
 def _factory_hint(question: str) -> dict[str, Any]:
@@ -405,18 +474,10 @@ class AgentRuntime(base_rt.AgentRuntime):
             {
                 "role": "system",
                 "content": (
-                    "FINAL ANSWER REQUIRED NOW. Do not call tools. Answer the user's exact request "
-                    "using only the evidence already collected. If a capability remains unavailable, "
-                    "state that limitation precisely; do not substitute a different metric or proxy. "
-                    "Mention any learned-tool validation failure only if it materially limits the answer. "
-                    "Do not narrate scratchpad deliberation, self-corrections, or step-by-step arithmetic. "
-                    "If you must derive a personal baseline from an already-returned semantic date series, "
-                    "use its median as the robust VitalChronicle baseline convention and state that once. "
-                    "If there are zero qualifying trigger events, report that directly and do not infer "
-                    "response frequency or recovery time. Use any current, non-expired personal context and "
-                    "recent self-reports already present in the session when they materially improve the "
-                    "interpretation or recommendations; keep subjective reports explicitly separate from "
-                    "measured evidence."
+                    "FINAL ANSWER NOW; no tools. Answer the exact request from collected evidence only. "
+                    "Do not substitute metrics or expose scratchpad. State material limits. A missing "
+                    "trigger cannot estimate frequency/recovery. Use relevant current personal context, "
+                    "label reports subjective, and mention factory failure only when it limits the result."
                 ),
             },
             {
@@ -589,12 +650,12 @@ class AgentRuntime(base_rt.AgentRuntime):
             *safe_history,
             {"role": "user", "content": user_content},
         ]
-        schemas = self.tools.tool_schemas()
-        if base_rt.is_online_model(model):
-            schemas = base_rt.online_tool_subset(schemas, request)
+        online_model = base_rt.is_online_model(model)
+        all_schemas = self.tools.tool_schemas()
+        schemas = base_rt.online_tool_subset(all_schemas, request)
         tool_function_names = {
             str(item.get("function", {}).get("name") or "")
-            for item in schemas
+            for item in all_schemas
             if isinstance(item, dict) and isinstance(item.get("function"), dict)
         }
         metric_reader_tools = {
@@ -629,6 +690,7 @@ class AgentRuntime(base_rt.AgentRuntime):
             )
         event(_("Personal agent started · {count} tools available", count=len(schemas)))
         hint = initial["tool_factory_decision_hint"]
+        evidence_ledger: list[dict[str, Any]] = []
         factory_candidate = bool(hint.get("consider_reusable_tool"))
         factory_capability = _factory_capability(hint)
         if factory_candidate:
@@ -642,20 +704,33 @@ class AgentRuntime(base_rt.AgentRuntime):
                 thread_id=thread_id,
             )
             event(_("Tool Factory preflight: registry checked before raw-data exploration."))
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "RUNTIME TOOL FACTORY PREFLIGHT: this request contains a reusable complex "
-                        f"capability pattern ({factory_capability}). Registry result: "
-                        + base_rt._json_text(registry_preflight, 5000)
-                        + ". You may inspect at most two raw metric series before making the "
-                        "capability decision. If no exact existing capability answers the request, "
-                        "create a reusable safe learned tool. Prefer semantic built-ins such as "
-                        "calculate_cardio_load or get_sleep_stage_series over guessing raw metric names."
-                    ),
-                }
+            evidence_ledger.append(
+                _evidence_entry(
+                    "search_tool_registry",
+                    {"capability": factory_capability, "description": request},
+                    registry_preflight,
+                )
             )
+            if online_model:
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "RUNTIME FACTORY PREFLIGHT: reusable gap detected; registry result: "
+                            + base_rt._json_text(registry_preflight, 3500)
+                            + ". Inspect at most two raw series, then create the safe learned tool "
+                            "if no exact capability exists. Prefer semantic tools over guessed metrics."
+                        ),
+                    }
+                )
+            else:
+                messages = _incremental_messages(
+                    system_prompt,
+                    safe_history,
+                    user_content,
+                    evidence_ledger,
+                    {"factory": self._last_factory_outcome, "next": "resolve reusable capability"},
+                )
         think = performance_profile != "fast"
         if thinking_callback:
             thinking_callback(_("Agent: selecting the minimum deterministic evidence needed…\n"))
@@ -709,6 +784,14 @@ class AgentRuntime(base_rt.AgentRuntime):
                         "Tool Factory gate active · the next decision must resolve the reusable capability gap."
                     )
                 )
+            num_ctx, num_predict, _estimated_input = base_rt._request_budget(
+                [
+                    {"role": str(item.get("role", "")), "content": str(item.get("content", ""))}
+                    for item in messages
+                ],
+                max_tokens,
+                physical_limit,
+            )
             message = self._chat_once(
                 model=model,
                 messages=messages,
@@ -1123,16 +1206,16 @@ class AgentRuntime(base_rt.AgentRuntime):
                         )
                         factory_resolution_seen = True
                         factory_gate_required = False
+                        if factory_tool_name:
+                            tool_function_names.add(factory_tool_name)
                         event(
                             _("Equivalent tool found · reusing it instead of creating a duplicate.")
                         )
-                        schemas = self.tools.tool_schemas()
-                        if base_rt.is_online_model(model):
-                            schemas = base_rt.online_tool_subset(
-                                schemas,
-                                request,
-                                required_names={factory_tool_name} if factory_tool_name else None,
-                            )
+                        schemas = base_rt.online_tool_subset(
+                            self.tools.tool_schemas(),
+                            request,
+                            required_names={factory_tool_name} if factory_tool_name else None,
+                        )
                     elif status == "created":
                         tool_record = result.get("tool") if isinstance(result.get("tool"), dict) else {}
                         factory_tool_name = str(
@@ -1149,14 +1232,14 @@ class AgentRuntime(base_rt.AgentRuntime):
                         )
                         factory_resolution_seen = True
                         factory_gate_required = False
+                        if factory_tool_name:
+                            tool_function_names.add(factory_tool_name)
                         event(_("Learned tool validated and saved locally."))
-                        schemas = self.tools.tool_schemas()
-                        if base_rt.is_online_model(model):
-                            schemas = base_rt.online_tool_subset(
-                                schemas,
-                                request,
-                                required_names={factory_tool_name} if factory_tool_name else None,
-                            )
+                        schemas = base_rt.online_tool_subset(
+                            self.tools.tool_schemas(),
+                            request,
+                            required_names={factory_tool_name} if factory_tool_name else None,
+                        )
                     else:
                         factory_error = str(
                             result.get("error")
@@ -1204,6 +1287,7 @@ class AgentRuntime(base_rt.AgentRuntime):
                     event(_("Persisted learned tool executed for this request."))
 
                 tool_text = base_rt._json_text(result)
+                evidence_ledger.append(_evidence_entry(name, args, result))
                 tool_message: dict[str, Any] = {
                     "role": "tool",
                     "content": tool_text,
@@ -1229,6 +1313,21 @@ class AgentRuntime(base_rt.AgentRuntime):
                 and analysis_steps >= FACTORY_GATE_AFTER_ANALYSIS_STEPS
             ):
                 factory_gate_required = True
+
+            if not online_model:
+                messages = _incremental_messages(
+                    system_prompt,
+                    safe_history,
+                    user_content,
+                    evidence_ledger,
+                    {
+                        "analysis_step": analysis_steps,
+                        "factory": self._last_factory_outcome,
+                        "factory_gate": factory_gate_required and not factory_disabled,
+                        "required_tool": factory_tool_name if not factory_tool_executed else None,
+                        "raw_series_probes": raw_series_probes,
+                    },
+                )
 
             if analysis_steps >= MAX_ANALYSIS_STEPS - 1:
                 messages.append(

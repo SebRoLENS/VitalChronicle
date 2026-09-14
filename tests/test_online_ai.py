@@ -9,6 +9,8 @@ from google_health_viewer.agent_runtime_v2 import (
     _FACTORY_POLICY,
     _PERSONALIZATION_POLICY,
     AgentRuntime,
+    _evidence_entry,
+    _incremental_messages,
 )
 from google_health_viewer.agent_store import AgentStore
 from google_health_viewer.ai_query_planner import AIDataPlanThread
@@ -216,7 +218,7 @@ def test_online_agent_returns_matching_tool_call_id_and_bounded_schemas(
     assert answer == "Risposta"
     assert tool_message["tool_call_id"] == "call_7"
     assert "tool_name" not in tool_message
-    assert len(calls[0]["tools"]) <= 20
+    assert len(calls[0]["tools"]) <= 16
     assert "create_learned_tool" in advertised
     assert "ask_user_feedback" in advertised
 
@@ -261,12 +263,30 @@ def test_initial_online_agent_payload_stays_compact_and_relevant(tmp_path, monke
     user_text = str(messages[-1]["content"])
     retained_history = [item for item in messages if str(item.get("content", "")).startswith("turn-")]
 
-    assert len(AGENT_SYSTEM_PROMPT + _FACTORY_POLICY + _PERSONALIZATION_POLICY) < 3000
-    assert len(system_text) < 3200
-    assert len(retained_history) == 6
-    assert all(len(str(item["content"])) <= 1600 for item in retained_history)
+    assert len(AGENT_SYSTEM_PROMPT + _FACTORY_POLICY + _PERSONALIZATION_POLICY) < 1800
+    assert len(system_text) < 2000
+    assert len(retained_history) == 4
+    assert all(len(str(item["content"])) <= 1000 for item in retained_history)
     assert "personal_context_key_catalogue" not in user_text
     assert "safe_tool_count" not in user_text
     assert user_text.count("I usually go to bed at 23:00") == 1
     assert "I cycle five days a week" not in user_text
-    assert len(calls[0]["tools"]) <= 20
+    assert len(calls[0]["tools"]) <= 16
+
+
+def test_incremental_context_keeps_evidence_not_agent_scratchpad() -> None:
+    daily = [{"date": f"2026-09-{day:02d}", "value": day} for day in range(1, 18)]
+    entry = _evidence_entry("get_metric_series", {"metric": "steps"}, {"series": daily})
+    messages = _incremental_messages(
+        "short system",
+        [{"role": "assistant", "content": "recent user-visible answer"}],
+        "Current request: compare the 17 days",
+        [entry],
+        {"analysis_step": 1},
+    )
+    joined = "\n".join(str(item["content"]) for item in messages)
+
+    assert "DETERMINISTIC EVIDENCE LEDGER" in joined
+    assert "2026-09-01" in joined and "2026-09-17" in joined
+    assert "hidden scratchpad" not in joined
+    assert len(joined) < 12000
