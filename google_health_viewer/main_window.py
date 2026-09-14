@@ -96,11 +96,13 @@ from .local_ai import (
 )
 from .oauth import CredentialStore
 from .online_ai import (
-    MISTRAL_MODEL,
-    MistralSetupDialog,
-    has_mistral_consent,
-    is_mistral_model,
-    mistral_api_key,
+    ONLINE_MODELS,
+    has_online_consent,
+    is_online_model,
+    online_api_key,
+    online_provider_for_model,
+    provider_display_name,
+    setup_dialog_for_model,
 )
 from .self_update import launch_windows_helper, select_update_target
 from .setup_wizard import AuthorizationHelpDialog, SetupWizard
@@ -744,11 +746,14 @@ class MainWindow(QMainWindow):
         page = QWidget()
         outer = QVBoxLayout(page)
         outer.setContentsMargins(24, 18, 24, 18)
-        title = QLabel(_("Local health intelligence"))
+        title = QLabel(_("Personal health intelligence"))
         title.setObjectName("pageTitle")
         subtitle = QLabel(
-            _("Prepare transparent statistics, inspect exactly what was calculated, and discuss "
-              "the results with a private Ollama model. Data and conversations remain local.")
+            _(
+                "Prepare transparent statistics, inspect exactly what was calculated, and choose "
+                "a private local model or an explicitly authorised online provider. Online use "
+                "sends only the selected question and evidence."
+            )
         )
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
@@ -766,7 +771,7 @@ class MainWindow(QMainWindow):
         config.setObjectName("aiCard")
         config_layout = QGridLayout(config)
         config_layout.setContentsMargins(16, 14, 16, 14)
-        self.ai_status_label = QLabel(_("○ Checking Ollama…"))
+        self.ai_status_label = QLabel(_("○ Checking the selected AI service…"))
         self.ai_status_label.setStyleSheet("font-weight: 700; color: #5F6368")
         config_layout.addWidget(self.ai_status_label, 0, 0, 1, 3)
         config_layout.addWidget(QLabel(_("Hardware profile")), 1, 0)
@@ -779,10 +784,10 @@ class MainWindow(QMainWindow):
         profile_index = self.ai_profile_combo.findData(saved_profile)
         self.ai_profile_combo.setCurrentIndex(max(0, profile_index))
         config_layout.addWidget(self.ai_profile_combo, 1, 1, 1, 2)
-        config_layout.addWidget(QLabel(_("Local model")), 2, 0)
+        config_layout.addWidget(QLabel(_("AI model")), 2, 0)
         self.ai_model_combo = QComboBox()
         self.ai_model_combo.setEditable(True)
-        self.ai_model_combo.addItem(MISTRAL_MODEL)
+        self.ai_model_combo.addItems(ONLINE_MODELS)
         self.ai_model_combo.addItems(MODEL_OPTIONS)
         saved_model = str(
             self.settings.value("ai/model", recommended_model(saved_profile))
@@ -812,6 +817,7 @@ class MainWindow(QMainWindow):
         config_layout.addWidget(self.ai_online_banner, 7, 0, 1, 3)
         self.ai_online_banner.setVisible(False)
         setup = QPushButton(_("Local installation guide"))
+        self.local_ai_setup_button = setup
         setup.clicked.connect(self.show_ai_setup)
         config_layout.addWidget(setup, 4, 0)
         self.pull_button = QPushButton(_("Download model"))
@@ -826,11 +832,11 @@ class MainWindow(QMainWindow):
         self.model_update_button.clicked.connect(self._apply_model_update)
         self.model_update_button.setVisible(False)
         config_layout.addWidget(self.model_update_button, 5, 1, 1, 2)
-        self.mistral_setup_button = QPushButton(_("Mistral online AI"))
+        self.mistral_setup_button = QPushButton(_("Configure online AI"))
         self.mistral_setup_button.setToolTip(
-            _("Open the Mistral key guide and review online data sharing.")
+            _("Open the selected provider key guide and review online data sharing.")
         )
-        self.mistral_setup_button.clicked.connect(self._configure_mistral)
+        self.mistral_setup_button.clicked.connect(self._configure_online_ai)
         self.mistral_setup_button.setVisible(False)
         config_layout.addWidget(self.mistral_setup_button, 5, 0)
         self._update_online_model_ui(saved_model)
@@ -1519,32 +1525,45 @@ class MainWindow(QMainWindow):
         return snapshot, resolved_period
 
     def _update_online_model_ui(self, model: str = "") -> None:
-        """Make online-provider setup visible as soon as Mistral is selected."""
+        """Make provider setup visible as soon as an online model is selected."""
         if not hasattr(self, "ai_online_banner"):
             return
         selected = model.strip() or self.ai_model_combo.currentText().strip()
-        online = is_mistral_model(selected)
+        online = is_online_model(selected)
         self.mistral_setup_button.setVisible(online)
         self.ai_online_banner.setVisible(online)
+        if hasattr(self, "local_ai_setup_button"):
+            self.local_ai_setup_button.setVisible(not online)
+        if hasattr(self, "pull_button"):
+            self.pull_button.setVisible(not online)
+        if hasattr(self, "ai_progress"):
+            self.ai_progress.setVisible(not online)
         if not online:
             self.ai_online_banner.clear()
             return
-        configured = bool(mistral_api_key() and has_mistral_consent())
+        provider = online_provider_for_model(selected)
+        if provider is None:
+            return
+        configured = bool(online_api_key(selected) and has_online_consent(selected))
         state = (
-            _("Mistral online AI is ready.")
+            _("{provider} online AI is ready.", provider=provider.name)
             if configured
-            else _("Mistral API key not configured.")
+            else _("{provider} API key not configured.", provider=provider.name)
+        )
+        self.mistral_setup_button.setText(
+            _("Configure {provider}", provider=provider.name)
         )
         self.ai_online_banner.setText(
-            _("Mistral online AI")
+            _("{provider} online AI", provider=provider.name)
             + " · "
             + state
-            + "\\n"
+            + "\n"
             + _(
-                "Mistral will receive the question and the minimum deterministic health "
-                "evidence needed for the answer. This information leaves your computer."
+                "{provider} will receive the question and the minimum deterministic health "
+                "evidence needed for the answer. This information leaves your computer.",
+                provider=provider.name,
             )
-            + "\\n"
+            + "\n"
             + _(
                 "Use the button below to create or paste an API key before starting the "
                 "analysis."
@@ -1559,14 +1578,21 @@ class MainWindow(QMainWindow):
             "padding: 8px; color: #5F4500; font-weight: 600;"
         )
 
-    def _configure_mistral(self, _checked: bool = False) -> None:
-        dialog = MistralSetupDialog(self)
+    def _configure_online_ai(self, _checked: bool = False) -> None:
+        model = self.ai_model_combo.currentText().strip()
+        if not is_online_model(model):
+            return
+        dialog = setup_dialog_for_model(model, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._update_online_model_ui()
             self.check_ai_status()
 
+    def _configure_mistral(self, _checked: bool = False) -> None:
+        """Backward-compatible action retained for older UI integrations."""
+        self._configure_online_ai(_checked)
+
     def _prepare_online_ai_request(self) -> bool:
-        """Show the Mistral key guide and data-sharing consent before online use."""
+        """Show the selected provider guide and consent before online use."""
         thread = (
             self.ai_chat_window._current_thread()
             if self.ai_chat_window is not None
@@ -1577,11 +1603,11 @@ class MainWindow(QMainWindow):
             if thread is not None
             else self.ai_model_combo.currentText()
         )
-        if not is_mistral_model(model):
+        if not is_online_model(model):
             return True
-        if mistral_api_key() and has_mistral_consent():
+        if online_api_key(model) and has_online_consent(model):
             return True
-        dialog = MistralSetupDialog(self)
+        dialog = setup_dialog_for_model(model, self)
         accepted = dialog.exec() == QDialog.DialogCode.Accepted
         self._update_online_model_ui(model)
         return accepted
@@ -2333,7 +2359,16 @@ class MainWindow(QMainWindow):
             )
 
     def _update_ai_model_hint(self, model: str) -> None:
-        self.ai_model_hint.setText(model_description(model))
+        provider = online_provider_for_model(model)
+        if provider is not None:
+            self.ai_model_hint.setText(
+                _(
+                    "Online {provider} model · health evidence leaves this computer only after consent.",
+                    provider=provider.name,
+                )
+            )
+        else:
+            self.ai_model_hint.setText(model_description(model))
 
     def _ai_model_is_installed(self, model: str) -> bool:
         value = model.strip().lower()
@@ -2366,7 +2401,13 @@ class MainWindow(QMainWindow):
     def check_ai_status(self) -> None:
         if self.ai_status_thread and self.ai_status_thread.isRunning():
             return
-        self.ai_status_label.setText(_("○ Checking the local service…"))
+        model = self.ai_model_combo.currentText()
+        self.ai_status_label.setText(
+            _(
+                "○ Checking {provider}…",
+                provider=provider_display_name(model),
+            )
+        )
         self.ai_status_label.setStyleSheet("font-weight: 700; color: #5F6368")
         self.ai_status_thread = AIStatusThread(
             self.ai_model_combo.currentText(), str(self.ai_profile_combo.currentData())
@@ -2395,7 +2436,7 @@ class MainWindow(QMainWindow):
                 if status.update_available or not installed
                 else "font-weight: 700; color: #188038"
             )
-            self.pull_button.setEnabled(not installed)
+            self.pull_button.setEnabled(not installed and not is_online_model(selected_model))
             if installed and status.model_context_limit:
                 self._model_token_limit = status.model_context_limit
                 self._remember_model_context_limit(

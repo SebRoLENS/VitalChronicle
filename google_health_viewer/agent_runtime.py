@@ -17,10 +17,16 @@ from .local_ai import (
     DEFAULT_OLLAMA_URL,
     LocalAIError,
 )
-from .online_ai import MISTRAL_API_URL, MistralClient, is_mistral_model, mistral_api_key
+from .online_ai import (
+    is_online_model,
+    online_chat_completion,
+    online_client,
+    provider_display_name,
+)
 
 MAX_AGENT_STEPS = 10
 MAX_TOOL_RESULT_CHARS = 24000
+MAX_ONLINE_TOOL_SCHEMAS = 28
 AGENT_TRACE_PREFIX = "__VC_AGENT_TRACE__:"
 CALIBRATION_VERSION = 1
 
@@ -110,6 +116,99 @@ def _tool_arguments(call: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             return {}
     return {}
+
+
+def online_tool_subset(
+    schemas: list[dict[str, Any]],
+    request: str,
+    *,
+    maximum: int = MAX_ONLINE_TOOL_SCHEMAS,
+    required_names: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Bound online tool-schema tokens while retaining request-relevant capabilities."""
+
+    text = request.casefold()
+    always = {
+        "get_available_metrics",
+        "get_data_coverage",
+        "get_metric_series",
+        "get_daily_summary",
+        "get_baseline",
+        "get_missing_data",
+        "search_tool_registry",
+        "create_learned_tool",
+        "get_user_model",
+        "ask_user_feedback",
+        "record_self_report",
+        "get_recent_self_reports",
+        "learn_user_association",
+    }
+    always.update(required_names or ())
+    domain_terms = {
+        "sleep.": ("sleep", "sonno", "notte", "dorm", "rem", "profondo", "risvegl"),
+        "training.": (
+            "training",
+            "allen",
+            "attivit",
+            "cardio",
+            "bicicletta",
+            "cicl",
+            "workout",
+            "esercizio",
+            "zona attiva",
+        ),
+        "fitness.": ("fitness", "vo2", "forma fisica", "progress"),
+        "recovery.": ("recovery", "recuper", "hrv", "frequenza cardiaca", "readiness"),
+        "resilience.": ("stress", "stanch", "fatica", "resilien", "strain"),
+        "analysis.": (
+            "correl",
+            "relazione",
+            "confront",
+            "trend",
+            "anom",
+            "outlier",
+            "mediana",
+            "baseline",
+            "percent",
+        ),
+        "coaching.": ("consigli", "raccomand", "dovrei", "recommend"),
+    }
+    selected_domains = {
+        domain for domain, terms in domain_terms.items() if any(term in text for term in terms)
+    }
+    if not selected_domains:
+        selected_domains = {"sleep.", "training.", "recovery.", "analysis."}
+    schema_terms = {
+        "sleep.": ("sleep", "awakening"),
+        "training.": ("training", "workout", "activity", "cardio", "load"),
+        "fitness.": ("fitness", "vo2", "progression"),
+        "recovery.": ("recovery", "hrv", "rhr", "readiness"),
+        "resilience.": ("stress", "strain", "resilience"),
+        "analysis.": ("compare", "correlation", "outlier", "trend"),
+        "coaching.": ("recommend", "coaching"),
+    }
+
+    required: list[dict[str, Any]] = []
+    relevant_items: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+    for schema in schemas:
+        function = schema.get("function") if isinstance(schema, dict) else None
+        if not isinstance(function, dict):
+            continue
+        name = str(function.get("name") or "")
+        description = str(function.get("description") or "").casefold()
+        searchable = f"{name.casefold()} {description}"
+        relevant = any(
+            any(term in searchable for term in schema_terms.get(domain, ()))
+            for domain in selected_domains
+        )
+        if name in always:
+            required.append(schema)
+        elif relevant:
+            relevant_items.append(schema)
+        else:
+            deferred.append(schema)
+    return (required + relevant_items + deferred)[: max(1, int(maximum))]
 
 
 def _tool_calling_unavailable_error(detail: str) -> bool:
@@ -251,8 +350,8 @@ class AgentRuntime:
         }
 
     @staticmethod
-    def _mistral_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Convert the Ollama-shaped tool transcript to the Mistral format."""
+    def _online_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Convert the Ollama-shaped tool transcript to OpenAI-compatible format."""
         converted: list[dict[str, Any]] = []
         for message in messages:
             item = dict(message)
@@ -261,7 +360,7 @@ class AgentRuntime:
             converted.append(item)
         return converted
 
-    def _mistral_chat_once(
+    def _online_chat_once(
         self,
         *,
         model: str,
@@ -271,43 +370,22 @@ class AgentRuntime:
         num_predict: int,
         cancel_callback: Callable[[], bool] | None,
     ) -> dict[str, Any]:
-        if not mistral_api_key():
-            raise LocalAIError(_("Mistral API key is not configured."))
-        try:
-            response = requests.post(
-                MISTRAL_API_URL,
-                headers={
-                    "Authorization": f"Bearer {mistral_api_key()}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "messages": self._mistral_messages(messages),
-                    "tools": tools,
-                    "tool_choice": "auto",
-                    "stream": False,
-                    "max_tokens": num_predict,
-                    "temperature": 0.15,
-                },
-                timeout=(15, 900),
-            )
-        except requests.RequestException as exc:
-            raise LocalAIError(_("Mistral agent request failed: {error}", error=exc)) from exc
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise LocalAIError(_("Mistral returned invalid agent JSON.")) from exc
-        if response.status_code >= 400:
-            error = payload.get("message")
-            if not error and isinstance(payload.get("error"), dict):
-                error = payload["error"].get("message") or payload["error"].get("type")
-            raise LocalAIError(
-                _("Mistral agent request failed: {error}", error=error or response.reason)
-            )
+        payload = online_chat_completion(
+            model=model,
+            messages=self._online_messages(messages),
+            tools=tools,
+            max_tokens=num_predict,
+            temperature=0.15,
+        )
         choices = payload.get("choices") or []
         message = choices[0].get("message") if choices and isinstance(choices[0], dict) else None
         if not isinstance(message, dict):
-            raise LocalAIError(_("Mistral returned no agent message."))
+            raise LocalAIError(
+                _(
+                    "{provider} returned no agent message.",
+                    provider=provider_display_name(model),
+                )
+            )
         usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
         telemetry = {
             "prompt_eval_count": usage.get("prompt_tokens"),
@@ -342,10 +420,10 @@ class AgentRuntime:
         think: bool,
         cancel_callback: Callable[[], bool] | None,
     ) -> dict[str, Any]:
-        if is_mistral_model(model):
+        if is_online_model(model):
             if cancel_callback and cancel_callback():
                 raise AIAnalysisCancelled(_("Analysis stopped."))
-            return self._mistral_chat_once(
+            return self._online_chat_once(
                 model=model,
                 messages=messages,
                 tools=tools,
@@ -458,6 +536,8 @@ class AgentRuntime:
             {"role": "user", "content": user_content},
         ]
         schemas = self.tools.tool_schemas()
+        if is_online_model(model):
+            schemas = online_tool_subset(schemas, request)
         physical_limit = (
             model_context_limit if model_context_limit and model_context_limit > 0 else None
         )
@@ -543,6 +623,18 @@ class AgentRuntime:
                         else:
                             event(_("Learned tool validated and saved locally."))
                         schemas = self.tools.tool_schemas()
+                        if is_online_model(model):
+                            tool_record = (
+                                result.get("tool") if isinstance(result.get("tool"), dict) else {}
+                            )
+                            learned_name = str(
+                                tool_record.get("name") or args.get("name") or ""
+                            )
+                            schemas = online_tool_subset(
+                                schemas,
+                                request,
+                                required_names={learned_name} if learned_name else None,
+                            )
                     elif name == "ask_user_feedback" and result.get("queued"):
                         event(_("Targeted feedback question queued for the user."))
                 tool_text = _json_text(result)
@@ -550,7 +642,7 @@ class AgentRuntime:
                     "role": "tool",
                     "content": tool_text,
                 }
-                if is_mistral_model(model):
+                if is_online_model(model):
                     tool_message["tool_call_id"] = str(call.get("id") or name)
                 else:
                     tool_message["tool_name"] = name
@@ -850,12 +942,8 @@ class AgentAnalysisThread(QThread):
         )
         profile = str(QSettings().value("ai/performance_profile", "standard") or "standard")
         client = (
-            MistralClient(
-                model=self.model,
-                api_key=mistral_api_key(),
-                performance_profile=profile,
-            )
-            if is_mistral_model(self.model)
+            online_client(self.model, performance_profile=profile)
+            if is_online_model(self.model)
             else OptimizedOllamaClient(model=self.model, performance_profile=profile)
         )
         return client.analyze_stream(

@@ -39,7 +39,7 @@ from .ai_conversations import ConversationStore
 from .ai_engine import TOKEN_USAGE_PREFIX
 from .branding import APP_NAME
 from .i18n import _
-from .online_ai import is_mistral_model
+from .online_ai import is_online_model, provider_activity_name
 from .workers import AIAnalysisThread
 
 
@@ -85,7 +85,7 @@ class AIChatWindow(QMainWindow):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(_("{app} · Local AI chat", app=APP_NAME))
+        self.setWindowTitle(_("{app} · AI chat", app=APP_NAME))
         self.resize(1260, 820)
         self.setMinimumSize(900, 620)
         self.conversations = conversations
@@ -513,7 +513,7 @@ class AIChatWindow(QMainWindow):
             return
         selected_model = str(thread.get("model") or self.model_provider()).strip()
         if (
-            is_mistral_model(selected_model)
+            is_online_model(selected_model)
             and self.online_prepare_provider is not None
             and not self.online_prepare_provider()
         ):
@@ -526,7 +526,8 @@ class AIChatWindow(QMainWindow):
             self.conversations.add_message(thread["id"], "user", display_question)
         self.input.clear()
         self._pending_mode = mode
-        self._live_thinking = _("Preparing the local model…\n")
+        provider = provider_activity_name(selected_model)
+        self._live_thinking = _("Preparing {provider}…\n", provider=provider)
         self._live_answer = ""
         self._answer_received = False
         self._prompt_sections = []
@@ -535,9 +536,13 @@ class AIChatWindow(QMainWindow):
         self.prompt_button.setChecked(False)
         self._set_running(True)
         if self._activity_active:
-            self._activity_event(_("Question received; preparing the request for Ollama…"))
+            self._activity_event(
+                _("Question received; preparing the request for {provider}…", provider=provider)
+            )
         else:
-            self._begin_activity(_("Question received; preparing the request for Ollama…"))
+            self._begin_activity(
+                _("Question received; preparing the request for {provider}…", provider=provider)
+            )
         self.refresh_threads(select_id=thread["id"])
         self._render_transcript()
         self.analysis_thread = AIAnalysisThread(
@@ -560,7 +565,10 @@ class AIChatWindow(QMainWindow):
     def _thinking_chunk(self, text: str) -> None:
         if self._activity_phase != "thinking":
             self._activity_phase = "thinking"
-            self._activity_event(_("Ollama is processing the health evidence…"))
+            model = str((self._current_thread() or {}).get("model") or self.model_provider())
+            self._activity_event(
+                _("{provider} is processing the health evidence…", provider=provider_activity_name(model))
+            )
         self._live_thinking += text
         self._schedule_render()
 
@@ -585,9 +593,21 @@ class AIChatWindow(QMainWindow):
         self._prompt_sections.append(text)
         prompt_number = len(self._prompt_sections)
         if self._pending_mode == "deep" and prompt_number == 1:
-            self._activity_event(_("Ollama is ranking the strongest longitudinal evidence…"))
+            model = str((self._current_thread() or {}).get("model") or self.model_provider())
+            self._activity_event(
+                _(
+                    "{provider} is ranking the strongest longitudinal evidence…",
+                    provider=provider_activity_name(model),
+                )
+            )
         elif prompt_number <= 2:
-            self._activity_event(_("The evidence is ready; Ollama is building the analysis…"))
+            model = str((self._current_thread() or {}).get("model") or self.model_provider())
+            self._activity_event(
+                _(
+                    "The evidence is ready; {provider} is building the analysis…",
+                    provider=provider_activity_name(model),
+                )
+            )
         else:
             self._activity_event(_("The model is retrying with a compact evidence packet…"))
         self.prompt_view.setPlainText(
@@ -676,11 +696,17 @@ class AIChatWindow(QMainWindow):
         self._set_running(False)
         self.refresh_threads(select_id=self.current_thread_id)
         self._load_current_thread()
-        QMessageBox.warning(
-            self,
-            _("Local analysis unavailable"),
-            _("{message}\n\nCheck Ollama from the Local AI tab.", message=message),
-        )
+        model = str((self._current_thread() or {}).get("model") or self.model_provider())
+        if is_online_model(model):
+            guidance = _(
+                "Check the API key, usage, and limits for {provider} in the AI tab.",
+                provider=provider_activity_name(model),
+            )
+            title = _("Online analysis unavailable")
+        else:
+            guidance = _("Check Ollama from the Local AI tab.")
+            title = _("Local analysis unavailable")
+        QMessageBox.warning(self, title, f"{message}\n\n{guidance}")
 
     def stop_analysis(self) -> None:
         if self.analysis_thread and self.analysis_thread.isRunning():

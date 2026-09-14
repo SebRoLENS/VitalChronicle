@@ -266,8 +266,8 @@ class AISetupDialog(QDialog):
 
         privacy = QLabel(
             _(
-                "AI explains statistical results and does not replace a doctor. VitalChronicle "
-                "does not send health data or detected hardware to online AI services."
+                "AI explains statistical results and does not replace a doctor. This Ollama "
+                "setup is fully local and does not send health data or detected hardware online."
             )
         )
         privacy.setObjectName("disclaimer")
