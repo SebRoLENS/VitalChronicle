@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QSettings
 
 from google_health_viewer.agent_runtime import online_tool_subset
 from google_health_viewer.agent_runtime_v2 import AgentRuntime
@@ -49,8 +48,6 @@ def test_online_provider_resolution_preserves_mistral_and_strips_groq_prefix() -
 
 
 def test_online_completion_uses_groq_endpoint_and_wire_model(monkeypatch) -> None:
-    settings = QSettings()
-    settings.setValue("ai/groq_api_key", "test-key")
     captured: dict = {}
 
     def fake_post(url, **kwargs):
@@ -58,6 +55,9 @@ def test_online_completion_uses_groq_endpoint_and_wire_model(monkeypatch) -> Non
         return _Response(200, {"choices": [{"message": {"content": "ok"}}]})
 
     monkeypatch.setattr("google_health_viewer.online_ai.requests.post", fake_post)
+    monkeypatch.setattr(
+        "google_health_viewer.online_ai.online_api_key", lambda _provider: "test-key"
+    )
     payload = online_chat_completion(
         model=GROQ_MODEL,
         messages=[{"role": "user", "content": "hello"}],
@@ -72,8 +72,6 @@ def test_online_completion_uses_groq_endpoint_and_wire_model(monkeypatch) -> Non
 
 
 def test_rate_limit_error_includes_available_provider_diagnostics(monkeypatch) -> None:
-    QSettings().setValue("ai/groq_api_key", "test-key")
-
     def fake_post(*_args, **_kwargs):
         return _Response(
             429,
@@ -86,6 +84,9 @@ def test_rate_limit_error_includes_available_provider_diagnostics(monkeypatch) -
         )
 
     monkeypatch.setattr("google_health_viewer.online_ai.requests.post", fake_post)
+    monkeypatch.setattr(
+        "google_health_viewer.online_ai.online_api_key", lambda _provider: "test-key"
+    )
     with pytest.raises(LocalAIError) as raised:
         online_chat_completion(
             model=GROQ_MODEL,
