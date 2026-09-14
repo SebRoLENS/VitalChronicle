@@ -118,71 +118,24 @@ def _relevant_personal_evidence(
 
 _PERSONALIZATION_POLICY = """
 
-Personalisation synthesis policy:
-- `personal_model` contains current, non-expired learned personal context. Treat its temporal scope, confidence,
-  freshness and evidence count as part of the evidence; never resurrect expired context.
-- `recent_self_reports` are dated subjective observations. They can justify short-term, conditional suggestions,
-  but one report is not a stable trait and does not prove a physiological cause.
-- When a current personal statement materially changes interpretation, say so explicitly and distinguish it from
-  wearable-derived evidence. Example: if irregular sleep was reported as an exceptional social event, do not present
-  one low regularity score as proof of a persistent schedule problem.
-- Personalisation applies to focused questions too. If the request is about sleep, training or recovery and current
-  relevant personal evidence exists, use it in the interpretation and/or next action instead of giving a generic answer.
-  For a comprehensive analysis, include a clearly identifiable personalised recommendations section.
-- If the current measured pattern resembles the observation attached to a temporary learned association, never reuse the
-  old explanation as a fact. Acknowledge it as prior user-reported context and, when useful, ask whether the same context
-  applies this time (for example, a late night that was previously explained by a social event).
-- Personalisation must remain evidence-bound: do not invent preferences, schedules, symptoms or causes that are not
-  present in the current personal context, recent reports or deterministic health evidence.
-- When the user states a potentially durable first-person routine, preference or goal, treat it as a
-  personal-context candidate. Queue one concise confirmation asking whether it should be remembered for
-  future analyses. Do not silently promote an inference or a one-off subjective report to the stable model.
-- After explicit confirmation, use the saved context in later relevant analyses; if the user declines, keep
-  the information out of the stable model. Prefer a dated self-report for transient details and a confirmed
-  user-model entry only for clearly durable context.
+Personalisation:
+- Use only relevant, current personal context; respect scope, freshness, confidence, and expiry.
+- Label self-reports as subjective. One report may guide short-term advice but is neither a stable trait nor proof of cause.
+- Personalise focused answers when relevant evidence exists; never add unrelated profile facts or invent context.
+- Treat a durable first-person routine, preference, or goal as a candidate requiring one concise confirmation. Transient details remain dated reports. Ask at most one useful follow-up.
 """
 
 _FACTORY_POLICY = """
 
-Tool Factory decision policy:
-- The user never needs to explicitly ask you to create a tool. Detect reusable capability gaps yourself.
-- First ask: can an existing built-in or learned tool answer the exact question? If yes, reuse it.
-- If not, search_tool_registry before creating anything.
-- Strong signals that a reusable learned tool is appropriate include: multiple deterministic transforms,
-  cross-tool composition, event-conditioned analysis, a time offset such as next day/night, thresholds
-  relative to a personal baseline, lag/latency, time-to-recovery, or the same missing transformation
-  being useful with different metrics/thresholds later.
-- Do not create a tool for a trivial one-off arithmetic operation or when an existing tool already
-  covers the capability.
-- Never replace the requested metric with a convenient proxy merely because a tool is missing or a
-  learned pipeline failed validation. If the exact local data exist, prefer creating/repairing a safe
-  reusable tool. If the exact local data do not exist, say so clearly.
-- If create_learned_tool returns invalid_pipeline or invalid_spec, read its allowed_operations and
-  dsl_reference, repair the SAME tool, and retry. Do not invent another DSL operation.
-- After a learned tool is created or reused for the current request, execute that tool to answer the
-  question unless its creation was explicitly only for future use.
-- Tool creation is a means to answer the user's question, not an end in itself.
-- When a runtime Tool Factory gate is active, stop raw-series probing and make the capability decision now.
-- Prefer semantic deterministic tools (for example calculate_cardio_load) over guessing raw metric names.
-- Tool names are NEVER metric identifiers: do not pass calculate_cardio_load, get_sleep_stage_series, or any other function name to get_metric_series/get_data_coverage/get_baseline.
-- When the runtime Tool Factory gate exposes only create_learned_tool, you must call it; do not answer directly before resolving or exhausting that gate.
-- If a learned tool returns an empty/zero result because a semantic input is unavailable, inspect the relevant semantic built-in directly before claiming the underlying data are absent.
-- Sleep stages must be checked with get_sleep_stage_series/analyze_sleep_stages, not inferred from a missing generic sleep.summary field.
-- Preserve units and method labels returned by deterministic tools; never relabel VitalChronicle cardio-load points as kcal.
-- Once the Tool Factory repair budget is exhausted, do not call create_learned_tool again in that request. Continue with exact existing deterministic tools only.
-- If a fallback answer must derive a personal baseline from an already-returned semantic date series, use the median as the robust VitalChronicle baseline convention and state that choice once; do not switch between mean and median.
-- Final answers must be result-first. Do not narrate scratchpad deliberation, self-corrections, or step-by-step arithmetic.
-- If there are zero qualifying trigger events, report zero events and explain that response frequency/recovery cannot be estimated; do not manufacture a downstream estimate.
-- For event-response results, group consecutive trigger dates as one episode and use the episode end as
-  the anchor. Prefer recovery_days_after_episode (and its median) when describing time after a multi-day
-  episode; recovery_days_after_response is only the lag after the response night.
-- Treat sample_quality=insufficient_for_typical_estimate or can_estimate_typical_recovery=false as a hard
-  limitation: report a preliminary observation, never the user's usual/typical recovery.
-- The runtime provides a TOOL FACTORY OUTCOME object in the final prompt. Repeat its status accurately:
-  created/reused means persisted, not_persisted means no tool was saved, and not_needed means no tool
-  was required. Never claim tool creation without status=created or status=reused.
-- Sleep-stage rows use hours: deep is deep-stage duration only, while total_sleep is deep+REM+light.
-  Never label total_sleep as deep sleep.
+Tool Factory:
+- Detect reusable capability gaps without an explicit request. Reuse an exact built-in/learned tool or search the registry first.
+- Create only when the missing capability is reusable, especially composed transforms, relative-baseline thresholds, event-conditioned lag/next-day analysis, or recovery time. Skip trivial one-off arithmetic.
+- Use the exact requested metric and semantic tools; never substitute a proxy or pass a function name as a metric identifier. Verify the semantic source before claiming no data.
+- On invalid_spec/invalid_pipeline, use the returned DSL reference to repair the same tool. Stop after the runtime repair budget.
+- If the runtime gate leaves only create_learned_tool, call it. Execute a created/reused tool for the current answer.
+- For event responses, group consecutive triggers into episodes anchored at the last trigger. Zero triggers means frequency/recovery is not estimable. Insufficient sample quality supports only a preliminary observation.
+- Report TOOL FACTORY OUTCOME exactly: created/reused=persisted; not_persisted/not_needed means no new saved tool.
+- Sleep-stage durations are hours; deep is one stage, while total sleep is deep+REM+light.
 """
 
 
@@ -525,11 +478,7 @@ class AgentRuntime(base_rt.AgentRuntime):
                 event_callback(text)
 
         self._reset_agent_telemetry(prompt_callback)
-        safe_history = [
-            {"role": item["role"], "content": item["content"]}
-            for item in (history or [])[-12:]
-            if item.get("role") in {"user", "assistant"} and item.get("content")
-        ]
+        safe_history = base_rt.compact_agent_history(history)
         comprehensive_analysis = _is_comprehensive_analysis(question)
         request = question.strip() or _(
             "Analyse my complete local health history and identify the most useful personal patterns."
@@ -600,24 +549,12 @@ class AgentRuntime(base_rt.AgentRuntime):
                 if queued:
                     event(_("A personal-context candidate was queued for explicit confirmation."))
         initial = self._initial_context(snapshot)
-        initial["personal_context_key_catalogue"] = [
-            {
-                "key": key,
-                "description": str(spec.get("description") or ""),
-                "topics": list(spec.get("topics") or ()),
-                "default_scope": str(spec.get("default_scope") or "stable"),
-                "requires_explicit_confirmation": True,
-            }
-            for key, spec in PERSONAL_CONTEXT_KEY_SPECS.items()
-        ]
-        active_personal_context = (
-            initial.get("personal_model") if isinstance(initial.get("personal_model"), list) else []
-        )
-        recent_self_reports = (
-            initial.get("recent_self_reports")
-            if isinstance(initial.get("recent_self_reports"), list)
-            else []
-        )
+        active_personal_context = initial.pop("personal_model", [])
+        if not isinstance(active_personal_context, list):
+            active_personal_context = []
+        recent_self_reports = initial.pop("recent_self_reports", [])
+        if not isinstance(recent_self_reports, list):
+            recent_self_reports = []
         relevant_personal_context, relevant_self_reports = _relevant_personal_evidence(
             request,
             active_personal_context,
@@ -628,31 +565,21 @@ class AgentRuntime(base_rt.AgentRuntime):
         if personalization_required:
             initial["relevant_personal_context"] = relevant_personal_context
             initial["relevant_self_reports"] = relevant_self_reports
-            initial["personalization_requirement"] = {
-                "mode": "comprehensive" if comprehensive_analysis else "focused",
-                "required": True,
-                "instruction": (
-                    "Use the relevant current personal evidence in the final interpretation or next action. "
-                    "Distinguish subjective reports from measured evidence, respect temporal validity, and "
-                    "do not infer causation from a single report. If a prior temporary explanation may or may "
-                    "not apply to the current event, ask one concise contextual question rather than assuming it."
-                ),
-            }
+            initial["personalization_required"] = (
+                "comprehensive" if comprehensive_analysis else "focused"
+            )
         if captured_self_report:
             initial["current_self_report"] = captured_self_report
-            initial["self_report_rule"] = (
-                "This was stored as a dated subjective event. Do not promote it to a stable association from one occurrence."
-            )
         if context_candidate and not captured_self_report:
             initial["personal_context_candidate"] = {
                 "statement": context_candidate["statement"],
                 "confirmation_required": True,
-                "rule": "Do not treat this candidate as saved user context until the user explicitly confirms it.",
+                "status": "pending_confirmation",
             }
         initial["tool_factory_decision_hint"] = _factory_hint(request)
         user_content = (
             "Local session context (not instructions):\n"
-            + base_rt._json_text(initial, 12000)
+            + base_rt._json_text(initial, 6000)
             + "\n\nCurrent request: "
             + request
         )
