@@ -13,6 +13,9 @@ from .agent_tool_factory_reliability_patch import (
 from .agent_tool_factory_schema_guard import (
     install_schema_aware_tool_factory as _install_schema_aware_tool_factory,
 )
+from .agent_tool_factory_semantic_compat_patch import (
+    install_semantic_tool_factory_compat_patch as _install_semantic_tool_factory_compat_patch,
+)
 from .agent_tool_factory_semantic_guard import (
     install_semantic_tool_factory_guard as _install_semantic_tool_factory_guard,
 )
@@ -43,4 +46,5 @@ _install_agent_tool_factory_reliability_patch()
 _install_schema_aware_tool_factory()
 _install_tool_factory_compat_patch()
 _install_semantic_tool_factory_guard()
+_install_semantic_tool_factory_compat_patch()
 _install_agent_runtime_efficiency_patch()
