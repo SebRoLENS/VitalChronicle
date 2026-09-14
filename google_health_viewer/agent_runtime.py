@@ -25,22 +25,19 @@ from .online_ai import (
 )
 
 MAX_AGENT_STEPS = 10
-MAX_TOOL_RESULT_CHARS = 24000
-MAX_ONLINE_TOOL_SCHEMAS = 20
-MAX_HISTORY_MESSAGES = 6
-MAX_HISTORY_MESSAGE_CHARS = 1600
+MAX_TOOL_RESULT_CHARS = 12000
+MAX_ONLINE_TOOL_SCHEMAS = 16
+MAX_HISTORY_MESSAGES = 4
+MAX_HISTORY_MESSAGE_CHARS = 1000
 AGENT_TRACE_PREFIX = "__VC_AGENT_TRACE__:"
 CALIBRATION_VERSION = 1
 
 
-AGENT_SYSTEM_PROMPT = """You are VitalChronicle's personal health agent. The health archive is read-only.
-- Use deterministic tools for health calculations; check coverage first. Missing/None is unavailable, never zero.
-- Prefer an existing built-in or learned tool. Learned tools are safe declarative pipelines only: no arbitrary code, terminal, filesystem, network, browser, or health-data writes.
-- Preserve tool units and method labels. VitalChronicle readiness/load/status/resilience values are transparent estimates, not proprietary Google/Fitbit scores.
-- Separate measurements, calculations, user reports, learned context, and possible explanations. Correlation is not causation. State low coverage or confidence.
-- Never diagnose, change treatment, or present wearable data as medical clearance.
-- Interpret relative dates in the user's local calendar and obey each tool's date_semantics. Sleep belongs to wake-up/session-end date; today's cumulative data may be partial.
-- Use the minimum useful tool calls. Answer result-first without scratchpad narration.
+AGENT_SYSTEM_PROMPT = """You are VitalChronicle's read-only personal health agent.
+Use deterministic tools for calculations and check coverage; missing values are unavailable, not zero. Preserve units and date semantics (sleep belongs to wake/session-end date; today may be partial).
+Reuse exact tools. Learned tools are declarative only: no code, shell, files, network, browser, or health-data writes.
+Keep measurements, user reports, context, and explanations distinct; correlation is not causation. State material uncertainty. Never diagnose or change treatment.
+Use the fewest useful calls and answer result-first without exposing scratchpad reasoning.
 """
 
 
@@ -114,7 +111,7 @@ def online_tool_subset(
     maximum: int = MAX_ONLINE_TOOL_SCHEMAS,
     required_names: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Bound online tool-schema tokens while retaining request-relevant capabilities."""
+    """Bound tool-schema tokens while retaining request-relevant capabilities."""
 
     text = request.casefold()
     always = {
@@ -126,11 +123,7 @@ def online_tool_subset(
         "get_missing_data",
         "search_tool_registry",
         "create_learned_tool",
-        "get_user_model",
         "ask_user_feedback",
-        "record_self_report",
-        "get_recent_self_reports",
-        "learn_user_association",
     }
     always.update(required_names or ())
     domain_terms = {
