@@ -7,8 +7,6 @@ from copy import deepcopy
 from datetime import date
 from typing import Any
 
-from .i18n import _
-
 _INSTALLED = False
 
 _SLEEP_TOTAL_ALIASES = {
@@ -125,7 +123,10 @@ _SELF_REPORT_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-def _daily_normalized_points(base: Any, points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+def _daily_normalized_points(
+    base: Any,
+    points: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
     groups: dict[str, list[tuple[float, float]]] = {}
     for ts, value in points:
         try:
@@ -143,7 +144,12 @@ def _daily_normalized_points(base: Any, points: list[tuple[float, float]]) -> li
     return result
 
 
-def _sleep_total_series(executor: Any, metric: str, left: date, right: date) -> dict[str, Any]:
+def _sleep_total_series(
+    executor: Any,
+    metric: str,
+    left: date,
+    right: date,
+) -> dict[str, Any]:
     from . import agent_tools as base
 
     records = executor._semantic_records("sleep", left, right)
@@ -186,7 +192,9 @@ def _enrich_threshold_result(executor: Any, args: dict[str, Any], result: Any) -
 
     enriched = deepcopy(result)
     left, right = factory.base._bounds(args.get("start"), args.get("end"), 60)
-    baseline_field = str(enriched.get("baseline_field") or args.get("baseline_field") or "median")
+    baseline_field = str(
+        enriched.get("baseline_field") or args.get("baseline_field") or "median"
+    )
     if baseline_field not in {"median", "mean"}:
         baseline_field = "median"
 
@@ -197,7 +205,11 @@ def _enrich_threshold_result(executor: Any, args: dict[str, Any], result: Any) -
         values = [float(value) for value in daily.values() if math.isfinite(float(value))]
         baseline = None
         if values:
-            baseline = statistics.median(values) if baseline_field == "median" else statistics.fmean(values)
+            baseline = (
+                statistics.median(values)
+                if baseline_field == "median"
+                else statistics.fmean(values)
+            )
         baselines[metric] = baseline
         meta = enriched.get("responses", {}).get(metric)
         if isinstance(meta, dict):
@@ -357,6 +369,7 @@ def _install_runtime_patch() -> None:
     original_hint = runtime_v2._factory_hint
     original_chat = runtime_v2.AgentRuntime._chat_once
     original_analyze = runtime_v2.AgentRuntime.analyze
+    original_detect_self_report = runtime_v2._detect_self_report
 
     def quality_hint(question: str) -> dict[str, Any]:
         return _supplement_factory_hint(question, original_hint(question))
@@ -383,17 +396,22 @@ def _install_runtime_patch() -> None:
             return 6144
         return 8192
 
-    # Existing efficiency wrappers resolve this module global at call time. Replacing it removes
-    # the old artificial 2800/3200 ceiling without forcing verbose output: requested num_predict
-    # is still respected, and larger budgets are used only when the caller/model allows them.
     efficiency._agent_predict_cap = adaptive_predict_cap
+
+    def quality_detect_self_report(question: str) -> dict[str, str] | None:
+        candidates = _self_report_candidates(question)
+        return candidates[0] if candidates else original_detect_self_report(question)
 
     def gap_aware_chat(self: Any, **kwargs: Any) -> dict[str, Any]:
         message = original_chat(self, **kwargs)
         tools = list(kwargs.get("tools") or [])
         calls = message.get("tool_calls") if isinstance(message, dict) else None
         content = str(message.get("content") or "") if isinstance(message, dict) else ""
-        if not tools or (isinstance(calls, list) and calls) or not _looks_like_runtime_capability_gap(content):
+        if (
+            not tools
+            or (isinstance(calls, list) and calls)
+            or not _looks_like_runtime_capability_gap(content)
+        ):
             return message
         allowed_names = {
             "search_tool_registry",
@@ -431,14 +449,21 @@ def _install_runtime_patch() -> None:
         retry_calls = retried.get("tool_calls") if isinstance(retried, dict) else None
         return retried if isinstance(retry_calls, list) and retry_calls else message
 
-    def capture_explicit_self_reports(self: Any, *args: Any, **kwargs: Any) -> str:
+    def capture_additional_self_reports(self: Any, *args: Any, **kwargs: Any) -> str:
         question = str(kwargs.get("question") or "")
         thread_id = kwargs.get("thread_id")
-        event_callback = kwargs.get("event_callback")
-        captured = 0
-        first_feedback_queued = False
+        primary = quality_detect_self_report(question)
+        primary_key = None
+        if primary:
+            primary_key = (
+                str(primary.get("category") or ""),
+                str(primary.get("statement") or "").casefold(),
+            )
         for candidate in _self_report_candidates(question):
-            report = self.agent_store.record_self_report(
+            candidate_key = (candidate["category"], candidate["statement"].casefold())
+            if candidate_key == primary_key:
+                continue
+            self.agent_store.record_self_report(
                 candidate["statement"],
                 category=candidate["category"],
                 thread_id=thread_id,
@@ -448,42 +473,12 @@ def _install_runtime_patch() -> None:
                     "auto_captured": True,
                 },
             )
-            if report:
-                captured += 1
-            category = candidate["category"]
-            if first_feedback_queued or category not in {"sleep_quality", "fatigue", "sleepiness", "stress"}:
-                continue
-            learning_key = f"self_report_detail:{category}"
-            if self.agent_store.has_recent_feedback_key(learning_key, days=14):
-                continue
-            if category == "sleep_quality":
-                feedback_question = _(
-                    "Quanto è stata diversa dal solito la qualità del sonno che hai appena descritto (poco, moderatamente o molto)?"
-                )
-                reason = _(
-                    "Questo dettaglio aiuta a confrontare in futuro il sonno percepito con le misure del wearable senza trasformare un singolo episodio in un tratto stabile."
-                )
-            else:
-                feedback_question, reason = runtime_v2._self_report_follow_up(category)
-            queued = self.agent_store.ask_feedback(
-                feedback_question,
-                thread_id=thread_id,
-                reason=reason,
-                learning_key=learning_key,
-                context={
-                    "self_report_id": report.get("report_id") if isinstance(report, dict) else None,
-                    "category": category,
-                    "feedback_mode": "self_report_detail",
-                },
-            )
-            first_feedback_queued = bool(queued)
-        if captured and callable(event_callback):
-            event_callback(_("{count} subjective self-report(s) saved locally.", count=captured))
         return original_analyze(self, *args, **kwargs)
 
     runtime_v2._factory_hint = quality_hint
+    runtime_v2._detect_self_report = quality_detect_self_report
     runtime_v2.AgentRuntime._chat_once = gap_aware_chat
-    runtime_v2.AgentRuntime.analyze = capture_explicit_self_reports
+    runtime_v2.AgentRuntime.analyze = capture_additional_self_reports
     runtime_v2._SELF_REPORT_CATEGORY_TOPICS.setdefault("appetite", {"recovery"})
     runtime_v2._SELF_REPORT_CATEGORY_TOPICS.setdefault("pain", {"recovery", "training"})
     if "Any personalisation question" not in runtime_v2._PERSONALIZATION_POLICY:
