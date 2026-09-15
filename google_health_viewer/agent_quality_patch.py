@@ -7,6 +7,8 @@ from copy import deepcopy
 from datetime import date
 from typing import Any
 
+from .i18n import _
+
 _INSTALLED = False
 
 _SLEEP_TOTAL_ALIASES = {
