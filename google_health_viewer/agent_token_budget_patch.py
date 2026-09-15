@@ -32,13 +32,12 @@ def adaptive_agent_predict_cap(num_ctx: int, has_tools: bool) -> int:
 
 
 def install_agent_token_budget_patch() -> None:
-    """Replace the legacy nested 1100/2800 caps before the runtime is instantiated."""
+    """Replace legacy nested output caps without importing the Qt runtime eagerly."""
 
     global _INSTALLED
     if _INSTALLED:
         return
 
-    from . import agent_runtime as base_rt
     from . import agent_runtime_efficiency_patch as efficiency
     from . import agent_tool_factory_reliability_patch as reliability
 
@@ -48,9 +47,10 @@ def install_agent_token_budget_patch() -> None:
         if reliability._RUNTIME_INSTALLED:
             return
 
-        # Capture the true transport call before the legacy installer wraps it. We still run the
-        # legacy installer because it also installs compact schema/history/evidence policies, then
-        # replace only its restrictive chat wrapper.
+        # This function runs lazily when the personal agent is actually created. Importing the
+        # Qt-dependent runtime here preserves headless-safe package imports and test tooling.
+        from . import agent_runtime as base_rt
+
         raw_chat = base_rt.AgentRuntime._chat_once
         original_installer()
 
