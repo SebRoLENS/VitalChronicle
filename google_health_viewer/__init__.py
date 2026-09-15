@@ -7,6 +7,7 @@ from .agent_factory_request_preserve_patch import (
 from .agent_hard_query_lazy_patch import (
     install_hard_query_lazy_patch as _install_hard_query_lazy_patch,
 )
+from .agent_quality_patch import install_agent_quality_patch as _install_agent_quality_patch
 from .agent_runtime_adaptive_patch import (
     install_agent_runtime_adaptive_patch as _install_agent_runtime_adaptive_patch,
 )
@@ -64,3 +65,4 @@ _install_agent_runtime_adaptive_patch()
 _install_hard_query_lazy_patch()
 _install_factory_request_preserve_patch()
 _install_tool_factory_english_patch()
+_install_agent_quality_patch()
