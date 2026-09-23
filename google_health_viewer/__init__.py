@@ -7,11 +7,17 @@ from .agent_factory_request_preserve_patch import (
 from .agent_hard_query_lazy_patch import (
     install_hard_query_lazy_patch as _install_hard_query_lazy_patch,
 )
+from .agent_quality_lazy_patch import (
+    install_agent_quality_lazy_patch as _install_agent_quality_lazy_patch,
+)
 from .agent_runtime_adaptive_patch import (
     install_agent_runtime_adaptive_patch as _install_agent_runtime_adaptive_patch,
 )
 from .agent_runtime_efficiency_patch import (
     install_agent_runtime_efficiency_patch as _install_agent_runtime_efficiency_patch,
+)
+from .agent_token_budget_patch import (
+    install_agent_token_budget_patch as _install_agent_token_budget_patch,
 )
 from .agent_tool_factory_compat_patch import (
     install_tool_factory_compat_patch as _install_tool_factory_compat_patch,
@@ -64,3 +70,5 @@ _install_agent_runtime_adaptive_patch()
 _install_hard_query_lazy_patch()
 _install_factory_request_preserve_patch()
 _install_tool_factory_english_patch()
+_install_agent_token_budget_patch()
+_install_agent_quality_lazy_patch()
