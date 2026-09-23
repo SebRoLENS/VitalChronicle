@@ -1,7 +1,7 @@
 ---
 title: "VitalChronicle User Manual"
 author: "Sebastiano Romi"
-date: "Updated for VitalChronicle 1.2.1"
+date: "Updated for VitalChronicle 1.7.31"
 lang: en-US
 geometry: margin=2.2cm
 colorlinks: true
@@ -13,7 +13,7 @@ toc-depth: 3
 
 # About this manual
 
-This is the authoritative user manual for **VitalChronicle 1.2.1**. VitalChronicle is a
+This is the authoritative user manual for **VitalChronicle 1.7.31**. VitalChronicle is a
 local-first desktop dashboard for personal Google Health data and optional AI analysis
 through local Ollama or an explicitly authorised online provider.
 
@@ -124,19 +124,19 @@ slow or may require more memory than the computer can provide.
 2. Make it executable:
 
    ```bash
-   chmod +x VitalChronicle-1.2.1-linux-x86_64.AppImage
+   chmod +x VitalChronicle-1.7.31-linux-x86_64.AppImage
    ```
 
 3. Start it:
 
    ```bash
-   ./VitalChronicle-1.2.1-linux-x86_64.AppImage
+   ./VitalChronicle-1.7.31-linux-x86_64.AppImage
    ```
 
 If FUSE is unavailable, run it with:
 
 ```bash
-APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.2.1-linux-x86_64.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.7.31-linux-x86_64.AppImage
 ```
 
 The AppImage is accompanied by a Sigstore bundle and release checksums.
@@ -146,8 +146,8 @@ Existing manually created launchers are left untouched.
 
 ## 3.2 Windows
 
-1. Download `VitalChronicle-1.2.1-windows-x86_64-setup.exe` for a normal installation,
-   or `VitalChronicle-1.2.1-windows-x86_64.exe` for portable use.
+1. Download `VitalChronicle-1.7.31-windows-x86_64-setup.exe` for a normal installation,
+   or `VitalChronicle-1.7.31-windows-x86_64.exe` for portable use.
 2. Verify its SHA-256 checksum against `SHA256SUMS.txt`.
 3. Run the installer to create a Start menu shortcut (with an optional desktop shortcut),
    or start the portable executable directly. To update an installed copy, run the new installer.
@@ -377,7 +377,7 @@ from blocking health-data updates.
 ## 5.4 Storage locations
 
 VitalChronicle keeps the historical internal `GoogleHealthViewer` directory identifier so
-existing 0.2.12 archives survive the 1.2.1 upgrade. Typical locations are:
+existing 0.2.12 archives survive the 1.7.31 upgrade. Typical locations are:
 
 - Linux data: `~/.local/share/GoogleHealthViewer/`;
 - Linux configuration: `~/.config/GoogleHealthViewer/`;
@@ -838,7 +838,7 @@ public issue containing credentials or health data.
 
 # 13. Android status
 
-VitalChronicle 1.2.1 does not ship an APK. The current application uses desktop Qt widgets,
+VitalChronicle 1.7.31 does not ship an APK. The current application uses desktop Qt widgets,
 a loopback-browser OAuth callback, desktop keyrings, and desktop chart interactions. A safe
 Android edition requires a dedicated mobile interface, Android OAuth credentials bound to
 a package name and signing certificate, mobile secure storage, lifecycle handling, and a

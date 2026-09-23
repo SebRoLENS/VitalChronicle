@@ -46,7 +46,7 @@ from .scientific_context_preserve_core import (
     install_scientific_context_preserve_core as _install_scientific_context_preserve_core,
 )
 
-__version__ = "1.2.1"
+__version__ = "1.7.31"
 
 _install_shared_heart_rate_core(_analysis)
 _install_deterministic_detail_core(_analysis)
