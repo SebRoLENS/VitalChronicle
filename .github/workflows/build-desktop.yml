@@ -151,7 +151,7 @@ jobs:
           if-no-files-found: error
 
   windows:
-    name: Windows standalone executable x86_64
+    name: Windows portable executable and installer x86_64
     needs: prepare-icons
     runs-on: windows-2025
     steps:
@@ -168,6 +168,9 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install -e ".[dev]"
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
       - name: Read version
         shell: pwsh
         run: |
@@ -192,10 +195,40 @@ jobs:
           $env:VITALCHRONICLE_SMOKE_TEST = "1"
           $process = Start-Process ".\VitalChronicle-$env:VERSION-windows-x86_64.exe" -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Frozen GUI exited with $($process.ExitCode)" }
+      - name: Build per-user installer
+        shell: pwsh
+        run: |
+          $root = (Get-Location).Path
+          $output = Join-Path $root "installer-output"
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          $arguments = @(
+            "/DMyAppVersion=$env:VERSION",
+            "/DSourceExe=$(Join-Path $root "VitalChronicle-$env:VERSION-windows-x86_64.exe")",
+            "/DRootDir=$root",
+            "/DOutputDir=$output",
+            "packaging\windows\vitalchronicle.iss"
+          )
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" @arguments
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+          Move-Item "$output\VitalChronicle-$env:VERSION-windows-x86_64-setup.exe" .
+      - name: Smoke-test installed application and shortcuts
+        shell: pwsh
+        run: |
+          $installer = (Resolve-Path ".\VitalChronicle-$env:VERSION-windows-x86_64-setup.exe").Path
+          $installDir = Join-Path (Get-Location).Path "installed-app"
+          $setup = Start-Process $installer -ArgumentList "/VERYSILENT /NORESTART /SUPPRESSMSGBOXES /DIR=`"$installDir`"" -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "Installer exited with $($setup.ExitCode)" }
+          if (-not (Test-Path "$installDir\vitalchronicle-installed.marker")) { throw "Installer marker is missing" }
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:VITALCHRONICLE_SMOKE_TEST = "1"
+          $app = Start-Process "$installDir\VitalChronicle.exe" -Wait -PassThru
+          if ($app.ExitCode -ne 0) { throw "Installed GUI exited with $($app.ExitCode)" }
       - uses: actions/upload-artifact@v7
         with:
           name: release-windows-x86_64
-          path: VitalChronicle-${{ env.VERSION }}-windows-x86_64.exe
+          path: |
+            VitalChronicle-${{ env.VERSION }}-windows-x86_64.exe
+            VitalChronicle-${{ env.VERSION }}-windows-x86_64-setup.exe
           if-no-files-found: error
 
   macos:

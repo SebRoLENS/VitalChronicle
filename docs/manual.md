@@ -140,12 +140,17 @@ APPIMAGE_EXTRACT_AND_RUN=1 ./VitalChronicle-1.2.1-linux-x86_64.AppImage
 ```
 
 The AppImage is accompanied by a Sigstore bundle and release checksums.
+On first launch, VitalChronicle copies the AppImage to `~/.local/opt/VitalChronicle/` and
+adds an application menu icon for the current user. It does not require administrator rights.
+Existing manually created launchers are left untouched.
 
 ## 3.2 Windows
 
-1. Download `VitalChronicle-1.2.1-windows-x86_64.exe`.
+1. Download `VitalChronicle-1.2.1-windows-x86_64-setup.exe` for a normal installation,
+   or `VitalChronicle-1.2.1-windows-x86_64.exe` for portable use.
 2. Verify its SHA-256 checksum against `SHA256SUMS.txt`.
-3. Start the executable.
+3. Run the installer to create a Start menu shortcut (with an optional desktop shortcut),
+   or start the portable executable directly. To update an installed copy, run the new installer.
 
 Windows SmartScreen may warn because the file is not signed with a paid Microsoft-trusted
 certificate. Downloading from the official repository and matching the checksum confirms
@@ -847,7 +852,7 @@ When **Update now** is available, the installed package type determines the down
 
 - a running Linux AppImage accepts only
   `VitalChronicle-<version>-linux-x86_64.AppImage`;
-- a frozen Windows build accepts only
+- a portable frozen Windows build accepts only
   `VitalChronicle-<version>-windows-x86_64.exe`;
 - one format is never substituted with another.
 

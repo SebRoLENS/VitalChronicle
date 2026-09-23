@@ -59,6 +59,38 @@ def test_does_not_cross_update_package_formats(tmp_path: Path):
     )
 
 
+def test_windows_installer_is_updated_by_installer_not_portable_exe(tmp_path: Path):
+    current = tmp_path / "VitalChronicle.exe"
+    current.write_bytes(b"installed")
+    (tmp_path / "vitalchronicle-installed.marker").write_text("installer")
+    release = _release(ReleaseAsset(
+        "VitalChronicle-1.2.3-windows-x86_64.exe", "https://example.test/windows"
+    ))
+    assert select_update_target(
+        release, platform="win32", frozen=True, executable=str(current)
+    ) is None
+
+
+def test_managed_linux_appimage_keeps_launcher_target(tmp_path: Path, monkeypatch):
+    current = tmp_path / "VitalChronicle.AppImage"
+    current.write_bytes(b"old")
+    content = b"new"
+    digest = hashlib.sha256(content).hexdigest()
+    asset = ReleaseAsset(
+        "VitalChronicle-1.2.3-linux-x86_64.AppImage",
+        "https://example.test/linux", digest=f"sha256:{digest}"
+    )
+
+    def fake_download(_asset, destination, _progress):
+        destination.write_bytes(content)
+        return digest
+
+    monkeypatch.setattr("google_health_viewer.self_update._download", fake_download)
+    result = install_update(_release(asset), UpdateTarget("appimage", current, asset))
+    assert result.destination == current
+    assert current.read_bytes() == content
+
+
 def test_parse_sha256_manifest_ignores_invalid_rows():
     digest = "a" * 64
     assert parse_sha256_manifest(

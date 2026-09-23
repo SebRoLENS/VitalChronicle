@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -196,6 +197,15 @@ def main() -> int:
     set_language(startup_language(preference))
 
     smoke_test = os.environ.get("VITALCHRONICLE_SMOKE_TEST") == "1"
+    if not smoke_test and sys.platform.startswith("linux") and os.environ.get("APPIMAGE"):
+        from .desktop_integration import integrate_linux_appimage
+
+        try:
+            integrate_linux_appimage(
+                Path(os.environ["APPIMAGE"]), Path(__file__).with_name("assets") / "app_icon.svg"
+            )
+        except (OSError, ValueError) as exc:
+            logging.getLogger(__name__).warning("Linux desktop integration failed: %s", exc)
     had_ai_configuration = settings.contains("ai/model") or settings.contains(
         "ai/hardware_profile"
     )

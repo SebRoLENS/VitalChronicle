@@ -15,8 +15,8 @@ A non-bot push to `main` that changes application or packaging files starts
    manual build must succeed.
 3. Generated metadata and documentation are committed by `github-actions[bot]`.
 4. An immutable `vX.Y.Z` tag is created.
-5. `build-desktop.yml` builds native packages on Linux, Windows, macOS Apple Silicon, and
-   macOS Intel runners.
+5. `build-desktop.yml` builds an AppImage, Windows installer and portable executable, and
+   native macOS packages on Apple Silicon and Intel runners.
 6. Python packages, a source archive, the manual, Sigstore material, and SHA-256 checksums
    are attached to the GitHub release.
 

@@ -47,8 +47,8 @@ release; the explicit line does not depend on the external badge cache.
 
 | Platform | Release package | Notes |
 |---|---|---|
-| Linux x86-64 | AppImage + Sigstore bundle | No Python installation required |
-| Windows x86-64 | Standalone `.exe` | Unsigned; SmartScreen may warn |
+| Linux x86-64 | AppImage + Sigstore bundle | First launch adds a user menu launcher; no Python required |
+| Windows x86-64 | Installer `.exe` or portable `.exe` | Installer adds Start menu shortcuts; unsigned |
 | macOS Apple Silicon | `.dmg` | Ad-hoc signed, not notarised |
 | macOS Intel x86-64 | `.dmg` | Ad-hoc signed, not notarised |
 | Python 3.10+ | Wheel and source archive | For development or unsupported systems |
