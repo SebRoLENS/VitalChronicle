@@ -1,6 +1,10 @@
-import os
+import sys
+
+import pytest
 
 from google_health_viewer.desktop_integration import integrate_linux_appimage
+
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux desktop integration")
 
 
 def test_linux_appimage_creates_and_updates_user_launcher(tmp_path):
@@ -14,8 +18,7 @@ def test_linux_appimage_creates_and_updates_user_launcher(tmp_path):
     desktop = integrate_linux_appimage(source, icon, home=home, data_home=data, refresh=False)
     installed = home / ".local/opt/VitalChronicle/VitalChronicle.AppImage"
     assert installed.read_bytes() == b"first version"
-    if os.name != "nt":
-        assert installed.stat().st_mode & 0o100
+    assert installed.stat().st_mode & 0o100
     assert f'Exec="{installed}"' in desktop.read_text(encoding="utf-8")
     assert (data / "icons/hicolor/scalable/apps/vitalchronicle.svg").exists()
 
