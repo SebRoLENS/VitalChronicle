@@ -77,7 +77,7 @@ def _obj(properties: dict[str, Any], required: tuple[str, ...] = ()) -> dict[str
 
 
 _DATE = {"type": "string", "description": "Local date YYYY-MM-DD."}
-_METRIC = {"type": "string", "description": "VitalChronicle data type or data_type:field."}
+_METRIC = {"type": "string", "description": "VitalChronicle data type, data_type:field, or a field name returned by get_available_metrics."}
 _PERIOD = {"start": _DATE, "end": _DATE}
 
 
@@ -599,10 +599,19 @@ class SafeToolExecutor:
     def _series(self, metric: str, left: date, right: date) -> dict[str, Any]:
         raw = str(metric or "").strip()
         data_type, _, explicit = raw.partition(":")
+        if not explicit and "." in data_type:
+            # get_available_metrics returns field names such as
+            # dailyHeartRateVariability.averageHeartRateVariabilityMilliseconds.
+            # Accept those names directly rather than querying a nonexistent data type.
+            prefix = data_type.split(".", 1)[0]
+            inferred = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", prefix).lower()
+            if inferred in self.health_store.counts():
+                explicit = data_type
+                data_type = inferred
         data_type = _ALIASES.get(data_type, data_type)
         records = self._semantic_records(data_type, left, right)
         metrics = available_metrics(records, data_type) if records else []
-        field = explicit if explicit in metrics else (metrics[0] if metrics else None)
+        field = (explicit if explicit in metrics else None) if explicit else (metrics[0] if metrics else None)
         if field is None:
             return {
                 "metric": raw,

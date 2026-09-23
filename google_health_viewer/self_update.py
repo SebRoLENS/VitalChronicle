@@ -59,6 +59,10 @@ def select_update_target(
     elif system == "win32" and is_frozen:
         kind = "windows-exe"
         destination = Path(executable_path).absolute()
+        # An Inno Setup installation owns its fixed executable and shortcuts.
+        # Updating the portable executable in place would bypass the installer.
+        if (destination.parent / "vitalchronicle-installed.marker").is_file():
+            return None
         expected = f"VitalChronicle-{release.version}-windows-x86_64.exe"
     else:
         return None
@@ -136,6 +140,8 @@ def _release_destination(target: UpdateTarget) -> Path:
         or Path(asset_name).name != asset_name
     ):
         raise SelfUpdateError("The release package has an unsafe filename.")
+    if target.kind == "appimage" and target.destination.name == "VitalChronicle.AppImage":
+        return target.destination
     return target.destination.with_name(asset_name)
 
 

@@ -40,6 +40,8 @@ badge beside the application title turns amber when a newer release is available
 The check runs at every startup and then once per hour while the app remains open.
 Portable AppImage and Windows builds can select **Update now** to download only the matching
 package, verify SHA-256, replace the file at the same path, and retain the previous build.
+The Windows installer is updated by running the newer installer. The Linux AppImage creates a
+per-user application menu entry on first launch and maintains its own local installed copy.
 
 Read the [complete manual](manual.md) for platform-specific installation, privacy,
 troubleshooting, exports, and AI configuration.
