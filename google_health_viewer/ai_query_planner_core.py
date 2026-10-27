@@ -14,6 +14,7 @@ from typing import Any
 
 from .ai_insights import build_ai_ready_snapshot
 from .constants import DATA_TYPE_BY_KEY
+from .health_calendar import SESSION_END_DATE_TYPES, local_calendar_records
 
 PLANNER_VERSION = "ai-data-planner-v1"
 MAX_SELECTED_DATA_TYPES = 8
@@ -41,12 +42,14 @@ Rules:
 - data_types may contain only exact keys present in the catalogue.
 - Select at most 8 data types and prefer fewer when they are sufficient.
 - Choose the time span from the scientific meaning of the question, not from a UI preset.
-- For a current/single-day question, usually request a few recent days for context.
+- For an exact single-day question, request that date; broaden only for a requested comparison/baseline. Python retrieves overnight sessions automatically.
 - For a short trend, usually request weeks; for correlations or personal baselines,
   usually request enough matched days (often 60-90 when available).
 - Long-term change questions may justify months or all available history.
 - Include supporting data only when it can materially help answer the question.
 - Use date_range only when the question explicitly identifies a calendar period.
+- Preserve explicitly requested dates even outside catalogue coverage; an empty interval must remain empty, not fall back to recent history.
+- The current question overrides conversation excerpts: a follow-up asking for the previous week shifts the previously discussed week, rather than repeating it.
 - end_date is inclusive. For relative windows, anchor to the latest locally available
   date in the selected datasets.
 - Missing catalogue coverage is not zero and must not be invented.
@@ -60,15 +63,30 @@ def build_data_catalog(store) -> dict[str, Any]:
     with store._connect() as db:  # noqa: SLF001 - the store owns the local DB boundary.
         rows = db.execute(
             """
+            WITH record_times AS (
+                SELECT data_type,
+                    CASE WHEN data_type IN (?, ?, ?)
+                         THEN COALESCE(end_time, start_time)
+                         ELSE COALESCE(start_time, end_time) END AS semantic_time
+                FROM records
+            ), calendar_dates AS (
+                SELECT data_type,
+                    CASE WHEN instr(substr(semantic_time, 12), 'Z') > 0
+                           OR instr(substr(semantic_time, 12), '+') > 0
+                           OR instr(substr(semantic_time, 12), '-') > 0
+                         THEN date(semantic_time, 'localtime')
+                         ELSE date(semantic_time) END AS observation_date
+                FROM record_times
+            )
             SELECT data_type,
                    COUNT(*) AS record_count,
-                   MIN(substr(COALESCE(start_time, end_time), 1, 10)) AS first_date,
-                   MAX(substr(COALESCE(start_time, end_time), 1, 10)) AS last_date
-            FROM records
-            WHERE COALESCE(start_time, end_time) IS NOT NULL
+                   MIN(observation_date) AS first_date,
+                   MAX(observation_date) AS last_date
+            FROM calendar_dates
+            WHERE observation_date IS NOT NULL
             GROUP BY data_type
             ORDER BY data_type
-            """
+            """, tuple(sorted(SESSION_END_DATE_TYPES))
         ).fetchall()
 
     datasets: list[dict[str, Any]] = []
@@ -111,11 +129,48 @@ def _history_excerpt(history: list[dict[str, str]]) -> list[dict[str, str]]:
     return result
 
 
+def resolve_week_followup(question: str, history: list[dict[str, str]]) -> str:
+    """Carry an unambiguous seven-day question into the preceding calendar week.
+
+    Only reuse the user's topic and explicit dates, never an assistant's health claims.
+    Ambiguous or more complex follow-ups remain with the normal planner.
+    """
+    if not re.fullmatch(
+        r"\s*(?:(?:e|and|what about)\s+)?(?:la\s+|the\s+)?(?:settimana precedente|settimana prima|previous week|week before)\s*[?.!]*\s*",
+        question, flags=re.IGNORECASE,
+    ):
+        return question
+    previous = next((str(h.get("content") or "") for h in reversed(history)
+                     if h.get("role") == "user"), "")
+    matches = list(re.finditer(r"\b\d{4}-\d{2}-\d{2}\b", previous))
+    span = None
+    days = []
+    if len(matches) == 2:
+        days = [_parse_day(m.group()) for m in matches]
+        span = (matches[0].start(), matches[1].end())
+    elif not matches:
+        months = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"]
+        m = re.search(r"\b(?:dal\s+)?(\d{1,2})\s*(?:al|[–-])\s*(\d{1,2})\s+(" + "|".join(months) + r")\s+(\d{4})\b", previous, re.IGNORECASE)
+        if m:
+            try:
+                days = [date(int(m[4]), months.index(m[3].lower()) + 1, int(m[i])) for i in (1, 2)]
+                span = m.span()
+            except ValueError:
+                return question
+    if span is None or len(days) != 2 or any(d is None for d in days):
+        return question
+    start, end = days
+    if (end - start).days != 6:
+        return question
+    shifted = f"{start - timedelta(days=7)}–{end - timedelta(days=7)}"
+    return previous[:span[0]] + shifted + previous[span[1]:]
+
+
 def _planner_messages(
     catalog: dict[str, Any], question: str, history: list[dict[str, str]]
 ) -> list[dict[str, str]]:
     payload = {
-        "question": question,
+        "question": resolve_week_followup(question, history),
         "conversation_context": _history_excerpt(history),
         "available_local_data": catalog,
     }
@@ -243,10 +298,8 @@ def resolve_data_plan(
         if requested_start is None or requested_end is None:
             window = "last_n_days"
         else:
-            start_day = max(first_available, requested_start)
-            end_day = min(last_available, requested_end)
-            if start_day > end_day:
-                window = "last_n_days"
+            start_day, end_day = sorted((requested_start, requested_end))
+            start_day = max(start_day, end_day - timedelta(days=MAX_LOOKBACK_DAYS - 1))
     if window not in {"all_history", "date_range"}:
         try:
             days = int(raw_plan.get("days") or 30)
@@ -287,6 +340,14 @@ class SelectedHealthStore:
     def list_records(self, data_type: str, *args, **kwargs):
         if data_type not in self._allowed:
             return []
+        start = kwargs.get("start", args[0] if args else None)
+        end = kwargs.get("end", args[1] if len(args) > 1 else None)
+        if start and end and len(str(start)) == len(str(end)) == 10:
+            return local_calendar_records(
+                self._store, data_type, date.fromisoformat(start),
+                date.fromisoformat(end) - timedelta(days=1),
+                limit=kwargs.get("limit", 20000), newest=kwargs.get("newest", False),
+            )
         return self._store.list_records(data_type, *args, **kwargs)
 
     def __getattr__(self, name: str):

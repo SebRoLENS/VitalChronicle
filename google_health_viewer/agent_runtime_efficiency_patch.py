@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from typing import Any
 
 _INSTALLED = False
 _RUNTIME_INSTALLED = False
+
+
+def _has_threshold_condition(text: str) -> bool:
+    # A request for percentage change between periods is descriptive arithmetic,
+    # not an event filter. "Percentuale" alone must not force the Tool Factory.
+    return any(marker in text for marker in (
+        "supera", "sopra", "sotto", "oltre", "inferior", "superior", "soglia",
+        "above", "below", "exceed", "threshold", "greater than", "less than",
+    ))
 
 
 def _agent_predict_cap(num_ctx: int, has_tools: bool) -> int:
@@ -56,6 +66,8 @@ def _snapshot_metric_seed(item: dict[str, Any]) -> dict[str, Any]:
         "label": item.get("label"),
         "unit": item.get("unit"),
     }
+    if item.get("value_semantics"):
+        result["value_semantics"] = item["value_semantics"]
     if compact_summary:
         result["summary"] = compact_summary
     if compact_derived:
@@ -106,14 +118,19 @@ def _supplement_factory_hint(question: str, hint: dict[str, Any]) -> dict[str, A
             "personal median",
         )
     ) or ("mediana" in text and any(marker in text for marker in ("mia", "mio", "personale")))
-    threshold = any(
-        marker in text
-        for marker in ("%", "percent", "supera", "superano", "sotto", "above", "below", "exceed")
-    )
-    if personal_median and "relative personal-baseline threshold" not in signals:
+    threshold = _has_threshold_condition(text)
+    percentages = re.findall(r"\d+(?:[.,]\d+)?\s*(?:%|percent|per cent)", text)
+    result["requires_response_threshold"] = len(percentages) > 1 or any(marker in text for marker in (
+        "scende del", "scende di", "diminuisce del", "diminuisce di", "drops by", "decreases by",
+    ))
+    if personal_median and threshold and "relative personal-baseline threshold" not in signals:
         signals.append("relative personal-baseline threshold")
     if threshold and "threshold/frequency analysis" not in signals:
         signals.append("threshold/frequency analysis")
+    if not threshold and any(marker in text for marker in ("confront", "compar", "variazione")):
+        signals = [s for s in signals if s not in {
+            "relative personal-baseline threshold", "threshold/frequency analysis",
+        }]
     result["signals"] = signals
     result["consider_reusable_tool"] = len(signals) >= 2
     if result["consider_reusable_tool"]:
@@ -139,12 +156,10 @@ def _required_composite_tools(request: str) -> set[str]:
             "personal baseline",
         )
     )
-    threshold_signal = any(
-        marker in text for marker in ("%", "percent", "supera", "superano", "above", "below", "exceed")
-    )
+    threshold_signal = _has_threshold_condition(text)
     recovery_signal = any(
         marker in text
-        for marker in ("recuper", "torna", "tornano", "ritorna", "return to", "recovery time")
+        for marker in ("quanto tempo", "quanti giorni", "quanto impieg", "torna", "ritorna", "return to", "recovery time")
     )
     if baseline_signal and threshold_signal:
         names.add("analyze_metric_threshold_responses")

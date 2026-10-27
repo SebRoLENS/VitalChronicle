@@ -11,11 +11,12 @@ EXTRA_BUILTIN_SPEC = {
     "name": "get_sleep_stage_series",
     "description": (
         "Return per-night recorded sleep-stage DURATIONS in hours (deep, REM, light, awake) "
-        "keyed by wake-up date. The 'deep' field is deep-sleep duration only; 'total_sleep' is "
+        "with exact minute conversions, keyed by wake-up date. Use scope=main for the main "
+        "night; scope=all also includes additional sessions. The 'deep' field is deep-sleep duration only; 'total_sleep' is "
         "deep+REM+light and must never be called deep sleep. Missing stages are never inferred."
     ),
     "capability": "sleep.stage_series",
-    "parameters": base._period(),
+    "parameters": base._obj({**base._PERIOD, "scope": {"type": "string", "enum": ["all", "main"]}}),
 }
 
 SAFE_COMPOSABLE_TOOLS = {
@@ -316,7 +317,14 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
     def _tool_get_sleep_stage_series(self, args, **_):
         left, right = base._bounds(args.get("start"), args.get("end"), 60)
         records = self._semantic_records("sleep", left, right)
+        all_record_count = len(records)
+        scope = str(args.get("scope") or "all")
+        if scope not in {"main", "all"}:
+            raise ValueError("scope must be main or all")
+        if scope == "main":
+            records = [r for r in records if r.get("payload", {}).get("sleep", {}).get("metadata", {}).get("mainSleep") is True]
         by_day: dict[str, dict[str, float]] = {}
+        session_rows = []
         sessions_with_stages = 0
         for record in records:
             stage_points = base.sleep_stage_points([record])
@@ -330,6 +338,7 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                 continue
             sessions_with_stages += 1
             row = by_day.setdefault(day, {"deep": 0.0, "rem": 0.0, "light": 0.0, "awake": 0.0})
+            session_totals = {"deep": 0.0, "rem": 0.0, "light": 0.0, "awake": 0.0}
             for raw_name, raw_value in values.items():
                 name = str(raw_name).strip().lower().replace("-", "_").replace(" ", "_")
                 if "deep" in name:
@@ -348,6 +357,15 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
                     continue
                 if math.isfinite(hours):
                     row[target] += hours
+                    session_totals[target] += hours
+            session_totals["total_sleep"] = sum(session_totals[k] for k in ("deep", "rem", "light"))
+            minutes = {k: round(v * 60, 2) for k, v in session_totals.items()}
+            session_rows.append({
+                "date": day,
+                "main_sleep": record.get("payload", {}).get("sleep", {}).get("metadata", {}).get("mainSleep"),
+                "minutes": minutes,
+                "duration_text": {k: f"{int(v // 60)} h {round(v % 60, 2):g} min" for k, v in minutes.items()},
+            })
         expected = (right - left).days + 1
         rows = []
         for day, values in sorted(by_day.items()):
@@ -355,9 +373,18 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
             rounded["total_sleep"] = round(
                 rounded["deep"] + rounded["rem"] + rounded["light"], 4
             )
-            rows.append({"date": day, **rounded})
+            minutes = {key: round(value * 60, 2) for key, value in rounded.items()}
+            duration_text = {
+                key: f"{int(value // 60)} h {round(value % 60, 2):g} min"
+                for key, value in minutes.items()
+            }
+            rows.append({"date": day, **rounded, "minutes": minutes, "duration_text": duration_text})
         return {
             "period": {"start": left.isoformat(), "end": right.isoformat()},
+            "session_scope": scope,
+            "session_stages": session_rows[-6:],
+            "omitted_session_details": max(0, len(session_rows) - 6),
+            "excluded_session_records": all_record_count - len(records),
             "daily_stages": rows,
             "sleep_session_records": len(records),
             "sessions_with_stages": sessions_with_stages,
@@ -375,7 +402,10 @@ class EnhancedSafeToolExecutor(base.SafeToolExecutor):
             },
             "method": (
                 "Recorded wearable sleep-stage durations grouped by local wake-up date. "
-                "total_sleep is a derived sum; deep remains deep-stage duration only."
+                "The date is when sleep ENDED, not the next morning. "
+                "total_sleep is a derived sum; deep remains deep-stage duration only. "
+                "Use minutes/duration_text directly; fractional hours are not clock minutes."
+                " For the main night use session_stages with main_sleep=true; report other sessions separately."
             ),
             "limitations": (
                 "Missing sleep stages are omitted and never inferred or zero-filled. A nonzero "

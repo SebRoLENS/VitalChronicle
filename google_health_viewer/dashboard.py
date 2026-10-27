@@ -175,6 +175,8 @@ class MetricCard(QFrame):
         summary = metric["summary"]
         unit = metric.get("unit", "")
         data_type = metric.get("data_type", "")
+        for label in (self.trend, self.baseline, self.ratio):
+            label.setToolTip("")
         self.value.setText(_format_metric_value(data_type, summary["latest"], unit))
         trend = summary.get("trend_percent")
         parts = [_("Average {value}", value=_format_metric_value(data_type, summary['mean'], unit))]
@@ -203,6 +205,7 @@ class MetricCard(QFrame):
             return _format_metric_value(data_type, value, unit)
 
         is_heart_day = data_type == "heart-rate-today"
+        within_average = metric.get("comparison") == "within"
         self.value.setText(formatted(current))
         if is_heart_day and current is not None:
             self.trend.setText(_("Latest measurement from today's series"))
@@ -210,10 +213,12 @@ class MetricCard(QFrame):
             self.trend.setText(_("No data for this day"))
         elif baseline is None:
             self.trend.setText(_("Data from previous days is required"))
+        elif within_average:
+            self.trend.setText(_("In line with your personal average"))
         elif percentage is None:
             difference = current - baseline
             direction = _("above") if difference > 0 else (_("below") if difference < 0 else _("average"))
-            if difference == 0:
+            if abs(difference) < 1e-12:
                 self.trend.setText(_("In line with your personal average"))
             else:
                 arrow = "↑" if difference > 0 else "↓"
@@ -230,7 +235,7 @@ class MetricCard(QFrame):
         else:
             difference = current - baseline
             direction = _("above") if difference > 0 else (_("below") if difference < 0 else _("average"))
-            if difference == 0:
+            if abs(difference) < 1e-12:
                 self.trend.setText(_("In line with your personal average"))
             else:
                 arrow = "↑" if difference > 0 else "↓"
@@ -332,13 +337,25 @@ class MetricCard(QFrame):
             if days_used
             else _("7-day average · —")
         )
+        margin = metric.get("comparison_margin")
+        tooltip = (
+            _("Usual range: {lower}–{upper}. Descriptive margin ±{margin}, based on the variability of {days} previous observed days (one sample standard deviation, with a display-resolution floor). This is not certified sensor uncertainty or a clinical range.",
+              lower=formatted(metric.get("comparison_lower")), upper=formatted(metric.get("comparison_upper")),
+              margin=formatted(margin), days=days_used)
+            if margin is not None else
+            _("At least three previous observed days are required to estimate a personal variability range. Sensor uncertainty is not supplied by these data.")
+        )
+        if delta is not None:
+            tooltip += "\n" + _("Measured difference from the average: {delta:+.2f}%.", delta=delta)
+        for label in (self.trend, self.baseline, self.ratio):
+            label.setToolTip(tooltip)
         self.progress.setVisible(completion)
         if percentage is None:
             self.ratio.setText("—")
             self.progress.setValue(0)
             ratio_style = "background: #F1F3F4; color: #5F6368;"
         elif not completion:
-            if abs(delta or 0.0) < 0.05:
+            if within_average or abs(delta or 0.0) < 1e-12:
                 self.ratio.setText(_("≈ average"))
             else:
                 arrow = "↑" if (delta or 0.0) > 0 else "↓"

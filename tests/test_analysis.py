@@ -391,7 +391,7 @@ def test_dense_measurements_open_on_the_latest_day():
     profile = visual_profile("heart-rate", "heartRate.beatsPerMinute")
     viewport = initial_x_range(points, "heart-rate", profile)
     assert viewport is not None
-    latest_local = datetime.fromtimestamp(points[-1][0])  # noqa: DTZ006
+    latest_local = datetime.fromtimestamp(points[-1][0])
     expected_start = datetime.combine(latest_local.date(), datetime.min.time()).timestamp()
     assert viewport[0] == expected_start
     assert viewport[1] - viewport[0] < 86400
@@ -411,7 +411,7 @@ def test_sparse_heart_rate_still_opens_on_one_calendar_day():
     viewport = initial_x_range(points, "heart-rate", profile)
 
     assert viewport is not None
-    latest_local = datetime.fromtimestamp(points[-1][0])  # noqa: DTZ006
+    latest_local = datetime.fromtimestamp(points[-1][0])
     expected_start = datetime.combine(latest_local.date(), datetime.min.time()).timestamp()
     assert viewport[0] == expected_start
     assert viewport[1] - viewport[0] < 86400
