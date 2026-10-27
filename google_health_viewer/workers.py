@@ -4,7 +4,7 @@ import traceback
 from datetime import date, datetime, timedelta
 from threading import Event
 
-from PySide6.QtCore import QObject, QRunnable, QSettings, QThread, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QRunnable, QSettings, QThread, Signal
 
 from .ai_engine import OptimizedOllamaClient
 from .ai_hardware import reasoning_value
@@ -34,7 +34,11 @@ class OverviewLoadTask(QRunnable):
 
     def __init__(self, store, request_id: int, start: str, end: str, reference_day: date, heart_day: date):
         super().__init__()
-        self.signals = OverviewLoadSignals()
+        # The runnable is auto-deleted by the pool on a worker thread. Its
+        # signal QObject belongs to the GUI thread and must not be destroyed
+        # there by Python ownership/GC while queued emissions are outstanding.
+        self.signals = OverviewLoadSignals(QCoreApplication.instance())
+        self.signals.finished.connect(self.signals.deleteLater)
         self.store = store
         self.request_id = request_id
         self.start = start

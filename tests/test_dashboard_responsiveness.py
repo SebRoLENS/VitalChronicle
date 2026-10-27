@@ -75,6 +75,7 @@ def test_download_completion_does_not_block_gui_or_queue_many_refreshes(tmp_path
     download.completed.connect(lambda *args: finished.append(args))
     try:
         until(app, entered.is_set)
+        assert window._overview_task.signals.parent() is app
         download.start()
         until(app, lambda: bool(finished) and len(ticks) >= 10)
         assert calls[0][2] != gui_thread
