@@ -96,3 +96,88 @@ def test_download_completion_does_not_block_gui_or_queue_many_refreshes(tmp_path
         window.close()
         QThreadPool.globalInstance().waitForDone(3000)
         app.processEvents()
+
+
+def test_personal_scores_after_download_run_off_gui_thread(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from google_health_viewer import agent_overview, main_window
+
+    app = QApplication.instance() or QApplication([])
+    # Exercise the production overview hook as well as the base window, and
+    # restore its class-level changes after this test.
+    monkeypatch.setattr(MainWindow, "refresh_overview", MainWindow.refresh_overview)
+    monkeypatch.setattr(MainWindow, "_agent_overview_installed", False, raising=False)
+    page = main_window.OverviewPage
+    monkeypatch.setattr(page, "__init__", page.__init__)
+    monkeypatch.setattr(page, "refresh_agent_scores", None, raising=False)
+    agent_overview.install_agent_overview(main_window)
+    monkeypatch.setattr(analysis, "build_overview_snapshot", lambda *a, **kw: {"metrics": []})
+    monkeypatch.setattr(analysis, "build_daily_progress_snapshot", lambda *a, **kw: {"metrics": []})
+    window = MainWindow(store=HealthStore(tmp_path / "health.sqlite3"), screenshot_mode=True)
+    entered, release = threading.Event(), threading.Event()
+    calls, ticks = [], []
+    gui_thread = threading.get_ident()
+
+    class Tools:
+        def execute(self, name, arguments):
+            calls.append((name, arguments, threading.get_ident()))
+            entered.set()
+            assert release.wait(3)
+            return {"score": 81, "label": "high"}
+
+    timer = QTimer()
+    timer.setInterval(5)
+    timer.timeout.connect(lambda: ticks.append(time.monotonic()))
+    try:
+        until(app, lambda: window._overview_task is None)
+        window.agent_runtime = SimpleNamespace(enabled=True, tools=Tools())
+        timer.start()
+        window._sync_completed(1, 0)
+        until(app, lambda: entered.is_set() and len(ticks) >= 10)
+        assert calls[0][2] != gui_thread
+        # Repeated refreshes cancel the old work and retain only the latest date.
+        for _ in range(5):
+            window.refresh_overview()
+        release.set()
+        until(app, lambda: window._overview_task is None)
+        assert len(calls) == 5  # cancelled first tool, then four current tools
+        assert all(thread != gui_thread for _, _, thread in calls)
+        assert window.overview.agent_score_cards["readiness"].value.text() == "81/100"
+    finally:
+        release.set()
+        timer.stop()
+        window.close()
+        QThreadPool.globalInstance().waitForDone(3000)
+        app.processEvents()
+
+
+def test_personal_agent_requests_only_one_overview_refresh_after_download(monkeypatch):
+    from types import SimpleNamespace
+
+    from google_health_viewer import agent_integration, agent_localization, agent_overview
+
+    monkeypatch.setattr(agent_integration, "_install_agent_reasoning_compatibility", lambda: None)
+    monkeypatch.setattr(agent_integration, "_install_chat_integration", lambda module: None)
+    monkeypatch.setattr(agent_localization, "install_agent_language_and_calibration_ui", lambda: None)
+    monkeypatch.setattr(agent_overview, "install_agent_overview", lambda module: None)
+    monkeypatch.setattr(agent_integration, "refresh_personal_ai_page", lambda window: None)
+
+    class Window:
+        def _build_ai_page(self):
+            pass
+
+        def _ensure_ai_chat_window(self):
+            pass
+
+        def _sync_completed(self, success, errors, automatic=False):
+            self.refresh_overview()
+
+        def refresh_overview(self):
+            self.refreshes += 1
+
+    agent_integration.install_personal_agent(SimpleNamespace(MainWindow=Window))
+    window = Window()
+    window.refreshes = 0
+    window._sync_completed(1, 0)
+    assert window.refreshes == 1

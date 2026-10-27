@@ -57,3 +57,17 @@ def test_overview_payload_uses_deterministic_agent_tools() -> None:
         "calculate_target_load",
     ]
     assert all(args["end"] == "2026-09-10" for _name, args in runtime.tools.calls)
+
+
+def test_cancelled_overview_stops_between_personal_score_tools() -> None:
+    from types import SimpleNamespace
+
+    calls = []
+
+    def execute(name, _arguments):
+        calls.append(name)
+        return {}
+
+    runtime = SimpleNamespace(tools=SimpleNamespace(execute=execute))
+    build_agent_overview_payload(runtime, date(2026, 10, 27), cancelled=lambda: bool(calls))
+    assert calls == ["calculate_readiness"]

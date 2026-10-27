@@ -1693,7 +1693,10 @@ class MainWindow(QMainWindow):
         if self._overview_closed or self._overview_pending is None:
             return
         args, self._overview_pending = self._overview_pending, None
-        task = OverviewLoadTask(self.store, *args)
+        task = OverviewLoadTask(
+            self.store, *args,
+            agent_runtime=getattr(self, "_overview_agent_runtime", None),
+        )
         self._overview_task = task
         task.signals.completed.connect(self._overview_ready)
         task.signals.failed.connect(self._overview_failed)
@@ -1706,6 +1709,8 @@ class MainWindow(QMainWindow):
             return
         self.current_snapshot = snapshot
         self.overview.refresh(snapshot, progress)
+        if hasattr(self.overview, "refresh_agent_scores"):
+            self.overview.refresh_agent_scores(progress.get("agent_scores"))
 
     @Slot(int, str)
     def _overview_failed(self, request_id: int, message: str) -> None:

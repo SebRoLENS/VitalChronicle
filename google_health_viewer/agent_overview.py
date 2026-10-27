@@ -153,17 +153,18 @@ class PersonalScoreCard(QFrame):
         self.caption.setText(caption or _t("no_data"))
 
 
-def build_agent_overview_payload(runtime, end: date) -> dict[str, Any]:
-    readiness = runtime.tools.execute("calculate_readiness", {"end": end.isoformat()})
-    resilience = runtime.tools.execute("calculate_resilience", {"end": end.isoformat()})
-    training = runtime.tools.execute("calculate_training_status", {"end": end.isoformat()})
-    target = runtime.tools.execute("calculate_target_load", {"end": end.isoformat()})
-    return {
-        "readiness": readiness,
-        "resilience": resilience,
-        "training": training,
-        "target": target,
-    }
+def build_agent_overview_payload(runtime, end: date, *, cancelled=None) -> dict[str, Any]:
+    payload = {}
+    for key, tool in (
+        ("readiness", "calculate_readiness"),
+        ("resilience", "calculate_resilience"),
+        ("training", "calculate_training_status"),
+        ("target", "calculate_target_load"),
+    ):
+        if cancelled and cancelled():
+            return {}
+        payload[key] = runtime.tools.execute(tool, {"end": end.isoformat()})
+    return payload
 
 
 def install_agent_overview(main_window_module) -> None:
@@ -249,17 +250,13 @@ def install_agent_overview(main_window_module) -> None:
         )
 
     def refresh_overview(self) -> None:
-        original_refresh_overview(self)
         runtime = getattr(self, "agent_runtime", None)
-        if runtime is None or not runtime.enabled:
+        self._overview_agent_runtime = runtime if runtime is not None and runtime.enabled else None
+        if self._overview_agent_runtime is None:
             self.overview.refresh_agent_scores(None)
-            return
-        try:
-            reference_day = self._qdate_to_date(self.end_date.date())
-            payload = build_agent_overview_payload(runtime, reference_day)
-        except Exception:  # noqa: BLE001 - overview must remain usable with sparse data.
-            payload = None
-        self.overview.refresh_agent_scores(payload)
+        # Use the same cancellable background request as the normal cards. Its
+        # request ID also prevents outdated personal scores from reaching the UI.
+        original_refresh_overview(self)
 
     OverviewPage.__init__ = overview_init
     OverviewPage.refresh_agent_scores = refresh_agent_scores
