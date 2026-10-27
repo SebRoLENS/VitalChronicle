@@ -32,7 +32,7 @@ class OverviewLoadSignals(QObject):
 class OverviewLoadTask(QRunnable):
     """No widget access or full-history AI extraction on the GUI thread."""
 
-    def __init__(self, store, request_id: int, start: str, end: str, reference_day: date, heart_day: date):
+    def __init__(self, store, request_id: int, start: str, end: str, reference_day: date, heart_day: date, *, agent_runtime=None):
         super().__init__()
         # The runnable is auto-deleted by the pool on a worker thread. Its
         # signal QObject belongs to the GUI thread and must not be destroyed
@@ -45,6 +45,7 @@ class OverviewLoadTask(QRunnable):
         self.end = end
         self.reference_day = reference_day
         self.heart_day = heart_day
+        self.agent_runtime = agent_runtime
         self.cancelled = Event()
 
     def run(self) -> None:
@@ -55,6 +56,18 @@ class OverviewLoadTask(QRunnable):
             if self.cancelled.is_set():
                 return
             progress = analysis.build_daily_progress_snapshot(self.store, self.reference_day, heart_day=self.heart_day)
+            if self.cancelled.is_set():
+                return
+            if self.agent_runtime is not None:
+                from .agent_overview import build_agent_overview_payload
+
+                try:
+                    progress["agent_scores"] = build_agent_overview_payload(
+                        self.agent_runtime, self.reference_day,
+                        cancelled=self.cancelled.is_set,
+                    )
+                except Exception:  # noqa: BLE001 - sparse scores must not hide the dashboard.
+                    progress["agent_scores"] = None
             if not self.cancelled.is_set():
                 self.signals.completed.emit(self.request_id, snapshot, progress)
         except Exception as exc:  # noqa: BLE001 - background boundary.

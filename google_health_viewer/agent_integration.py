@@ -398,7 +398,6 @@ def install_personal_agent(main_window_module) -> None:
     def sync_completed(self, success: int, errors: int, automatic: bool = False) -> None:
         original_sync_completed(self, success, errors, automatic)
         refresh_personal_ai_page(self)
-        self.refresh_overview()
 
     MainWindow._build_ai_page = build_ai_page
     MainWindow._ensure_ai_chat_window = ensure_ai_chat_window
