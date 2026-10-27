@@ -94,6 +94,12 @@ def _sample_list(values: list[Any], limit: int, depth: int) -> Any:
         return [_compact_value(item, limit=limit, depth=depth + 1) for item in values]
     if limit <= 0:
         return {"item_count": len(values), "details_omitted": True}
+    if limit == 1:
+        return {
+            "item_count": len(values), "details_truncated": True,
+            "first_items": [],
+            "last_items": [_compact_value(values[-1], limit=limit, depth=depth + 1)],
+        }
     head_count = max(1, limit // 2)
     tail_count = max(0, limit - head_count)
     return {
@@ -425,7 +431,22 @@ def _install_runtime_patch() -> None:
         result: Any,
     ) -> dict[str, Any]:
         entry_budget = max(1800, min(18000, _CURRENT_TOOL_RESULT_CHARS.get() // 2))
-        result_text = _smart_json_text(result, int(entry_budget * 0.82))
+        result_budget = int(entry_budget * 0.82)
+
+        def has_large_list(value: Any) -> bool:
+            if isinstance(value, list):
+                return len(value) > 8 or any(has_large_list(v) for v in value)
+            if isinstance(value, dict):
+                return any(has_large_list(v) for v in value.values())
+            return False
+
+        full = _encoded(result)
+        if len(full) <= 3000 and not has_large_list(result):
+            # A compact computed summary should survive intact. It is much
+            # cheaper and safer than asking the model to reconstruct omitted
+            # baselines/counts or re-read long raw series.
+            result_budget = max(result_budget, len(full))
+        result_text = _smart_json_text(result, result_budget)
         try:
             compact_result = json.loads(result_text)
         except ValueError:

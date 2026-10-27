@@ -64,7 +64,7 @@ def test_resolve_plan_uses_only_catalog_keys_and_ai_selected_window() -> None:
     assert plan["detail"] == "daily"
 
 
-def test_resolve_explicit_range_is_clamped_to_available_selected_data() -> None:
+def test_resolve_explicit_range_preserves_unobserved_dates_with_bounded_lookback() -> None:
     plan = resolve_data_plan(
         {
             "data_types": ["daily-heart-rate-variability"],
@@ -75,8 +75,9 @@ def test_resolve_explicit_range_is_clamped_to_available_selected_data() -> None:
         _catalog(),
     )
 
-    assert plan["start_date"] == "2026-06-01"
-    assert plan["end_date"] == "2026-09-01"
+    assert plan["start_date"] == "2020-01-05"
+    assert plan["end_date"] == "2030-01-01"
+    assert plan["days"] == 3650
 
 
 def test_invalid_plan_has_safe_bounded_fallback() -> None:
@@ -140,8 +141,9 @@ def test_catalog_contains_metadata_not_health_values(tmp_path) -> None:
 
     catalog = build_data_catalog(store)
     raw = str(catalog)
-    assert catalog["archive_first_date"] == "2026-08-01"
-    assert catalog["archive_last_date"] == "2026-09-01"
+    # Overnight observations belong to the local wake date, consistently with tools.
+    assert catalog["archive_first_date"] == "2026-08-02"
+    assert catalog["archive_last_date"] == "2026-09-02"
     assert catalog["datasets"][0]["record_count"] == 2
     assert "minutesAsleep" not in raw
     assert "secret_health_value" not in raw
@@ -162,3 +164,19 @@ def test_planner_json_parser_accepts_fenced_json_but_not_prose_only() -> None:
         '```json\n{"data_types":["sleep"],"window":"last_n_days","days":7}\n```'
     )
     assert parsed["data_types"] == ["sleep"]
+
+
+def test_week_followup_uses_user_topic_and_shifts_only_unambiguous_week():
+    from google_health_viewer.ai_query_planner_core import resolve_week_followup
+
+    history = [
+        {"role": "user", "content": "Qual è stata la mia HRV media dal 20 al 26 ottobre 2026?"},
+        {"role": "assistant", "content": "Invented value 999, dates 2026-10-01 to 2026-10-07"},
+    ]
+    result = resolve_week_followup("E la settimana precedente?", history)
+    assert result == "Qual è stata la mia HRV media 2026-10-13–2026-10-19?"
+    assert resolve_week_followup("Quanto sonno oggi?", history) == "Quanto sonno oggi?"
+    assert resolve_week_followup("E la settimana precedente?", []) == "E la settimana precedente?"
+    assert resolve_week_followup("And the previous week?", [
+        {"role": "user", "content": "Mean HRV 2026-01-01–2026-01-07?"}
+    ]) == "Mean HRV 2025-12-25–2025-12-31?"

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import traceback
 from datetime import date, datetime, timedelta
+from threading import Event
 
-from PySide6.QtCore import QSettings, QThread, Signal
+from PySide6.QtCore import QObject, QRunnable, QSettings, QThread, Signal
 
 from .ai_engine import OptimizedOllamaClient
 from .ai_hardware import reasoning_value
@@ -20,6 +21,43 @@ from .updates import fetch_latest_release
 FILTER_REPAIR_VERSION = "snake-case-filters-v1"
 HEART_RATE_STORAGE_VERSION = "heart-rate-five-minute-rollup-v2"
 DAILY_ROLLUP_STORAGE_VERSION = "daily-rollup-civil-v1"
+
+
+class OverviewLoadSignals(QObject):
+    completed = Signal(int, object, object)
+    failed = Signal(int, str)
+    finished = Signal(int)
+
+
+class OverviewLoadTask(QRunnable):
+    """No widget access or full-history AI extraction on the GUI thread."""
+
+    def __init__(self, store, request_id: int, start: str, end: str, reference_day: date, heart_day: date):
+        super().__init__()
+        self.signals = OverviewLoadSignals()
+        self.store = store
+        self.request_id = request_id
+        self.start = start
+        self.end = end
+        self.reference_day = reference_day
+        self.heart_day = heart_day
+        self.cancelled = Event()
+
+    def run(self) -> None:
+        from . import analysis
+
+        try:
+            snapshot = analysis.build_overview_snapshot(self.store, self.start, self.end, cancelled=self.cancelled.is_set)
+            if self.cancelled.is_set():
+                return
+            progress = analysis.build_daily_progress_snapshot(self.store, self.reference_day, heart_day=self.heart_day)
+            if not self.cancelled.is_set():
+                self.signals.completed.emit(self.request_id, snapshot, progress)
+        except Exception as exc:  # noqa: BLE001 - background boundary.
+            if not self.cancelled.is_set():
+                self.signals.failed.emit(self.request_id, str(exc))
+        finally:
+            self.signals.finished.emit(self.request_id)
 
 
 class AuthThread(QThread):

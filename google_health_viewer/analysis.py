@@ -89,7 +89,7 @@ PREFERRED_FIELD_HINTS: dict[str, tuple[str, ...]] = {
         "breathsPerMinute",
         "rate",
     ),
-    "daily-sleep-temperature-derivations": ("temperatureDelta", "temperature"),
+    "daily-sleep-temperature-derivations": ("nightlyTemperatureCelsius", "temperatureDelta", "temperature"),
     "core-body-temperature": ("temperature", "celsius"),
     "weight": ("weightGrams", "kilograms", "weight"),
     "body-fat": ("percentage", "bodyFat"),
@@ -379,7 +379,7 @@ def categorical_daily_points(
         timestamp = _record_timestamp(record)
         if timestamp is None:
             continue
-        day = datetime.fromtimestamp(timestamp).date().isoformat()  # noqa: DTZ006
+        day = datetime.fromtimestamp(timestamp).date().isoformat()
         values: dict[str, float] = {}
         if data_type == "time-in-heart-rate-zone":
             zone_time = _zone_time_for_record(record)
@@ -666,7 +666,7 @@ def display_points(
     grouped: dict[str, list[tuple[float, float]]] = defaultdict(list)
     for timestamp, value in points:
         # Use the computer's timezone so daily totals match the user's calendar day.
-        day = datetime.fromtimestamp(timestamp).date()  # noqa: DTZ006
+        day = datetime.fromtimestamp(timestamp).date()
         grouped[day.isoformat()].append((timestamp, value))
     result = []
     for day, values in grouped.items():
@@ -695,7 +695,7 @@ def initial_x_range(
     # Heart-rate charts always open on one calendar day. The seven-day baseline
     # belongs only to the overview band and must never become the visible series.
     if data_type == "heart-rate":
-        latest_day = datetime.fromtimestamp(latest).date()  # noqa: DTZ006
+        latest_day = datetime.fromtimestamp(latest).date()
         day_start = datetime.combine(latest_day, time.min).timestamp()
         left = max(earliest, day_start)
         padding = max((latest - left) * 0.02, 60.0)
@@ -871,7 +871,7 @@ def _daily_map(points: list[tuple[float, float]], aggregation: str) -> dict[str,
     grouped: dict[str, list[float]] = defaultdict(list)
     for timestamp, value in points:
         # Correlations must use the same local calendar day shown in the charts.
-        day = datetime.fromtimestamp(timestamp).date().isoformat()  # noqa: DTZ006
+        day = datetime.fromtimestamp(timestamp).date().isoformat()
         grouped[day].append(value)
     return {
         day: sum(values) if aggregation == "sum" else statistics.fmean(values)
@@ -884,6 +884,8 @@ def daily_progress(
     aggregation: str,
     reference_day: date,
     window_days: int = 7,
+    *,
+    resolution: float = 0.0,
 ) -> dict[str, Any]:
     """Compare one calendar day with the preceding rolling window."""
     daily = _daily_map(points, aggregation)
@@ -898,6 +900,14 @@ def daily_progress(
     if current is not None and baseline is not None and baseline > 1e-12 and current >= 0:
         percentage = current / baseline * 100.0
         delta_percent = (current - baseline) / baseline * 100.0
+    spread = statistics.stdev(baseline_values) if len(baseline_values) >= 3 else None
+    # A descriptive range for another day's value, not a confidence interval
+    # for the mean or a calibrated estimate of wearable measurement error.
+    margin = max(spread, resolution / 2) if spread is not None else None
+    comparison = None
+    if current is not None and baseline is not None and margin is not None:
+        difference = current - baseline
+        comparison = "within" if abs(difference) <= margin + 1e-12 else ("above" if difference > 0 else "below")
     return {
         "current": current,
         "baseline": baseline,
@@ -905,6 +915,12 @@ def daily_progress(
         "delta_percent": delta_percent,
         "days_used": len(baseline_values),
         "window_days": window_days,
+        "comparison": comparison,
+        "comparison_margin": margin,
+        "comparison_lower": baseline - margin if baseline is not None and margin is not None else None,
+        "comparison_upper": baseline + margin if baseline is not None and margin is not None else None,
+        "comparison_method": "previous_observed_days_sample_sd_with_resolution_floor",
+        "measurement_uncertainty": None,
     }
 
 
@@ -1230,7 +1246,7 @@ def build_daily_progress_snapshot(
             if not latest_points:
                 continue
             latest_timestamp, latest_value = latest_points[-1]
-            value_day = datetime.fromtimestamp(latest_timestamp).date()  # noqa: DTZ006
+            value_day = datetime.fromtimestamp(latest_timestamp).date()
             weight_start = (value_day - timedelta(days=8)).isoformat()
             weight_end = (value_day + timedelta(days=1)).isoformat()
             records = store.list_records(
@@ -1263,15 +1279,22 @@ def build_daily_progress_snapshot(
             available_points = [
                 point
                 for point in shown
-                if datetime.fromtimestamp(point[0]).date() <= reference_day  # noqa: DTZ006
+                if datetime.fromtimestamp(point[0]).date() <= reference_day
             ]
             if available_points:
                 latest_timestamp, latest_value = available_points[-1]
-                value_day = datetime.fromtimestamp(latest_timestamp).date()  # noqa: DTZ006
+                value_day = datetime.fromtimestamp(latest_timestamp).date()
+        aggregation = "sum" if profile.aggregation == "sum" or data_type == "sleep" else "mean"
+        # Match the displayed resolution; do not invent device accuracy.
+        resolution = 0.1 if data_type == "weight" else (1 / 60 if data_type == "sleep" else 0.0)
+        baseline_scale = max((abs(v) for _, v in shown), default=0.0)
+        if not resolution:
+            resolution = 1.0 if baseline_scale >= 100 else (0.1 if baseline_scale >= 10 else 0.01)
         comparison = daily_progress(
             shown,
-            "sum" if profile.aggregation == "sum" else "mean",
+            aggregation,
             value_day,
+            resolution=resolution,
         )
         if latest_value is not None:
             comparison["current"] = latest_value
@@ -1279,6 +1302,10 @@ def build_daily_progress_snapshot(
             if baseline is not None and baseline > 1e-12:
                 comparison["percentage"] = latest_value / baseline * 100.0
                 comparison["delta_percent"] = (latest_value - baseline) / baseline * 100.0
+            margin = comparison.get("comparison_margin")
+            if baseline is not None and margin is not None:
+                difference = latest_value - baseline
+                comparison["comparison"] = "within" if abs(difference) <= margin + 1e-12 else ("above" if difference > 0 else "below")
         item = {
             "data_type": data_type,
             "label": DATA_TYPE_BY_KEY[data_type].label,
@@ -1297,7 +1324,7 @@ def build_daily_progress_snapshot(
             )
             sparkline = recent_daily_series(
                 shown,
-                "sum" if profile.aggregation == "sum" else "mean",
+                aggregation,
                 sparkline_day,
             )
             values = [value for _timestamp, value in sparkline]
@@ -1329,7 +1356,7 @@ def build_daily_progress_snapshot(
             today_points = [
                 point
                 for point in heart_points
-                if datetime.fromtimestamp(point[0]).date() == heart_day  # noqa: DTZ006
+                if datetime.fromtimestamp(point[0]).date() == heart_day
             ]
             today_points = [point for point in today_points if 20 <= point[1] <= 250]
             if today_points:
@@ -1376,6 +1403,39 @@ def _pearson(left: list[float], right: list[float]) -> float | None:
     right_sum = sum((y - right_mean) ** 2 for y in right)
     denominator = math.sqrt(left_sum * right_sum)
     return numerator / denominator if denominator > 0 else None
+
+
+def build_overview_snapshot(store, start: str, end: str, *, cancelled=None) -> dict[str, Any]:
+    """Prepare only card summaries; full AI evidence is built separately on demand."""
+    from .health_calendar import local_calendar_records
+
+    left = date.fromisoformat(start[:10])
+    right = date.fromisoformat(end[:10]) - timedelta(days=1)
+    metrics = []
+    for data_type in SNAPSHOT_TYPES:
+        if cancelled and cancelled():
+            break
+        records = local_calendar_records(store, data_type, left, right, limit=30000, newest=True)
+        if not records:
+            continue
+        fields = available_metrics(records[:100], data_type) or available_metrics(records, data_type)
+        if not fields:
+            continue
+        metric = fields[0]
+        profile = visual_profile(data_type, metric)
+        if data_type == "sleep":
+            points = [(parse_timestamp(r.get("end_time") or r.get("start_time")), duration_hours(r)) for r in records]
+            points = [(ts, v) for ts, v in points if ts is not None and v is not None]
+            daily = _daily_map(points, "sum")
+            shown = [(datetime.fromisoformat(day).timestamp(), value) for day, value in sorted(daily.items())]
+        else:
+            shown = display_points(raw_points(records, metric), profile)
+        summary = summarize_series(shown)
+        if summary:
+            metrics.append({"data_type": data_type, "label": DATA_TYPE_BY_KEY[data_type].label,
+                            "metric": friendly_metric_name(metric), "unit": profile.unit,
+                            "summary": asdict(summary)})
+    return {"period": {"start": start, "end": end}, "metrics": metrics, "correlations": []}
 
 
 def build_health_snapshot(
@@ -1446,7 +1506,7 @@ def build_health_snapshot(
             completed_points = [
                 point
                 for point in shown
-                if datetime.fromtimestamp(point[0]).date() != today  # noqa: DTZ006
+                if datetime.fromtimestamp(point[0]).date() != today
             ]
             temporal_context = _partial_day_context(
                 records, metric, profile, shown, completed_points, local_now

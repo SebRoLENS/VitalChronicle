@@ -26,6 +26,16 @@ Readiness, cardio load, target load, training status, stress load, and resilienc
 
 Every calculation is expected to return its method, available coverage, and confidence where applicable. Missing observations are omitted rather than treated as zero.
 
+Sleep metric series and baselines use daily totals of recorded sessions, grouped by local
+wake-up date, rather than averaging a main night with short additional sessions.
+`get_sleep_sessions` separately exposes the source's `mainSleep` label as `main_sleep`
+(null when unknown), local start/end timestamps with UTC offsets, and a baseline limited
+to explicitly labelled main sessions. Multiple sessions on one date do not by themselves
+indicate duplicates. Its 60-session limit is reported explicitly; request a smaller interval
+for omitted sessions. Nightly HRV comparisons must distinguish main sleep from additional
+sessions, respect temporal order, and calculate paired associations before describing
+their strength.
+
 ## Learned tools and the Tool Factory
 
 A learned tool is not Python code. The Tool Factory accepts only a small declarative pipeline language and stores the validated pipeline in the separate agent database.

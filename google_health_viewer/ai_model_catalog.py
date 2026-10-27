@@ -472,10 +472,16 @@ def recommended_model_for_hardware(
     )
     if not cached_families:
         return base
+    capacity = _capacity_gb(ram_gb, vram_gb, has_gpu)
+    base_size = model_memory_gb(base)
+    if profile == "fast" and base_size:
+        # A newer family can be much larger while still fitting in system RAM.
+        # Preserve the fast profile's small-model budget as well as memory fit.
+        capacity = min(capacity, base_size * 1.25)
     successor = _newest_compatible_family(
         base,
         cached_families,
-        capacity_gb=_capacity_gb(ram_gb, vram_gb, has_gpu),
+        capacity_gb=capacity,
         allow_unknown_size=False,
     )
     return successor or base

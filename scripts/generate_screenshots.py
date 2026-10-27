@@ -9,6 +9,7 @@ import os
 import tempfile
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from time import monotonic, sleep
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -222,6 +223,16 @@ def capture(window: MainWindow, target: Path) -> None:
     window.ensurePolished()
     window.show()
     QApplication.processEvents()
+    deadline = monotonic() + 15
+    while isinstance(window, MainWindow) and (
+        window._overview_task is not None
+        or window._overview_pending is not None
+        or window._overview_timer.isActive()
+    ):
+        if monotonic() >= deadline:
+            raise RuntimeError("Dashboard did not finish loading before screenshot capture")
+        QApplication.processEvents()
+        sleep(0.01)
     pixmap = window.grab()
     if pixmap.isNull() or not pixmap.save(str(target), "PNG"):
         raise RuntimeError(f"Could not write screenshot: {target}")

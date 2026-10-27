@@ -18,7 +18,8 @@ from .analysis import (
     visual_profile,
 )
 from .agent_store import AgentStore
-from .utils import parse_timestamp
+from .health_calendar import SESSION_END_DATE_TYPES, local_calendar_records, record_local_day
+from .utils import coerce_number, parse_timestamp
 
 MAX_SERIES_POINTS = 360
 MAX_LEARNED_STEPS = 12
@@ -77,7 +78,7 @@ def _obj(properties: dict[str, Any], required: tuple[str, ...] = ()) -> dict[str
 
 
 _DATE = {"type": "string", "description": "Local date YYYY-MM-DD."}
-_METRIC = {"type": "string", "description": "VitalChronicle data type, data_type:field, or a field name returned by get_available_metrics."}
+_METRIC = {"type": "string", "description": "Dataset, data_type:field, or discovered field. Use hrv for ordinary daily HRV comparisons; heart-rate-variability is a distinct intraday sample metric."}
 _PERIOD = {"start": _DATE, "end": _DATE}
 
 
@@ -86,13 +87,13 @@ def _period(metric: bool = False) -> dict[str, Any]:
     return _obj(props, ("metric",) if metric else ())
 
 
-# 34 deterministic health tools + 6 agent/personalisation tools.
+# Deterministic health tools and agent/personalisation controls.
 _TOOL_ROWS = (
     (
         "get_available_metrics",
-        "List available local health metrics and record counts.",
+        "List local datasets. Pass data_type for its exact field names; dataset names also work as metric identifiers.",
         "data.available_metrics",
-        _obj({}),
+        _obj({"data_type": {"type": "string"}}),
     ),
     (
         "get_data_coverage",
@@ -105,6 +106,12 @@ _TOOL_ROWS = (
         "Read a bounded deterministic metric series without zero-filling gaps.",
         "data.metric_series",
         _period(True),
+    ),
+    (
+        "summarize_health_overview",
+        "Summarize up to eight chosen daily metrics with exact counts, extrema dates and changes. Defaults to HRV, resting HR, sleep totals and steps. No causal or clinical interpretation.",
+        "data.health_overview",
+        _obj({**_PERIOD, "metrics": {"type": "array", "items": _METRIC, "maxItems": 8}}),
     ),
     (
         "get_daily_summary",
@@ -124,7 +131,21 @@ _TOOL_ROWS = (
         "data.missing_dates",
         _period(True),
     ),
-    ("get_sleep_sessions", "Summarize recorded sleep sessions.", "sleep.sessions", _period()),
+    (
+        "get_sleep_sessions",
+        ("Read sleep sessions, mainSleep labels, local bedtimes and main-sleep baseline. "
+         "Use for nightly comparisons; short additional sessions are not entire nights."),
+        "sleep.sessions",
+        _period(),
+    ),
+    (
+        "analyze_sleep_metric_association",
+        ("Calculate main-sleep duration/bedtime correlations with a daily metric (default HRV), "
+         "and pair low metric outliers with the preceding main night. Returns compact statistics "
+         "and up to eight events, not raw series. Use for HRV dips versus sleep timing/duration."),
+        "sleep.metric_association",
+        _obj({"metric": _METRIC, **_PERIOD}),
+    ),
     (
         "analyze_sleep_stages",
         "Summarize recorded sleep-stage durations and shares.",
@@ -139,7 +160,7 @@ _TOOL_ROWS = (
     ),
     (
         "calculate_sleep_regularity",
-        "Calculate personal sleep timing/duration regularity.",
+        "Calculate main-sleep timing/duration regularity and weekday versus weekend median bedtimes, correctly handling midnight. Positive weekend delay means later.",
         "sleep.regularity",
         _period(),
     ),
@@ -211,8 +232,14 @@ _TOOL_ROWS = (
     ),
     (
         "analyze_workout",
-        "Summarize workout frequency, duration and recorded types.",
+        "Summarize workout counts, duration and duration-weighted recorded mean heart rate by type. Optional exercise_type is an exact recorded type such as SWIMMING.",
         "training.workout_analysis",
+        _obj({**_PERIOD, "exercise_type": {"type": "string"}}),
+    ),
+    (
+        "summarize_nutrition_logs",
+        "Sum recorded dietary calories and protein from actual nutrition-log meals. Food is a catalogue, not consumed meals. Missing nutrients remain unknown; logs may not cover all intake.",
+        "nutrition.intake",
         _period(),
     ),
     (
@@ -263,9 +290,11 @@ _TOOL_ROWS = (
     ),
     (
         "calculate_correlations",
-        "Calculate exploratory same-day Pearson association between two metrics.",
+        "Calculate exploratory Pearson association. offset_days shifts metric B relative to metric A (0=same day, 1=following day). Returns compact paired statistics, not raw series.",
         "analysis.correlations",
-        _obj({"metric_a": _METRIC, "metric_b": _METRIC, **_PERIOD}, ("metric_a", "metric_b")),
+        _obj({"metric_a": _METRIC, "metric_b": _METRIC, **_PERIOD,
+              "offset_days": {"type": "integer", "minimum": -7, "maximum": 7, "default": 0}},
+             ("metric_a", "metric_b")),
     ),
     (
         "detect_trends",
@@ -447,11 +476,7 @@ _ALIASES = {
     "vo2max": "daily-vo2-max",
 }
 
-_END_DATE_TYPES = {
-    "sleep",
-    "respiratory-rate-sleep-summary",
-    "daily-sleep-temperature-derivations",
-}
+_END_DATE_TYPES = SESSION_END_DATE_TYPES
 
 
 def _date_semantics(data_type: str) -> str:
@@ -494,8 +519,7 @@ def _record_semantic_timestamp(record: dict[str, Any], data_type: str) -> float 
 
 
 def _semantic_day(record: dict[str, Any], data_type: str) -> str | None:
-    timestamp = _record_semantic_timestamp(record, data_type)
-    return _day(timestamp) if timestamp is not None else None
+    return record_local_day(record, data_type)
 
 
 def _daily(points: list[tuple[float, float]], aggregation: str) -> dict[str, float]:
@@ -521,6 +545,8 @@ def _baseline(values: list[float]) -> dict[str, Any]:
 
 
 def _confidence(observed: int, expected: int, components: int = 1, available: int = 1) -> float:
+    if observed <= 0 or available <= 0:
+        return 0.0
     coverage = min(1.0, observed / max(1, expected))
     sample = min(1.0, observed / 14.0)
     component = min(1.0, available / max(1, components))
@@ -575,26 +601,12 @@ class SafeToolExecutor:
         raise ValueError(f"Unknown or inactive agent tool: {name}")
 
     def _records(self, data_type: str, left: date, right: date) -> list[dict[str, Any]]:
-        return self.health_store.list_records(
-            data_type,
-            start=left.isoformat(),
-            end=(right + timedelta(days=1)).isoformat(),
-            limit=200000,
-        )
+        return local_calendar_records(self.health_store, data_type, left, right)
 
     def _semantic_records(
         self, data_type: str, left: date, right: date
     ) -> list[dict[str, Any]]:
-        query_left = left - timedelta(days=1) if data_type in _END_DATE_TYPES else left
-        records = self._records(data_type, query_left, right)
-        if data_type not in _END_DATE_TYPES:
-            return records
-        return [
-            record
-            for record in records
-            if (day := _semantic_day(record, data_type)) is not None
-            and left.isoformat() <= day <= right.isoformat()
-        ]
+        return self._records(data_type, left, right)
 
     def _series(self, metric: str, left: date, right: date) -> dict[str, Any]:
         raw = str(metric or "").strip()
@@ -609,9 +621,33 @@ class SafeToolExecutor:
                 explicit = data_type
                 data_type = inferred
         data_type = _ALIASES.get(data_type, data_type)
+        context = str(getattr(self, "_request_context", "") or "").casefold()
+        if (
+            context and data_type == "heart-rate-variability"
+            and "daily-heart-rate-variability" in self.health_store.counts()
+            and not any(marker in context for marker in (
+                "campion", "intraday", "intranotte", "raw", "ogni minuto", "minuto per minuto",
+                "heartratevariability.",
+            ))
+            and not re.search(r"(?<!daily-)heart-rate-variability\b", context)
+        ):
+            raise ValueError(
+                "For an ordinary HRV question use metric='hrv' (source daily HRV). "
+                "heart-rate-variability contains intraday samples and is a different measurement. "
+                "It is available only when that sample-level variant is explicitly requested."
+            )
         records = self._semantic_records(data_type, left, right)
         metrics = available_metrics(records, data_type) if records else []
-        field = (explicit if explicit in metrics else None) if explicit else (metrics[0] if metrics else None)
+        field = metrics[0] if metrics else None
+        if explicit:
+            candidates = [m for m in metrics if m == explicit or m.endswith("." + explicit)]
+            if records and len(candidates) != 1:
+                raise ValueError(
+                    f"Unknown or ambiguous metric field {explicit!r} for {data_type}. "
+                    f"Available fields: {', '.join(metrics[:12])}. "
+                    "Use the dataset name alone for its primary metric."
+                )
+            field = candidates[0] if len(candidates) == 1 else None
         if field is None:
             return {
                 "metric": raw,
@@ -631,15 +667,24 @@ class SafeToolExecutor:
                 if timestamp is not None and candidate:
                     source_points.append((timestamp, float(candidate[-1][1])))
         points = display_points(source_points, profile)
+        if data_type == "sleep":
+            # A daily sleep value is the total recorded sleep, not the mean
+            # session length (which makes a nap halve an otherwise normal night).
+            daily = _daily(source_points, "sum")
+            points = [
+                (datetime.fromisoformat(day).astimezone().timestamp(), value)
+                for day, value in sorted(daily.items())
+            ]
         return {
             "metric": raw,
             "data_type": data_type,
             "field": field,
             "points": [
-                (float(ts), float(value)) for ts, value in points if math.isfinite(float(value))
+                (float(ts), float(value)) for ts, value in points
+                if math.isfinite(float(value)) and left.isoformat() <= _day(ts) <= right.isoformat()
             ],
             "unit": profile.unit,
-            "aggregation": profile.aggregation,
+            "aggregation": "sum" if data_type == "sleep" else profile.aggregation,
             "date_semantics": _date_semantics(data_type),
         }
 
@@ -667,10 +712,16 @@ class SafeToolExecutor:
             else {
                 "count": summary.count,
                 "latest": summary.latest,
+                "earliest": points[0][1],
+                "first_date": _day(points[0][0]),
+                "last_date": _day(points[-1][0]),
+                "first_to_last_change": summary.latest - points[0][1],
                 "mean": summary.mean,
                 "median": summary.median,
                 "minimum": summary.minimum,
                 "maximum": summary.maximum,
+                "minimum_date": _day(min(points, key=lambda point: point[1])[0]),
+                "maximum_date": _day(max(points, key=lambda point: point[1])[0]),
                 "trend_percent": summary.trend_percent,
                 "baseline_low": summary.baseline_low,
                 "baseline_high": summary.baseline_high,
@@ -678,6 +729,11 @@ class SafeToolExecutor:
             },
             "method": "Deterministic local values; missing observations are omitted, never zero-filled.",
         }
+        if series["data_type"] == "sleep":
+            result["method"] += (
+                " Sleep values are daily totals of recorded sessions by wake-up date,"
+                " including additional sessions; use get_sleep_sessions for main-night timing/duration."
+            )
         if include_points:
             stride = max(1, math.ceil(len(points) / MAX_SERIES_POINTS))
             bounded = points[::stride]
@@ -690,20 +746,50 @@ class SafeToolExecutor:
 
     def _tool_get_available_metrics(self, args, **_):
         rows = []
-        for data_type, count in sorted(self.health_store.counts().items()):
-            records = self.health_store.list_records(data_type, limit=min(count, 2000), newest=True)
+        counts = self.health_store.counts()
+        selected = str(args.get("data_type") or "").strip()
+        selected = _ALIASES.get(selected, selected)
+        for data_type, count in sorted(counts.items()):
+            if selected and data_type != selected:
+                continue
+            records = self.health_store.list_records(
+                data_type, limit=min(count, 2000 if selected else 1), newest=True
+            )
             rows.append(
                 {
                     "data_type": data_type,
                     "records": count,
-                    "metrics": available_metrics(records, data_type)[:12],
+                    "metrics": available_metrics(records, data_type)[:12 if selected else 1],
                 }
             )
-        return {"data_types": rows, "count": len(rows)}
+        return {
+            "available_data_types": counts,
+            "data_types": rows,
+            "count": len(rows),
+            "field_lookup": "Pass data_type to inspect all its field names; use dataset names for primary metrics.",
+        }
 
     def _tool_get_metric_series(self, args, **_):
         left, right = _bounds(args.get("start"), args.get("end"))
+        focus = getattr(self, "_resolved_followup_window", None)
+        if focus and (left.isoformat(), right.isoformat()) != focus:
+            raise ValueError(
+                f"This follow-up asks for {focus[0]} through {focus[1]}, inclusive. "
+                "Use that interval, not the week already analysed in conversation history."
+            )
         return self._series_info(str(args.get("metric") or ""), left, right, True)
+
+    def _tool_summarize_health_overview(self, args, **_):
+        left, right = _bounds(args.get("start"), args.get("end"), 7)
+        metrics = args.get("metrics", ["hrv", "rhr", "sleep", "steps"])
+        if not isinstance(metrics, list) or not 1 <= len(metrics) <= 8 or not all(isinstance(m, str) for m in metrics):
+            raise ValueError("metrics must contain 1 to 8 metric identifiers")
+        return {
+            "period": {"start": left.isoformat(), "end": right.isoformat()},
+            "includes_today": left <= date.today() <= right,
+            "metrics": [self._series_info(m, left, right) for m in dict.fromkeys(metrics)],
+            "method": "Descriptive observed daily measurements only. No causality, significance test, medical assessment or recovery clearance.",
+        }
 
     def _coverage(self, args: dict[str, Any]) -> dict[str, Any]:
         left, right = _bounds(args.get("start"), args.get("end"))
@@ -760,6 +846,8 @@ class SafeToolExecutor:
             "coverage": item["coverage"],
             "confidence": item["confidence"],
             "baseline": item["daily_baseline"],
+            "status": "descriptive_only_short_history" if item["observed_days"] < 7 else "available",
+            "interpretation": "Fewer than 7 observed days cannot establish a usual personal baseline; widen the interval. Equality with a single-day value does not demonstrate stable recovery or medical safety." if item["observed_days"] < 7 else "Descriptive personal reference, not medical safety or a prediction.",
         }
 
     def _sleep_rows(
@@ -775,12 +863,22 @@ class SafeToolExecutor:
             except (TypeError, ValueError):
                 continue
             if hours is not None:
+                sleep = record.get("payload", {}).get("sleep", {})
+                main_sleep = sleep.get("metadata", {}).get("mainSleep")
+                try:
+                    start = datetime.fromisoformat(
+                        str(record.get("start_time")).replace("Z", "+00:00")
+                    ).astimezone().isoformat()
+                except (TypeError, ValueError):
+                    start = record.get("start_time")
                 rows.append(
                     {
                         "date": end.date().isoformat(),
                         "hours": round(hours, 3),
-                        "start_time": record.get("start_time"),
-                        "end_time": record.get("end_time"),
+                        "minutes_asleep": round(hours * 60, 3),
+                        "start_time": start,
+                        "end_time": end.isoformat(),
+                        "main_sleep": main_sleep if isinstance(main_sleep, bool) else None,
                     }
                 )
         return records, rows
@@ -789,14 +887,105 @@ class SafeToolExecutor:
         left, right = _bounds(args.get("start"), args.get("end"))
         records, rows = self._sleep_rows(left, right)
         expected = (right - left).days + 1
+        main_rows = [row for row in rows if row["main_sleep"] is True]
         return {
             "period": {"start": left.isoformat(), "end": right.isoformat()},
-            "sessions": rows[-60:],
+            "interpretation": (
+                "main_sleep=true is explicitly labelled mainSleep by the source; null is unknown,"
+                " not a duplicate or a confirmed nap. Multiple sessions on one date are not"
+                " necessarily duplicate records. Compare HRV with the main sleep ending on that"
+                " date, not a later short session. Timestamps include the computer's local UTC"
+                " offset. Daily sleep metric totals include all sessions, unlike this main-sleep baseline."
+            ),
+            "main_sleep_baseline_hours": _baseline([row["hours"] for row in main_rows]),
+            "main_sleep_observed_days": len({row["date"] for row in main_rows}),
+            "returned_sessions": min(len(rows), 60),
+            "omitted_sessions": max(0, len(rows) - 60),
+            "truncated": len(rows) > 60,
+            "truncation_notice": (
+                "Request a shorter interval to inspect omitted sessions." if len(rows) > 60 else None
+            ),
             "session_count": len(rows),
             "sessions_with_stages": len(sleep_stage_points(records)),
             "coverage": round(len({row["date"] for row in rows}) / max(1, expected), 3),
             "confidence": _confidence(len({row["date"] for row in rows}), expected),
             "date_semantics": "wake_up_date",
+            "sessions": rows[-60:],
+        }
+
+    def _tool_analyze_sleep_metric_association(self, args, **_):
+        left, right = _bounds(args.get("start"), args.get("end"), 60)
+        metric = str(args.get("metric") or "hrv")
+        series = self._series(metric, left, right)
+        daily = _daily(series["points"], "sum" if series["aggregation"] == "sum" else "mean")
+        _, rows = self._sleep_rows(left, right)
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            if row["main_sleep"] is True:
+                grouped.setdefault(row["date"], []).append(row)
+        # Do not choose arbitrarily if the source labels multiple main sleeps.
+        main = {day: items[0] for day, items in grouped.items() if len(items) == 1}
+        paired = sorted(set(main) & set(daily))
+        starts: dict[str, float] = {}
+        for day in paired:
+            try:
+                dt = datetime.fromisoformat(main[day]["start_time"])
+            except (TypeError, ValueError):
+                continue
+            minute = dt.hour * 60 + dt.minute
+            starts[day] = float(minute + (1440 if dt.hour < 12 else 0))
+
+        def pearson(pairs):
+            if len(pairs) < 4:
+                return None
+            xs, ys = [p[0] for p in pairs], [p[1] for p in pairs]
+            if not statistics.pstdev(xs) or not statistics.pstdev(ys):
+                return None
+            return round(statistics.correlation(xs, ys), 4)
+
+        baseline = _baseline(list(daily.values()))
+        sigma = 1.4826 * (baseline["mad"] or 0)
+        threshold = (baseline["median"] - 2.5 * sigma) if sigma else None
+        low_dates = sorted(day for day in daily if threshold is not None and daily[day] < threshold)
+        events = {}
+        for day in low_dates[:8]:
+            night = main.get(day)
+            events[day] = {
+                "metric_value": daily[day],
+                "main_sleep_hours": night["hours"] if night else None,
+                "main_sleep_minutes": night["minutes_asleep"] if night else None,
+                "local_start": night["start_time"] if night else None,
+            }
+        usual_minute = statistics.median(starts.values()) if starts else None
+        for day, event in events.items():
+            delay = starts.get(day)
+            event["bedtime_delay_minutes"] = (
+                delay - usual_minute if delay is not None and usual_minute is not None else None
+            )
+        return {
+            "metric": metric,
+            "unit": series["unit"],
+            "period": {"start": left.isoformat(), "end": right.isoformat()},
+            "expected_days": (right - left).days + 1,
+            "metric_observed_days": len(daily),
+            "metric_median": baseline["median"],
+            "metric_mean": baseline["mean"],
+            "main_sleep_observed_days": len(main),
+            "paired_days": len(paired),
+            "bedtime_paired_days": len(starts),
+            "duration_pearson_r": pearson([(daily[d], main[d]["hours"]) for d in paired]),
+            "bedtime_pearson_r": pearson([(daily[d], starts[d]) for d in starts]),
+            "main_sleep_median_hours": statistics.median([r["hours"] for r in main.values()]) if main else None,
+            "usual_local_start": (
+                f"{int(usual_minute) // 60 % 24:02}:{int(usual_minute) % 60:02}"
+                if usual_minute is not None else None
+            ),
+            "low_metric_threshold": round(threshold, 4) if threshold is not None else None,
+            "low_metric_event_count": len(low_dates),
+            "omitted_events": max(0, len(low_dates) - len(events)),
+            "low_metric_events": events,
+            "ambiguous_main_sleep_days": len(grouped) - len(main),
+            "method": "Source-labelled mainSleep, same wake date. Bedtime unwrapped at noon: positive bedtime_delay_minutes means LATER than usual, even after midnight. Low < median-2.5*1.4826*MAD. Missing pairs omitted. Exploratory, not causal.",
         }
 
     def _tool_analyze_sleep_stages(self, args, **_):
@@ -837,8 +1026,10 @@ class SafeToolExecutor:
     def _tool_calculate_sleep_regularity(self, args, **_):
         left, right = _bounds(args.get("start"), args.get("end"), 42)
         _records, rows = self._sleep_rows(left, right)
+        main_rows = [row for row in rows if row["main_sleep"] is True]
         starts, durations = [], []
-        for row in rows:
+        cohorts: dict[str, list[float]] = {"weekend": [], "weekday": []}
+        for row in main_rows:
             try:
                 dt = datetime.fromisoformat(
                     str(row["start_time"]).replace("Z", "+00:00")
@@ -848,6 +1039,8 @@ class SafeToolExecutor:
             minute = dt.hour * 60 + dt.minute + (1440 if dt.hour < 12 else 0)
             starts.append(float(minute))
             durations.append(float(row["hours"]))
+            cohort = "weekend" if date.fromisoformat(row["date"]).weekday() >= 5 else "weekday"
+            cohorts[cohort].append(float(minute))
         start_sd = statistics.pstdev(starts) if len(starts) > 1 else None
         duration_sd = statistics.pstdev(durations) if len(durations) > 1 else None
         score = (
@@ -856,18 +1049,34 @@ class SafeToolExecutor:
             else max(0.0, min(100.0, 100 - min(60.0, start_sd / 2) - min(40.0, duration_sd * 18)))
         )
         return {
+            "period": {"start": left.isoformat(), "end": right.isoformat()},
             "regularity_score": None if score is None else round(score, 1),
             "sleep_start_sd_minutes": None if start_sd is None else round(start_sd, 1),
             "duration_sd_hours": None if duration_sd is None else round(duration_sd, 2),
             "sessions": len(durations),
+            "excluded_non_main_sessions": len(rows) - len(main_rows),
+            "bedtime_by_wake_day_type": {
+                name: {
+                    "observed_nights": len(values),
+                    "median_start_minutes_unwrapped": statistics.median(values) if values else None,
+                    "median_local_start": (
+                        f"{int(statistics.median(values)) // 60 % 24:02}:{int(statistics.median(values)) % 60:02}"
+                        if values else None
+                    ),
+                } for name, values in cohorts.items()
+            },
+            "weekend_delay_minutes": (
+                statistics.median(cohorts["weekend"]) - statistics.median(cohorts["weekday"])
+                if all(cohorts.values()) else None
+            ),
             "confidence": _confidence(len(durations), (right - left).days + 1),
-            "method": "VitalChronicle heuristic from personal sleep-start and duration variability.",
+            "method": "Source-labelled mainSleep only, local bedtime unwrapped at noon. Weekend=Saturday/Sunday WAKE dates (Friday/Saturday nights). Positive delay=later. Regularity score is a VitalChronicle heuristic. Unlabelled sessions excluded, not missing sleep data.",
         }
 
     def _tool_calculate_sleep_debt(self, args, **_):
         _left, right = _bounds(args.get("start"), args.get("end"), 35)
-        _records, rows = self._sleep_rows(right - timedelta(days=34), right)
-        by_day = {row["date"]: float(row["hours"]) for row in rows}
+        series = self._series("sleep", right - timedelta(days=34), right)
+        by_day = _daily(series["points"], "sum")
         recent = [
             by_day[key]
             for i in range(7)
@@ -875,7 +1084,7 @@ class SafeToolExecutor:
         ]
         baseline = [
             by_day[key]
-            for i in range(8, 35)
+            for i in range(7, 35)
             if (key := (right - timedelta(days=i)).isoformat()) in by_day
         ]
         need = (
@@ -891,7 +1100,7 @@ class SafeToolExecutor:
             "recent_nights": len(recent),
             "baseline_nights": len(baseline),
             "confidence": _confidence(len(recent) + len(baseline), 35),
-            "method": "Estimate against the user's prior median sleep duration; not a clinical sleep-need diagnosis.",
+            "method": "Recorded daily sleep totals including additional sessions, compared with prior median (or recent median if no prior baseline). Missing days omitted, never extrapolated to seven nights. Not a clinical sleep-need diagnosis.",
         }
 
     def _recent_baseline(self, metric: str, right: date) -> dict[str, Any]:
@@ -906,6 +1115,10 @@ class SafeToolExecutor:
         pct = None if delta is None or abs(bmedian) < 1e-12 else delta / abs(bmedian) * 100
         return {
             "metric": metric,
+            "as_of": right.isoformat(),
+            "recent_period": {"start": (right - timedelta(days=6)).isoformat(), "end": right.isoformat()},
+            "current_day_value": daily.get(right.isoformat()),
+            "latest_observed_date": max(daily) if daily else None,
             "recent_mean": rmean,
             "baseline_median": bmedian,
             "delta": delta,
@@ -971,8 +1184,8 @@ class SafeToolExecutor:
             "confidence": _confidence(observed, 21, 3, len(available)),
             "components": {key: round(value, 1) for key, value in available.items()},
             "component_evidence": items,
-            "method": "VitalChronicle personal-baseline composite: sleep 40%, HRV 35%, resting HR 25%; missing components are reweighted. Not Fitbit's proprietary score.",
-            "limitations": "Subjective feedback personalizes tolerance but cannot establish medical safety.",
+            "method": "VitalChronicle composite of RECENT SEVEN-DAY MEANS versus prior baselines: sleep 40%, HRV 35%, resting HR 25%; missing components reweighted. Not a single-day measurement or Fitbit score.",
+            "limitations": "Wearable signals cannot identify or rule out causes of fatigue. A reassuring score does not establish recovery or medical safety; user-reported fatigue remains relevant.",
         }
 
     def _tool_calculate_readiness(self, args, **_):
@@ -1204,19 +1417,83 @@ class SafeToolExecutor:
 
         left, right = _bounds(args.get("start"), args.get("end"), 28)
         records = self._records("exercise", left, right)
-        groups: dict[str, dict[str, float]] = {}
+        groups: dict[str, dict[str, Any]] = {}
+        selected = str(args.get("exercise_type") or "").strip().upper()
+        selected = {
+            "CYCLING": "BIKING", "BIKE": "BIKING", "BICI": "BIKING",
+            "BICICLETTA": "BIKING", "CICLISMO": "BIKING",
+            "SWIM": "SWIMMING", "NUOTO": "SWIMMING",
+        }.get(selected, selected)
+        available_types: set[str] = set()
+        selected_records = 0
         for record in records:
             kind = str(
                 _find_named_value(record.get("payload") or {}, {"exercisetype", "type"})
                 or "UNSPECIFIED"
             ).upper()
-            entry = groups.setdefault(kind, {"sessions": 0, "hours": 0.0})
+            available_types.add(kind)
+            if selected and kind != selected:
+                continue
+            selected_records += 1
+            entry = groups.setdefault(kind, {
+                "sessions": 0, "hours": 0.0, "heart_rate_observed_sessions": 0,
+                "heart_rate_observed_hours": 0.0, "_weighted_hr": 0.0,
+            })
+            hours = duration_hours(record)
             entry["sessions"] += 1
-            entry["hours"] += duration_hours(record) or 0.0
+            entry["hours"] += hours or 0.0
+            hr = coerce_number(_find_named_value(
+                record.get("payload") or {}, {"averageheartratebeatsperminute"}
+            ))
+            if hr is not None and math.isfinite(hr) and hours and hours > 0:
+                entry["heart_rate_observed_sessions"] += 1
+                entry["heart_rate_observed_hours"] += hours
+                entry["_weighted_hr"] += hr * hours
+        for entry in groups.values():
+            entry["average_heart_rate_bpm"] = (
+                round(entry["_weighted_hr"] / entry["heart_rate_observed_hours"], 2)
+                if entry["heart_rate_observed_hours"] else None
+            )
+            del entry["_weighted_hr"]
         return {
-            "sessions": len(records),
+            "period": {"start": left.isoformat(), "end": right.isoformat()},
+            "sessions": selected_records,
+            "exercise_type_filter": selected or None,
+            "available_recorded_types": sorted(available_types),
             "total_hours": round(sum(x["hours"] for x in groups.values()), 2),
             "by_type": groups,
+            "method": "Recorded sessions; mean HR weighted by recorded session duration for sessions with mean HR. Not a mean of raw heart-rate samples. Missing HR is not inferred.",
+        }
+
+    def _tool_summarize_nutrition_logs(self, args, **_):
+        left, right = _bounds(args.get("start"), args.get("end"))
+        records = self._records("nutrition-log", left, right)
+        energy, protein = [], []
+        days = set()
+        for record in records:
+            item = record.get("payload", {}).get("nutritionLog", {})
+            value = coerce_number(item.get("energy", {}).get("kcal"))
+            if value is not None and math.isfinite(value):
+                energy.append(value)
+            nutrients = item.get("nutrients", [])
+            for nutrient in nutrients if isinstance(nutrients, list) else []:
+                if str(nutrient.get("nutrient", "")).upper() != "PROTEIN":
+                    continue
+                value = coerce_number(nutrient.get("quantity", {}).get("grams"))
+                if value is not None and math.isfinite(value):
+                    protein.append(value)
+            day = _semantic_day(record, "nutrition-log")
+            if day:
+                days.add(day)
+        return {
+            "period": {"start": left.isoformat(), "end": right.isoformat()},
+            "recorded_meals": len(records),
+            "observed_days": len(days),
+            "energy_kcal": round(sum(energy), 2) if energy else None,
+            "protein_grams": round(sum(protein), 2) if protein else None,
+            "meals_with_energy": len(energy),
+            "protein_entries": len(protein),
+            "method": "Actual nutrition-log entries only; excludes the food catalogue. Recorded totals are not complete dietary intake or estimated requirements; missing nutrients are unknown.",
         }
 
     def _vo2(self, left: date, right: date) -> dict[str, Any]:
@@ -1371,6 +1648,19 @@ class SafeToolExecutor:
 
     def _tool_compare_periods(self, args, **_):
         metric = str(args.get("metric") or "")
+        windows = getattr(self, "_comparison_windows", None)
+        if windows:
+            supplied = {(str(args.get("start_a")), str(args.get("end_a"))),
+                        (str(args.get("start_b")), str(args.get("end_b")))}
+            expected = {tuple(windows["focus"]), tuple(windows["previous_week"])}
+            if supplied != expected:
+                raise ValueError(
+                    f"For this today-versus-previous-week request use exactly these periods: {windows}. "
+                    "The previous week is seven complete days excluding the focus day, not eight days."
+                )
+            args = {**args,
+                    "start_a": windows["previous_week"][0], "end_a": windows["previous_week"][1],
+                    "start_b": windows["focus"][0], "end_b": windows["focus"][1]}
         a = self._tool_get_daily_summary(
             {"metric": metric, "start": args.get("start_a"), "end": args.get("end_a")}
         )
@@ -1381,8 +1671,15 @@ class SafeToolExecutor:
         delta = None if ma is None or mb is None else float(mb) - float(ma)
         return {
             "metric": metric,
+            "data_type": a["data_type"],
+            "field": a["field"],
+            "unit": a["unit"],
+            "period_a": {**a["period"], "observed_days": a["observed_days"], "expected_days": a["expected_days"]},
+            "period_b": {**b["period"], "observed_days": b["observed_days"], "expected_days": b["expected_days"]},
             "mean_a": ma,
             "mean_b": mb,
+            "median_a": a["daily_baseline"]["median"],
+            "median_b": b["daily_baseline"]["median"],
             "delta": delta,
             "delta_percent": None
             if delta is None or abs(float(ma)) < 1e-12
@@ -1413,12 +1710,15 @@ class SafeToolExecutor:
 
     def _tool_calculate_correlations(self, args, **_):
         left, right = _bounds(args.get("start"), args.get("end"), 60)
+        offset = int(args.get("offset_days") or 0)
+        if not -7 <= offset <= 7:
+            raise ValueError("offset_days must be between -7 and 7")
         a = self._series(str(args.get("metric_a") or ""), left, right)
-        b = self._series(str(args.get("metric_b") or ""), left, right)
+        b = self._series(str(args.get("metric_b") or ""), left + timedelta(days=offset), right + timedelta(days=offset))
         da = _daily(a["points"], "sum" if a["aggregation"] == "sum" else "mean")
         db = _daily(b["points"], "sum" if b["aggregation"] == "sum" else "mean")
-        common = sorted(set(da) & set(db))
-        pairs = [(da[x], db[x]) for x in common]
+        pairs = [(value, db[target]) for day, value in sorted(da.items())
+                 if (target := (date.fromisoformat(day) + timedelta(days=offset)).isoformat()) in db]
         r = None
         if len(pairs) >= 4:
             xs, ys = [x for x, _ in pairs], [y for _, y in pairs]
@@ -1427,6 +1727,10 @@ class SafeToolExecutor:
                 mx, my = statistics.fmean(xs), statistics.fmean(ys)
                 r = sum((x - mx) * (y - my) for x, y in pairs) / (len(pairs) * sx * sy)
         return {
+            "metric_a": a["data_type"], "metric_b": b["data_type"],
+            "period": {"start": left.isoformat(), "end": right.isoformat()},
+            "offset_days": offset,
+            "metric_a_observed_days": len(da), "metric_b_observed_days": len(db),
             "paired_days": len(pairs),
             "pearson_r": None if r is None else round(r, 4),
             "confidence": _confidence(len(pairs), (right - left).days + 1),

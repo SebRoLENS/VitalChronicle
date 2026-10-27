@@ -7,8 +7,10 @@ from typing import Any
 
 from . import agent_runtime as base_rt
 from . import agent_store as agent_store_mod
+from .agent_answer_facts import comparison_roles, metric_role, render_fact_answer
 from .agent_store import PERSONAL_CONTEXT_KEY_SPECS
 from .agent_tool_factory import EnhancedSafeToolExecutor
+from .ai_query_planner_core import resolve_week_followup
 from .i18n import _
 from .local_ai import AIAnalysisCancelled, LocalAIError
 
@@ -44,6 +46,56 @@ def _is_comprehensive_analysis(question: str) -> bool:
     if not text:
         return True
     return any(marker in text for marker in _COMPREHENSIVE_ANALYSIS_MARKERS)
+
+
+def _required_calculation_tools(question: str) -> set[str]:
+    """Small verification contract for calculations a compact model may skip."""
+    text = question.casefold()
+    if any(w in text for w in ("panoramica", "health overview", "health summary", "riepilogo dei miei dati di salute")) and not any(w in text for w in ("consigl", "should", "diagnos", "terapia", "treatment")):
+        return {"summarize_health_overview"}
+    factual_total = any(w in text for w in ("quanti", "quante", "totale", "how many", "total"))
+    if factual_total and not comparison_roles(question) and not any(w in text for w in ("consigl", "should", "raccomand", "recommend")):
+        if any(w in text for w in ("alimentazione", "proteine", "pasti", "protein", "meals", "dietary")):
+            return {"summarize_nutrition_logs"}
+        if any(w in text for w in ("allenament", "nuoto", "bicicletta", "bici", "cycling", "workout", "swimming")):
+            return {"analyze_workout"}
+    if (
+        comparison_roles(question) == {"weight"}
+        and not any(w in text for w in ("confront", "compar"))
+        and any(w in text for w in ("cambiat", "variaz", "change", "aument", "diminui", "perso", "gained", "lost", "media", "mean", "mediana"))
+        and not any(w in text for w in ("calori", "aliment", "diet", "allen", "bmi", "imc", "grasso", "body fat"))
+    ):
+        return {"get_metric_series"}
+    if not comparison_roles(question) and not any(word in text for word in ("hrv", "sonno", "sleep", "nott", "letto", "bedtime", "passi", "steps", "frequenza", "peso", "weight")):
+        return set()
+    sleep = any(word in text for word in ("sonno", "sleep", "nott", "letto", "bedtime"))
+    if any(word in text for word in ("readiness", "segnali di recupero", "recupero oggi", "recovery signals", "stanc", "tired")):
+        return {"calculate_readiness"}
+    if any(word in text for word in ("correl", "associa")):
+        return {"analyze_sleep_metric_association"} if sleep else {"calculate_correlations"}
+    if any(word in text for word in ("spike", "picch")):
+        return {"analyze_sleep_metric_association"} if sleep else {"detect_outliers"}
+    if sleep and any(word in text for word in ("profondo", "rem", "leggero", "stages", "deep")):
+        return {"get_sleep_stage_series"}
+    if sleep and any(word in text for word in ("weekend", "ferial", "regularity", "regolarit")):
+        return {"calculate_sleep_regularity"}
+    if any(word in text for word in ("confront", "compar", "rispetto", "versus", " vs ")) and any(
+        word in text for word in ("period", "settim", "week", "month", "mese", "giorn", "day", "202")
+    ):
+        return {"compare_periods"}
+    if sleep and any(word in text for word in ("quanto", "a che ora", "how long", "how much", "bedtime")) and not any(w in text for w in ("devo", "dovrei", "should", "risvegl", "awake", "sveglio")):
+        return {"get_sleep_sessions"}
+    if comparison_roles(question) == {"sleep"} and any(
+        w in text for w in ("come sta andando", "come va", "andamento", "how is", "sleep lately", "sleep trend")
+    ) and not any(w in text for w in ("consigl", "should", "migliorare", "improve")):
+        return {"get_metric_series"}
+    if (
+        len(comparison_roles(question)) == 1 and "sleep" not in comparison_roles(question)
+        and any(w in text for w in ("media", "mediana", "minimo", "massimo", "mean", "median", "minimum", "maximum", "totale", "total", "quanti passi", "how many steps"))
+        and not any(w in text for w in ("confront", "compar", "rispetto", "versus", "consigl", "should"))
+    ):
+        return {"get_metric_series"}
+    return set()
 
 
 _TOPIC_MARKERS = {
@@ -133,11 +185,10 @@ Personalisation:
 _FACTORY_POLICY = """
 
 Tool Factory:
-- Detect reusable composed/baseline/lag/recovery gaps. Reuse an exact tool or search first; skip one-off arithmetic.
-- Never substitute metrics or use a function name as a metric. Repair invalid pipelines from the returned DSL, within the runtime budget.
-- Obey a factory-only gate and execute a created/reused tool before answering.
-- Event episodes end at the last consecutive trigger; zero triggers cannot estimate frequency/recovery. Small samples support preliminary findings only.
-- Report factory status exactly. Sleep stages are hours; total sleep is deep+REM+light.
+- Reuse exact tools; search before creating reusable transformations. Never substitute metrics or use tool names as metrics.
+- Repair from returned DSL within budget; obey factory gates and execute tools before answering.
+- Episodes end at the last consecutive trigger; zero triggers cannot estimate recovery. Small samples are preliminary.
+- Mention factory status only if asked or it limits the answer. Sleep stages are hours; total sleep=deep+REM+light.
 """
 
 
@@ -214,7 +265,8 @@ def _persistence_claim(answer: str) -> str | None:
     text = answer.casefold()
     if re.search(r"(?:non|not|no)\b[^.\n]{0,40}(?:creat|salvat|attiv|registrat|impost)", text):
         return None
-    created = r"(?:creat|salvat|attiv|registrat|impost)"
+    # Completed actions, not offers such as "posso impostare un promemoria".
+    created = r"(?:creat[oaie]\b|salvat[oaie]\b|attivat[oaie]\b|registrat[oaie]\b|impostat[oaie]\b|created\b|saved\b|activated\b|registered\b|set up\b)"
     monitor = r"(?:monitor\w*|promemoria|check-in|reminder)"
     tool = r"(?:strumento|tool)"
     if re.search(fr"{monitor}[^.\n]{{0,120}}{created}|{created}[^.\n]{{0,120}}{monitor}", text):
@@ -248,9 +300,10 @@ def _factory_hint(question: str) -> dict[str, Any]:
             "torni",
             "torna",
             "ritorni",
-            "recuper",
+            "quanto tempo",
+            "quanti giorni",
+            "quanto impieg",
             "return to",
-            "recover",
             "recovery time",
         ),
         "threshold/frequency analysis": (
@@ -453,6 +506,15 @@ def _only_named_tools(schemas: list[dict[str, Any]], names: set[str]) -> list[di
 
 def _factory_capability(hint: dict[str, Any]) -> str:
     signals = {str(item) for item in hint.get("signals", [])}
+    if (
+        {"relative personal-baseline threshold", "threshold/frequency analysis"} <= signals
+        and "time-to-recovery/return-to-baseline" not in signals
+    ):
+        # This primitive already supports exact day offsets. A lag does not
+        # require a new DSL wrapper or a separate composed capability.
+        return "analysis.composed.personal_baseline.threshold_frequency" + (
+            ".response_threshold" if hint.get("requires_response_threshold") else ""
+        )
     parts = ["analysis", "composed"]
     if "relative personal-baseline threshold" in signals:
         parts.append("personal_baseline")
@@ -473,6 +535,26 @@ class AgentRuntime(base_rt.AgentRuntime):
         self.tools = EnhancedSafeToolExecutor(self.health_store, self.agent_store)
 
     def _verified_persistence_answer(self, answer: str) -> str:
+        facts = self._fact_answer()
+        if facts:
+            return facts
+        if not _persistence_claim(answer):
+            return answer
+        correction = self._persistence_correction(answer)
+        # Correct the persistence claim without deleting the actual analysis.
+        lines = re.split(r"(?<=[.!?])\s+|\n", answer)
+        kept = [line for line in lines if not _persistence_claim(line)]
+        return "\n".join([*kept, correction]).strip()
+
+    def _fact_answer(self) -> str | None:
+        return render_fact_answer(
+            str(getattr(self, "_analysis_request", "") or ""),
+            list(getattr(self, "_analysis_fact_results", []) or []),
+            set(getattr(self, "_analysis_fact_tools", set()) or set()),
+            base_rt.current_language(),
+        )
+
+    def _persistence_correction(self, answer: str) -> str:
         claim = _persistence_claim(answer)
         if not claim:
             return answer
@@ -559,6 +641,7 @@ class AgentRuntime(base_rt.AgentRuntime):
                     "Do not substitute metrics or expose scratchpad. State material limits. A missing "
                     "trigger cannot estimate frequency/recovery. Use relevant current personal context, "
                     "label reports subjective, and mention factory failure only when it limits the result."
+                    " Be concise; copy dates and values exactly from tool evidence. Finish all sentences/tables."
                 ),
             },
             {
@@ -584,9 +667,22 @@ class AgentRuntime(base_rt.AgentRuntime):
             tools=[],
             num_ctx=num_ctx,
             num_predict=num_predict,
-            think=think,
+            think=False,
             cancel_callback=cancel_callback,
         )
+        if message.get("_done_reason") in {"length", "max_tokens"}:
+            message = self._chat_once(
+                model=model,
+                messages=[*final_messages, {"role": "system", "content": (
+                    "The response exceeded its output budget. Give a complete answer in at most "
+                    "150 words, without a table; use only the calculated evidence values."
+                )}],
+                tools=[],
+                num_ctx=num_ctx,
+                num_predict=num_predict,
+                think=False,
+                cancel_callback=cancel_callback,
+            )
         answer = str(message.get("content") or "").strip()
         if not answer:
             answer = _(
@@ -626,6 +722,23 @@ class AgentRuntime(base_rt.AgentRuntime):
         request = question.strip() or _(
             "Analyse my complete local health history and identify the most useful personal patterns."
         )
+        resolved_request = resolve_week_followup(request, safe_history)
+        self.tools._resolved_followup_window = None
+        if resolved_request != request:
+            days = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", resolved_request)
+            if len(days) == 2:
+                self.tools._resolved_followup_window = tuple(days)
+            # Topic and dates are now explicit; avoid re-anchoring to the old week.
+            safe_history = []
+        request = resolved_request
+        self._analysis_request = request
+        self._analysis_fact_results = []
+        self._analysis_fact_tools = _required_calculation_tools(request)
+        self.tools._comparison_windows = None
+        self.tools._request_context = "\n".join([
+            *[str(h.get("content") or "") for h in safe_history if h.get("role") == "user"],
+            request,
+        ])
         self._last_factory_outcome = {
             "status": "not_needed",
             "persisted": False,
@@ -725,6 +838,20 @@ class AgentRuntime(base_rt.AgentRuntime):
                 "status": "pending_confirmation",
             }
         initial["tool_factory_decision_hint"] = _factory_hint(request)
+        if re.search(r"\b(?:oggi|stanotte|today)\b", request, flags=re.IGNORECASE):
+            initial["answer_focus"] = (
+                f"Today is {initial.get('local_date')}. Answer today's measurements; "
+                "earlier dates are baseline/comparison context, not a replacement requested interval."
+            )
+            if any(word in request.casefold() for word in ("settimana precedente", "previous week")):
+                from datetime import date, timedelta
+                focus = date.fromisoformat(str(initial["local_date"]))
+                windows = {
+                    "focus": (focus.isoformat(), focus.isoformat()),
+                    "previous_week": ((focus - timedelta(days=7)).isoformat(), (focus - timedelta(days=1)).isoformat()),
+                }
+                initial["comparison_windows"] = windows
+                self.tools._comparison_windows = windows
         active_monitors = self.agent_store.list_monitoring_rules()
         if active_monitors:
             initial["active_monitoring_rules"] = active_monitors[:8]
@@ -744,7 +871,9 @@ class AgentRuntime(base_rt.AgentRuntime):
         ]
         online_model = base_rt.is_online_model(model)
         all_schemas = self.tools.tool_schemas()
-        schemas = base_rt.online_tool_subset(all_schemas, request)
+        schemas = base_rt.online_tool_subset(
+            all_schemas, request, required_names=_required_calculation_tools(request)
+        )
         tool_function_names = {
             str(item.get("function", {}).get("name") or "")
             for item in all_schemas
@@ -783,8 +912,21 @@ class AgentRuntime(base_rt.AgentRuntime):
         event(_("Personal agent started · {count} tools available", count=len(schemas)))
         hint = initial["tool_factory_decision_hint"]
         evidence_ledger: list[dict[str, Any]] = []
+        required_calculations = _required_calculation_tools(request)
+        required_comparison_roles = comparison_roles(request) if "compare_periods" in required_calculations else set()
+        compared_roles: set[str] = set()
+        calculated_tools: set[str] = set()
+        calculation_checks = 0
+        pending_calculation_check = False
+        call_counts: dict[str, int] = {}
+        deferred_tools: set[str] = set()
         factory_candidate = bool(hint.get("consider_reusable_tool"))
         factory_capability = _factory_capability(hint)
+        if factory_candidate:
+            # A preliminary routine read must not stand in for a composed analysis.
+            self._analysis_fact_tools = set()
+        if factory_candidate and factory_capability == "analysis.composed.personal_baseline.threshold_frequency":
+            self._analysis_fact_tools = {"analyze_metric_threshold_responses"}
         if factory_candidate:
             self._last_factory_outcome.update(
                 {"status": "pending", "capability": factory_capability}
@@ -866,6 +1008,16 @@ class AgentRuntime(base_rt.AgentRuntime):
                 )
             )
             active_schemas = _without_factory_creation(schemas) if factory_disabled else schemas
+            if (
+                required_calculations and not factory_candidate
+                and not any(w in request.casefold() for w in ("monitor", "promemoria", "tool", "strumento", "consigl", "raccomand", "should"))
+            ):
+                active_schemas = _only_named_tools(active_schemas, required_calculations | {"get_available_metrics"})
+            if deferred_tools and not factory_candidate:
+                active_schemas = [s for s in active_schemas if s.get("function", {}).get("name") not in deferred_tools]
+                deferred_tools.clear()
+            if pending_calculation_check:
+                active_schemas = _only_named_tools(active_schemas, required_calculations)
             self._telemetry_phase = f"agent step {analysis_steps + 1}"
             if factory_tool_name and not factory_tool_executed:
                 active_schemas = _only_named_tools(active_schemas, {factory_tool_name})
@@ -1072,6 +1224,34 @@ class AgentRuntime(base_rt.AgentRuntime):
                         event=event,
                         answer_callback=answer_callback,
                     )
+                if (
+                    required_calculations
+                    and not factory_candidate
+                    and (not (required_calculations & calculated_tools) or not required_comparison_roles <= compared_roles)
+                    and calculation_checks < 2
+                    and required_calculations & tool_function_names
+                ):
+                    calculation_checks += 1
+                    pending_calculation_check = True
+                    messages.append({"role": "system", "content": (
+                        "CALCULATION CHECK: the requested calculation has not been executed. "
+                        "The prepared snapshot window is context, not the user's exact comparison. "
+                        "Call " + ", ".join(sorted(required_calculations))
+                        + " for the user's actual dates before answering. Do not invent a mean, "
+                        "coefficient or conversion from sampled details. Dataset names are valid metric identifiers. "
+                        + ("Still required: " + ", ".join(sorted(required_comparison_roles - compared_roles)) if required_comparison_roles else "")
+                    )})
+                    event(_("Verifying the requested calculation before finalising…"))
+                    continue
+                if message.get("_done_reason") in {"length", "max_tokens"}:
+                    # A short tool turn may consume its budget in reasoning alone,
+                    # or leave a partial answer. Use a dedicated final pass in both cases.
+                    return self._final_answer(
+                        model=model, messages=messages, max_tokens=max_tokens,
+                        physical_limit=physical_limit, think=False,
+                        cancel_callback=cancel_callback, event=event,
+                        answer_callback=answer_callback,
+                    )
                 if final_answer:
                     if personalization_required:
                         messages.append({"role": "assistant", "content": final_answer})
@@ -1182,9 +1362,17 @@ class AgentRuntime(base_rt.AgentRuntime):
                             )
                         )
 
-                cache_key = base_rt._json_text({"tool": name, "arguments": args}, 8000)
+                # Cache identity must never use a lossy context serializer.
+                cache_key = json.dumps({"tool": name, "arguments": args}, sort_keys=True,
+                                       ensure_ascii=False, separators=(",", ":"), default=str)
+                call_counts[cache_key] = call_counts.get(cache_key, 0) + 1
                 if not blocked_for_factory and cache_key in tool_result_cache:
                     result = tool_result_cache[cache_key]
+                    if not factory_candidate:
+                        if required_calculations and not (required_calculations & calculated_tools):
+                            pending_calculation_check = True
+                        if call_counts[cache_key] >= 2 and name not in required_calculations and name.startswith(("get_", "calculate_", "analyze_", "detect_", "compare_")):
+                            deferred_tools.add(name)
                     event(
                         _(
                             "Repeated identical tool call reused from this analysis instead of consuming another query."
@@ -1207,6 +1395,49 @@ class AgentRuntime(base_rt.AgentRuntime):
                     else:
                         productive_tool_call = True
                         tool_result_cache[cache_key] = result
+                        if not (isinstance(result, dict) and result.get("error")):
+                            calculated_tools.add(name)
+                            if isinstance(result, dict):
+                                self._analysis_fact_results.append((name, result))
+                            if name == "compare_periods":
+                                compared_roles.add(metric_role(result))
+                                # A single validated pair of periods applies to
+                                # every metric explicitly requested in this same
+                                # comparison. Complete that small set in Python
+                                # instead of making the model repeat the recipe
+                                # or silently omit a metric from its answer.
+                                metric_defaults = {
+                                    "hrv": "hrv", "sleep": "sleep", "rhr": "daily-resting-heart-rate",
+                                    "weight": "weight", "steps": "steps",
+                                    "temperature": "daily-sleep-temperature-derivations",
+                                }
+                                for role in sorted(required_comparison_roles - compared_roles):
+                                    if role not in metric_defaults:
+                                        continue
+                                    extra_args = {
+                                        "metric": metric_defaults[role],
+                                        "start_a": result["period_a"]["start"],
+                                        "end_a": result["period_a"]["end"],
+                                        "start_b": result["period_b"]["start"],
+                                        "end_b": result["period_b"]["end"],
+                                    }
+                                    self._emit_agent_trace("Runtime", name, base_rt._json_text(extra_args), kind="tool_call")
+                                    try:
+                                        extra_result = self.tools.execute(name, extra_args, thread_id=thread_id)
+                                    except Exception as exc:  # noqa: BLE001 - expose missing evidence, never invent it.
+                                        extra_result = {"error": str(exc), "tool": name}
+                                    evidence_ledger.append(_evidence_entry(name, extra_args, extra_result))
+                                    self._emit_agent_trace(name, "Agent", base_rt._json_text(extra_result), kind="tool_result")
+                                    if not extra_result.get("error"):
+                                        self._analysis_fact_results.append((name, extra_result))
+                                        compared_roles.add(metric_role(extra_result))
+                            if name == "analyze_metric_threshold_responses" and name in self._analysis_fact_tools:
+                                factory_tool_executed = True
+                                self._last_factory_outcome.update({
+                                    "status": "reused", "persisted": True, "executed": True, "tool_name": name,
+                                })
+                            if name in required_calculations:
+                                pending_calculation_check = False
 
                 if name == "create_learned_tool":
                     status = str(result.get("status") or "")
@@ -1384,7 +1615,14 @@ class AgentRuntime(base_rt.AgentRuntime):
                     event(_("Persisted learned tool executed for this request."))
 
                 tool_text = base_rt._json_text(result)
-                evidence_ledger.append(_evidence_entry(name, args, result))
+                entry = _evidence_entry(name, args, result)
+                if call_counts[cache_key] > 1:
+                    entry["already_completed"] = True
+                    entry["repeat_count"] = call_counts[cache_key] - 1
+                    entry["next_action"] = "Do not repeat these arguments. Request narrower dates/different fields, use an aggregate tool, or answer from the result."
+                evidence_ledger[:] = [e for e in evidence_ledger
+                                      if not (e.get("tool") == name and e.get("arguments") == args)]
+                evidence_ledger.append(entry)
                 tool_message: dict[str, Any] = {
                     "role": "tool",
                     "content": tool_text,
@@ -1402,6 +1640,13 @@ class AgentRuntime(base_rt.AgentRuntime):
                 event(
                     _("Repairing the learned-tool definition without consuming an analysis step…")
                 )
+
+            facts = self._fact_answer()
+            if facts and (not factory_candidate or factory_tool_executed):
+                if answer_callback:
+                    answer_callback(facts)
+                event(_("Agent finished the analysis."))
+                return facts
 
             if (
                 factory_candidate

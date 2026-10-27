@@ -7,7 +7,7 @@ from itertools import pairwise
 from pathlib import Path
 
 import pyqtgraph as pg
-from PySide6.QtCore import QDate, QSettings, Qt, QTimer
+from PySide6.QtCore import QDate, QSettings, Qt, QThreadPool, QTimer, Slot
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIntValidator
 from PySide6.QtWidgets import (
     QApplication,
@@ -49,8 +49,6 @@ from .ai_model_catalog import model_description
 from .ai_setup import AISetupDialog
 from .analysis import (
     available_metrics,
-    build_daily_progress_snapshot,
-    build_health_snapshot,
     categorical_daily_points,
     display_points,
     format_value,
@@ -114,6 +112,7 @@ from .workers import (
     AIStatusThread,
     AppUpdateThread,
     AuthThread,
+    OverviewLoadTask,
     SyncThread,
     UpdateCheckThread,
 )
@@ -152,6 +151,10 @@ class MainWindow(QMainWindow):
         self.current_type: str | None = None
         self.current_records: list[dict] = []
         self.current_snapshot: dict = {"metrics": [], "correlations": []}
+        self._overview_task: OverviewLoadTask | None = None
+        self._overview_pending = None
+        self._overview_request_id = 0
+        self._overview_closed = False
         self.conversation_store = ConversationStore(
             self.store.path.with_name("ai_conversations.json") if screenshot_mode else None
         )
@@ -1675,15 +1678,51 @@ class MainWindow(QMainWindow):
         self._overview_timer.start(180)
 
     def refresh_overview(self) -> None:
+        if self._overview_closed:
+            return
         start, end = self._date_bounds()
-        self.current_snapshot = build_health_snapshot(self.store, start, end)
         reference_day = self._qdate_to_date(self.end_date.date())
-        progress_snapshot = build_daily_progress_snapshot(
-            self.store,
-            reference_day,
-            heart_day=datetime.now().astimezone().date(),
-        )
-        self.overview.refresh(self.current_snapshot, progress_snapshot)
+        self._overview_request_id += 1
+        self._overview_pending = (self._overview_request_id, start, end, reference_day, datetime.now().astimezone().date())
+        if self._overview_task is not None:
+            self._overview_task.cancelled.set()
+            return
+        self._start_overview_task()
+
+    def _start_overview_task(self) -> None:
+        if self._overview_closed or self._overview_pending is None:
+            return
+        args, self._overview_pending = self._overview_pending, None
+        task = OverviewLoadTask(self.store, *args)
+        self._overview_task = task
+        task.signals.completed.connect(self._overview_ready)
+        task.signals.failed.connect(self._overview_failed)
+        task.signals.finished.connect(self._overview_finished)
+        QThreadPool.globalInstance().start(task)
+
+    @Slot(int, object, object)
+    def _overview_ready(self, request_id: int, snapshot: dict, progress: dict) -> None:
+        if self._overview_closed or request_id != self._overview_request_id:
+            return
+        self.current_snapshot = snapshot
+        self.overview.refresh(snapshot, progress)
+
+    @Slot(int, str)
+    def _overview_failed(self, request_id: int, message: str) -> None:
+        if not self._overview_closed and request_id == self._overview_request_id:
+            self.statusBar().showMessage(_("Overview update failed: {message}", message=message), 15000)
+
+    @Slot(int)
+    def _overview_finished(self, _request_id: int) -> None:
+        self._overview_task = None
+        self._start_overview_task()
+
+    def closeEvent(self, event) -> None:
+        self._overview_closed = True
+        self._overview_pending = None
+        if self._overview_task is not None:
+            self._overview_task.cancelled.set()
+        super().closeEvent(event)
 
     def _update_connection_status(self) -> None:
         connected = self.credentials is not None

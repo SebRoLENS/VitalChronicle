@@ -819,5 +819,9 @@
   "☕ Support development": "☕ Support development",
   "✓ A valid OAuth client is already stored. Select a JSON only to replace it.": "✓ A valid OAuth client is already stored. Select a JSON only to replace it.",
   "✓ Valid OAuth client. The redirect URI is correct.": "✓ Valid OAuth client. The redirect URI is correct.",
-  "✕ This JSON cannot be used: {error}": "✕ This JSON cannot be used: {error}"
+  "✕ This JSON cannot be used: {error}": "✕ This JSON cannot be used: {error}",
+  "Overview update failed: {message}": "Overview update failed: {message}",
+  "Usual range: {lower}–{upper}. Descriptive margin ±{margin}, based on the variability of {days} previous observed days (one sample standard deviation, with a display-resolution floor). This is not certified sensor uncertainty or a clinical range.": "Usual range: {lower}–{upper}. Descriptive margin ±{margin}, based on the variability of {days} previous observed days (one sample standard deviation, with a display-resolution floor). This is not certified sensor uncertainty or a clinical range.",
+  "At least three previous observed days are required to estimate a personal variability range. Sensor uncertainty is not supplied by these data.": "At least three previous observed days are required to estimate a personal variability range. Sensor uncertainty is not supplied by these data.",
+  "Measured difference from the average: {delta:+.2f}%.": "Measured difference from the average: {delta:+.2f}%."
 }

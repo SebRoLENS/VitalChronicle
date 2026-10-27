@@ -36,9 +36,10 @@ CALIBRATION_VERSION = 1
 AGENT_SYSTEM_PROMPT = """You are VitalChronicle's read-only personal health agent.
 Use deterministic tools for calculations and check coverage; missing values are unavailable, not zero. Preserve units and date semantics (sleep belongs to wake/session-end date; today may be partial).
 Reuse exact tools. Learned tools are declarative only: no code, shell, files, network, browser, or health-data writes.
-Persistent check-ins are monitoring rules, not learned tools; they run only while VitalChronicle is open.
-Keep measurements, user reports, context, and explanations distinct; correlation is not causation. State material uncertainty. Never diagnose or change treatment.
-Use the fewest useful calls and answer result-first without exposing scratchpad reasoning.
+Monitoring rules run only with VitalChronicle open.
+Keep measurements, user reports, context, and explanations distinct; correlation is not causation. State material uncertainty. Never diagnose, establish medical safety, or change treatment.
+Use calculated paired results for correlation strength. Respect main_sleep labels and local timestamps: short additional sessions are not whole nights. Omitted detail is unknown; retrieve it if needed.
+Use few calls; answer result-first without scratchpad reasoning.
 """
 
 
@@ -135,7 +136,7 @@ def online_tool_subset(
             {"create_monitoring_rule", "record_monitoring_observation", "list_monitoring_rules"}
         )
     domain_terms = {
-        "sleep.": ("sleep", "sonno", "notte", "dorm", "rem", "profondo", "risvegl"),
+        "sleep.": ("sleep", "sonno", "nott", "letto", "bedtime", "dorm", "rem", "profondo", "risvegl"),
         "training.": (
             "training",
             "allen",
@@ -178,6 +179,36 @@ def online_tool_subset(
         "coaching.": ("recommend", "coaching"),
     }
 
+    # Reserve slots for the actual question before generic discovery/agent controls.
+    # With ten slots, the old nine "always" tools crowded out correlations,
+    # comparisons and sleep stages, leaving the model to guess the calculation.
+    targeted = set(required_names or ())
+    if any(term in text for term in ("correl", "associa", "relaz", "relationship")):
+        targeted.add("calculate_correlations")
+    if any(term in text for term in ("spike", "picch", "outlier", "anomal")):
+        targeted.add("detect_outliers")
+    if "sleep." in selected_domains and any(
+        term in text for term in ("correl", "associa", "spike", "picch", "relazione", "relationship")
+    ):
+        targeted.add("analyze_sleep_metric_association")
+    if any(term in text for term in ("confront", "compar")):
+        targeted.add("compare_periods")
+    if "sleep." in selected_domains:
+        targeted.add("get_sleep_sessions")
+        if any(term in text for term in ("orari", "letto", "bedtime", "regolar", "weekend", "ferial")):
+            targeted.add("calculate_sleep_regularity")
+        if any(term in text for term in ("profond", "rem", "fasi", "stages", "deep", "legger")):
+            targeted.add("get_sleep_stage_series")
+    if any(term in text for term in ("mancant", "missing", "copertura", "coverage")):
+        targeted.add("get_missing_data")
+    if any(term in text for term in ("allen", "workout", "nuot", "swim", "bici", "cycling", "bike")):
+        targeted.add("analyze_workout")
+    if any(term in text for term in ("aliment", "nutrition", "protein", "mangiat", "diet", "meal", "assunt", "ingerit", "pasti", "intake")):
+        targeted.add("summarize_nutrition_logs")
+    if any(term in text for term in ("readiness", "segnali di recupero", "recovery signals", "recupero oggi", "stanc", "tired")):
+        targeted.add("calculate_readiness")
+
+    priority: list[dict[str, Any]] = []
     required: list[dict[str, Any]] = []
     relevant_items: list[dict[str, Any]] = []
     deferred: list[dict[str, Any]] = []
@@ -192,13 +223,19 @@ def online_tool_subset(
             any(term in searchable for term in schema_terms.get(domain, ()))
             for domain in selected_domains
         )
-        if name in always:
+        if name in targeted:
+            priority.append(schema)
+        elif name in always:
             required.append(schema)
         elif relevant:
             relevant_items.append(schema)
         else:
             deferred.append(schema)
-    return (required + relevant_items + deferred)[: max(1, int(maximum))]
+    # Explicit runtime requirements (e.g. an exact learned tool) come first.
+    priority.sort(key=lambda item: item["function"]["name"] not in (required_names or set()))
+    controls = {"search_tool_registry", "create_learned_tool", "ask_user_feedback"}
+    required.sort(key=lambda item: item["function"]["name"] not in controls)
+    return (priority + required + relevant_items + deferred)[: max(1, int(maximum))]
 
 
 def _tool_calling_unavailable_error(detail: str) -> bool:
@@ -326,7 +363,9 @@ class AgentRuntime:
             "archive_bounds": (
                 {"start": bounds[0].isoformat(), "end": bounds[1].isoformat()} if bounds else None
             ),
+            "available_data_types": self.health_store.counts(),
             "conversation_scope": snapshot.get("analysis_scope"),
+            "prepared_interval_rule": "The prepared interval may include context; answer the user's requested dates, not an expanded retrieval window.",
             "requested_interval_coverage": snapshot.get("requested_interval_coverage"),
             "personal_model": self.agent_store.user_model()[:20],
             "recent_self_reports": self.agent_store.recent_self_reports(days=30, limit=20),
@@ -369,6 +408,8 @@ class AgentRuntime:
                     provider=provider_display_name(model),
                 )
             )
+        message = dict(message)
+        message["_done_reason"] = choices[0].get("finish_reason") if choices else None
         usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
         telemetry = {
             "prompt_eval_count": usage.get("prompt_tokens"),
@@ -416,31 +457,43 @@ class AgentRuntime:
             )
         if cancel_callback and cancel_callback():
             raise AIAnalysisCancelled(_("Analysis stopped."))
-        try:
-            response = requests.post(
-                f"{DEFAULT_OLLAMA_URL}/api/chat",
-                json={
-                    "model": model,
-                    "stream": False,
-                    "think": think,
-                    "messages": messages,
-                    "tools": tools,
-                    "options": {
-                        "temperature": 0.15,
-                        "num_ctx": num_ctx,
-                        "num_predict": num_predict,
-                    },
-                    "keep_alive": "5m",
-                },
-                timeout=(10, 900),
-            )
-        except requests.RequestException as exc:
-            raise LocalAIError(_("Local agent request failed: {error}", error=exc)) from exc
-        if response.status_code >= 400:
+        request_payload = {
+            "model": model, "stream": False, "think": think,
+            "messages": messages, "tools": tools,
+            "options": {"temperature": 0.15, "num_ctx": num_ctx, "num_predict": num_predict},
+            "keep_alive": "5m",
+        }
+        for attempt in range(2):
+            if cancel_callback and cancel_callback():
+                raise AIAnalysisCancelled(_("Analysis stopped."))
+            try:
+                response = requests.post(
+                    f"{DEFAULT_OLLAMA_URL}/api/chat", json=request_payload, timeout=(10, 900)
+                )
+            except requests.RequestException as exc:
+                raise LocalAIError(_("Local agent request failed: {error}", error=exc)) from exc
+            if response.status_code < 400:
+                break
             try:
                 detail = str(response.json().get("error") or response.reason)
             except (TypeError, ValueError):
                 detail = str(response.reason)
+            malformed_call = any(marker in detail.casefold() for marker in (
+                "xml syntax error", "error parsing tool", "failed to parse tool", "invalid tool call",
+            ))
+            if tools and attempt == 0 and malformed_call:
+                # Ollama can reject a locally generated tool call before it can
+                # expose a message/done_reason. Retry once, without reasoning and
+                # with enough room to close the structured arguments.
+                request_payload["messages"] = [*messages, {"role": "system", "content": (
+                    "The previous tool call was malformed. Return one complete native tool call "
+                    "with valid arguments matching its schema. Close every parameter and object. "
+                    "Prefer an existing calculation tool; keep the call short."
+                )}]
+                request_payload["think"] = "low" if isinstance(think, str) else False
+                num_predict = min(max(1024, num_predict * 2), max(256, num_ctx // 4))
+                request_payload["options"]["num_predict"] = num_predict
+                continue
             raise LocalAIError(detail or f"HTTP {response.status_code}")
         try:
             payload = response.json()
@@ -449,6 +502,8 @@ class AgentRuntime:
         message = payload.get("message")
         if not isinstance(message, dict):
             raise LocalAIError(_("Ollama returned no agent message."))
+        message = dict(message)
+        message["_done_reason"] = payload.get("done_reason")
         self._emit_agent_usage(payload, num_ctx=num_ctx, num_predict=num_predict)
         assistant_content = str(message.get("content") or "").strip()
         if assistant_content:

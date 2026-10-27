@@ -819,5 +819,9 @@
   "☕ Support development": "☕ Sostieni lo sviluppo",
   "✓ A valid OAuth client is already stored. Select a JSON only to replace it.": "✓ È già memorizzato un client OAuth valido. Seleziona un JSON solo per sostituirlo.",
   "✓ Valid OAuth client. The redirect URI is correct.": "✓ Client OAuth valido. L'URI di reindirizzamento è corretto.",
-  "✕ This JSON cannot be used: {error}": "✕ Questo JSON non può essere utilizzato: {error}"
+  "✕ This JSON cannot be used: {error}": "✕ Questo JSON non può essere utilizzato: {error}",
+  "Overview update failed: {message}": "Aggiornamento panoramica non riuscito: {message}",
+  "Usual range: {lower}–{upper}. Descriptive margin ±{margin}, based on the variability of {days} previous observed days (one sample standard deviation, with a display-resolution floor). This is not certified sensor uncertainty or a clinical range.": "Fascia abituale: {lower}–{upper}. Margine descrittivo ±{margin}, basato sulla variabilità di {days} giorni precedenti osservati (una deviazione standard campionaria, con un minimo legato alla risoluzione di visualizzazione). Non è l’incertezza certificata del sensore né una fascia clinica.",
+  "At least three previous observed days are required to estimate a personal variability range. Sensor uncertainty is not supplied by these data.": "Servono almeno tre giorni precedenti osservati per stimare una fascia di variabilità personale. Questi dati non forniscono l’incertezza del sensore.",
+  "Measured difference from the average: {delta:+.2f}%.": "Scostamento misurato dalla media: {delta:+.2f}%."
 }

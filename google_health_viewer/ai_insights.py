@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import statistics
 from collections import defaultdict
+from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from itertools import pairwise
 from typing import Any
@@ -24,9 +25,11 @@ from .analysis import (
     duration_hours,
     raw_points,
     sleep_stage_points,
+    summarize_series,
     visual_profile,
 )
 from .constants import DATA_TYPE_BY_KEY
+from .health_calendar import record_local_day
 from .utils import flatten_dict, parse_timestamp
 
 DAILY_EXPECTED_TYPES = {
@@ -87,7 +90,7 @@ def _daily_values(
             value = duration_hours(record)
             if timestamp is not None and value is not None:
                 points.append((timestamp, value))
-        aggregation = "mean"
+        aggregation = "sum"
     else:
         points = display_points(raw_points(records, metric), profile)
         aggregation = "sum" if profile.aggregation == "sum" else "mean"
@@ -95,7 +98,7 @@ def _daily_values(
     grouped: dict[date, list[float]] = defaultdict(list)
     for timestamp, value in points:
         if math.isfinite(value):
-            grouped[datetime.fromtimestamp(timestamp).date()].append(float(value))  # noqa: DTZ006
+            grouped[datetime.fromtimestamp(timestamp).date()].append(float(value))
     daily = {
         day: sum(values) if aggregation == "sum" else statistics.fmean(values)
         for day, values in grouped.items()
@@ -398,9 +401,12 @@ def _interquartile_range(values: list[float]) -> float:
     return statistics.median(upper) - statistics.median(lower)
 
 
-def _record_day(record: dict[str, Any]) -> date | None:
+def _record_day(record: dict[str, Any], data_type: str | None = None) -> date | None:
+    if data_type:
+        day = record_local_day(record, data_type)
+        return date.fromisoformat(day) if day else None
     timestamp = parse_timestamp(record.get("end_time") or record.get("start_time"))
-    return datetime.fromtimestamp(timestamp).date() if timestamp is not None else None  # noqa: DTZ006
+    return datetime.fromtimestamp(timestamp).date() if timestamp is not None else None
 
 
 def _exercise_type(record: dict[str, Any]) -> str:
@@ -431,13 +437,14 @@ def _exercise_period(records: list[dict[str, Any]], start: date, end: date) -> d
 def _sleep_stage_period(records: list[dict[str, Any]], start: date, end: date) -> dict[str, Any]:
     totals: dict[str, float] = defaultdict(float)
     sessions = 0
-    for timestamp, stages in sleep_stage_points(records):
-        day = datetime.fromtimestamp(timestamp).date()  # noqa: DTZ006
-        if not start <= day <= end:
+    for record in records:
+        day = _record_day(record, "sleep")
+        if day is None or not start <= day <= end:
             continue
-        sessions += 1
-        for stage, hours in stages.items():
-            totals[stage] += hours
+        for _timestamp, stages in sleep_stage_points([record]):
+            sessions += 1
+            for stage, hours in stages.items():
+                totals[stage] += hours
     total = sum(totals.values())
     return {
         "sessions": sessions,
@@ -479,7 +486,7 @@ def _structured_period_comparison(
         recent_start = end_day - timedelta(days=6)
         totals: dict[str, float] = defaultdict(float)
         for timestamp, categories in points:
-            day = datetime.fromtimestamp(timestamp).date()  # noqa: DTZ006
+            day = datetime.fromtimestamp(timestamp).date()
             if recent_start <= day <= end_day:
                 for category, value in categories.items():
                     totals[category] += value
@@ -908,7 +915,7 @@ def build_ai_ready_snapshot(
     except ValueError:
         start_day = local_now.date()
         exclusive_end = start_day + timedelta(days=1)
-    end_day = min(exclusive_end - timedelta(days=1), local_now.date())
+    end_day = exclusive_end - timedelta(days=1)
     snapshot = build_health_snapshot(store, start, end, now=local_now, record_limit=record_limit)
     daily_by_type: dict[str, dict[date, float]] = {}
     observed_dates_by_type: dict[str, set[date]] = {}
@@ -917,7 +924,7 @@ def build_ai_ready_snapshot(
     for data_type, metric in metric_by_type.items():
         records = store.list_records(data_type, start, end, limit=record_limit, newest=True)
         observed_dates_by_type[data_type] = {
-            day for record in records if (day := _record_day(record)) is not None
+            day for record in records if (day := _record_day(record, data_type)) is not None
         }
         if data_type in REFERENCE_CONFIGURATION_TYPES:
             metric["data_role"] = "reference_configuration"
@@ -931,6 +938,15 @@ def build_ai_ready_snapshot(
         daily_result = _daily_values(records, data_type)
         if daily_result:
             daily, _unit, _aggregation = daily_result
+            if data_type == "sleep":
+                # Match the agent's daily-total semantics. The dashboard's raw
+                # per-session summary must not become an AI nightly baseline.
+                summary = summarize_series([
+                    (datetime.combine(day, datetime.min.time()).astimezone().timestamp(), value)
+                    for day, value in sorted(daily.items())
+                ])
+                metric["summary"] = asdict(summary) if summary else None
+                metric["value_semantics"] = "Daily total of recorded sleep sessions by local wake-up date; not main-night duration."
             daily_by_type[data_type] = daily
             metric["derived_evidence"] = _metric_features(
                 daily, data_type, start_day, end_day, local_now.date()

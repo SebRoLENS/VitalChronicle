@@ -1,0 +1,13 @@
+# Responsive dashboard and personal comparison bands
+
+The Overview uses compact card summaries, not the full deterministic AI evidence builder. Both the card summaries and daily comparisons run in a background `QRunnable`. Widget updates run on the GUI thread. Only one dashboard request runs at a time; repeated range changes replace a single pending request. Results from an obsolete request are ignored. Closing the window cancels further work and delivery without waiting on the GUI thread.
+
+This matters after a Google Health sync: downloading already ran in a worker, but the completion handler rebuilt all-category AI evidence synchronously. Large structured records and additional-field extraction could therefore freeze the interface even after the HTTP requests finished. Full AI evidence remains available on demand in its existing pipeline.
+
+Daily physiological comparisons use the preceding seven calendar days, excluding the compared date and omitting missing days. With at least three observed days, the descriptive band is the personal mean plus/minus one **sample standard deviation**, with a minimum half-width of half the display resolution (or half a recorded sleep minute). This is a per-metric band, not a fixed percentage shared by HRV, weight, oxygen saturation and other quantities. Boundaries are inclusive. An outlying current value does not enter its own historical standard deviation.
+
+`comparison`, `comparison_margin`, `comparison_lower` and `comparison_upper` accompany the unchanged measured values and exact percentages. The card's text and neutral badge use the same classification. Cumulative progress bars retain their actual percentage of the average, including when a value falls within the descriptive band. Tooltips show the band's bounds, margin, observation count and method. With fewer than three prior observations, the band remains unavailable; missing dates never become zero.
+
+The band describes variability in the recorded daily series. It is neither a clinical reference range nor a statistical confidence interval, and does not estimate certified wearable error. `measurement_uncertainty` remains unknown. Device calibration and repeatability would require additional source information: [NIST's discussion of short-term and day-to-day variability](https://www.itl.nist.gov/div898/handbook/mpc/section1/mpc114.htm) explains why these components must be distinguished.
+
+Sleep comparisons sum same-wake-date sessions, consistent with the AI's daily totals. Main-night timing analyses continue to distinguish source-labelled main sleep from additional sessions.

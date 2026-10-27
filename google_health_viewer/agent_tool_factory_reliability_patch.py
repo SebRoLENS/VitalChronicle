@@ -181,14 +181,25 @@ def _tool_analyze_metric_threshold_responses(
 
     response_series: dict[str, dict[str, float]] = {}
     response_meta: dict[str, dict[str, Any]] = {}
+    response_baselines: dict[str, float | None] = {}
     for metric in response_metrics:
         series, raw = _daily_series(self, metric, left, right)
+        response_baselines[metric] = (
+            (statistics.median(list(series.values())) if baseline_field == "median"
+             else statistics.fmean(series.values())) if series else None
+        )
+        baseline_observed = len(series)
+        if offset:
+            series, raw = _daily_series(
+                self, metric, left + timedelta(days=offset), right + timedelta(days=offset)
+            )
         response_series[metric] = series
         response_meta[metric] = {
             "observed_days": len(series),
             "unit": raw.get("unit"),
             "field": raw.get("field"),
             "date_semantics": raw.get("date_semantics"),
+            "baseline_observed_days": baseline_observed,
         }
 
     matched_counts = {metric: 0 for metric in response_metrics}
@@ -214,6 +225,22 @@ def _tool_analyze_metric_threshold_responses(
             }
         )
 
+    response_summaries = {}
+    for metric in response_metrics:
+        matched = [row["responses"][metric] for row in rows if row["responses"][metric] is not None]
+        ref = response_baselines[metric]
+        below = sum(value < ref for value in matched) if ref is not None else None
+        response_summaries[metric] = {
+            **response_meta[metric],
+            "baseline_value": ref,
+            "matched_event_days": matched_counts[metric],
+            "missing_event_days": len(rows) - matched_counts[metric],
+            "matched_mean": statistics.fmean(matched) if matched else None,
+            "matched_median": statistics.median(matched) if matched else None,
+            "days_below_baseline": below,
+            "percent_below_baseline": round(100 * below / len(matched), 2) if matched and below is not None else None,
+        }
+
     return {
         "status": "ok",
         "period": {"start": left.isoformat(), "end": right.isoformat()},
@@ -229,14 +256,7 @@ def _tool_analyze_metric_threshold_responses(
         "event_day_count": len(rows),
         "response_offset_days": offset,
         "event_days": rows,
-        "responses": {
-            metric: {
-                **response_meta[metric],
-                "matched_event_days": matched_counts[metric],
-                "missing_event_days": len(rows) - matched_counts[metric],
-            }
-            for metric in response_metrics
-        },
+        "responses": response_summaries,
         "method": (
             "Deterministic daily aggregation, personal-baseline threshold, then exact calendar-date "
             "join. Missing response dates remain null and are never shifted, inferred, or zero-filled."
